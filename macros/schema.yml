@@ -1,0 +1,66 @@
+version: 2
+
+macros:
+  - name: sql_string
+    description: >
+      Converts a Jinja value into a safe BigQuery STRING SQL expression. Nulls remain typed nulls,
+      while quotes, backslashes, carriage returns, and newlines are escaped for generated hook SQL.
+    arguments:
+      - name: value
+        type: any
+        description: Value to render as a SQL string expression.
+
+  - name: tracked_test
+    description: >
+      Returns whether a manifest node is a data test selected for dbt-dqm collection. A tracked test
+      must have the configured tag and store_failures enabled.
+    arguments:
+      - name: node
+        type: ParsedNode
+        description: dbt result or manifest node to inspect.
+
+  - name: relation_name
+    description: >
+      Produces a fully qualified BigQuery relation name in the target schema or the schema selected
+      by dbt_dqm_schema. Centralizing this rule keeps hook tables and package models aligned.
+    arguments:
+      - name: name
+        type: string
+        description: Unqualified dbt-dqm table or view identifier.
+
+  - name: compact_json
+    description: >
+      Serializes manifest metadata such as tags and test meta into compact JSON while preserving
+      list order and string case.
+    arguments:
+      - name: value
+        type: any
+        description: Jinja value to serialize.
+
+  - name: capture_tables_ddl
+    description: >
+      Returns BigQuery DDL that initializes dqm_test_executions and dqm_issue_observations. These
+      hook-owned tables exist before reconciliation models read them.
+
+  - name: ensure_capture_tables
+    description: >
+      Executes capture-table initialization only during dbt execution, then inspects the existing
+      observation schema and performs only required one-time column migrations. Routine collection
+      therefore causes no no-op BigQuery table-update operations.
+
+  - name: migrate_occurrence_schema
+    description: >
+      Idempotent reconciliation pre-hook that inspects and, only when necessary, migrates the
+      dqm_issue_occurrences record-detail column before the incremental model queries it. It
+      backfills record_values_json from prior split JSON fields before removing them, and does
+      nothing on a first installation where the occurrence table does not yet exist.
+
+  - name: capture_test_results
+    description: >
+      on-run-end collector that persists tracked test executions and a bulk union of deduplicated
+      failure observations. It validates mandatory meta.dbt_dqm.granularity, records collection
+      errors, and never treats inconclusive results as evidence that an issue passed.
+    arguments:
+      - name: results
+        type: list[RunResult]
+        description: dbt invocation results supplied to the on-run-end hook.

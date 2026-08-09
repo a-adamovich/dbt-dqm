@@ -1,0 +1,120 @@
+version: 2
+
+models:
+  - name: dqm_reconcile
+    description: >
+      Internal incremental reconciliation model, materialized as dqm_issue_occurrences. It turns
+      immutable observations into durable Active and Archived occurrences, retains annotations for
+      continuous failures, and creates clean occurrences for later recurrences.
+    columns:
+      - name: occurrence_id
+        description: Stable SHA-256 identifier for one lifecycle occurrence of a test failure.
+        data_tests: [not_null, unique]
+      - name: test_unique_id
+        description: dbt manifest unique_id of the data test that produced the failure.
+      - name: test_name
+        description: Human-readable dbt test node name from the latest observation.
+      - name: unique_id
+        description: Case-insensitive SHA-256 identity of the configured granularity values.
+        data_tests: [not_null]
+      - name: occurrence_number
+        description: One-based recurrence number within a test and failure identity.
+      - name: record_values_json
+        description: >
+          Portable JSON object stored as text, mapping every stored-failure output column to its
+          original display value. JSON null and empty string remain distinct; configured
+          meta.dbt_dqm.granularity determines which properties form unique_id.
+      - name: failure_row_count
+        description: Number of stored failure rows collapsed into this identity during observation.
+      - name: test_tags
+        description: Compact JSON text containing ordered test tags in dbt manifest order.
+      - name: first_seen_at
+        description: Timestamp when this lifecycle occurrence was first observed.
+      - name: last_seen_at
+        description: Timestamp of the most recent failing observation for this occurrence.
+      - name: archived_at
+        description: Timestamp when a conclusive execution archived the occurrence, if applicable.
+      - name: record_status
+        description: Package-managed lifecycle state; either Active or Archived.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [Active, Archived]
+      - name: close_reason
+        description: >
+          Package-managed reason for archival. `Passed` means a conclusive execution ran and this
+          identity was genuinely absent under an unchanged granularity. `IDENTITY_CHANGED` means
+          the test's configured `meta.dbt_dqm.granularity` changed since this occurrence was last
+          touched, so the absence is not a verified pass. `TEST_REMOVED` means the test itself is
+          no longer present in the project manifest (renamed or deleted).
+      - name: first_seen_invocation
+        description: dbt invocation that created this occurrence.
+      - name: last_seen_invocation
+        description: Latest dbt invocation in which this identity failed.
+      - name: last_evaluated_invocation
+        description: Latest conclusive invocation reconciled for the parent test.
+      - name: test_status
+        description: Reviewer-editable workflow status, initialized to NEW for every occurrence.
+      - name: call_to_action
+        description: Reviewer-editable next action, optionally initialized from test meta.
+      - name: ticket_url
+        description: Reviewer-editable link to an external work item.
+      - name: notes
+        description: Reviewer-editable free-form investigation notes.
+      - name: poc_responsible
+        description: Reviewer-editable owner, optionally initialized from test meta.
+      - name: annotation_updated_at
+        description: Timestamp of the most recent local-app annotation apply.
+      - name: granularity_signature
+        description: >
+          Case-folded, order-preserved JSON array of the test's configured meta.dbt_dqm.granularity
+          columns, recorded at the invocation that last touched this occurrence. Used to detect a
+          grain/identity-scheme change so it isn't mistaken for a genuine pass.
+
+  - name: dqm_current_issues
+    description: >
+      Public review view containing only Active occurrences. It exposes identity, failure context,
+      lifecycle timestamps, test tags, and the five editable annotation fields.
+    columns:
+      - name: occurrence_id
+        description: Stable identifier of the active lifecycle occurrence.
+      - name: record_status
+        description: Always Active in this view.
+      - name: unique_id
+        description: Case-insensitive identity derived from configured granularity.
+      - name: test_status
+        description: Reviewer-managed workflow status.
+
+  - name: dqm_all_issues
+    description: >
+      Public history view containing every Active and Archived occurrence. Use it for recurrence
+      analysis, audit review, and the local application's Active/Archive switch.
+    columns:
+      - name: occurrence_id
+        description: Stable identifier of one lifecycle occurrence.
+      - name: record_status
+        description: Active or Archived package-managed lifecycle state.
+      - name: occurrence_number
+        description: Recurrence sequence for a test and case-insensitive failure identity.
+      - name: close_reason
+        description: Reason an Archived occurrence was closed.
+
+  - name: dqm_annotation_changes
+    description: >
+      Append-only field-level audit ledger written by local-app apply batches. The compound key of
+      batch, occurrence, and field makes retries idempotent while preserving who changed what.
+    columns:
+      - name: batch_id
+        description: Deterministic identifier of the frozen local patch batch.
+      - name: occurrence_id
+        description: Occurrence whose annotation field was changed.
+      - name: field_name
+        description: One of the five application-editable annotation fields.
+      - name: old_value
+        description: Value present in the local synchronization base before editing.
+      - name: new_value
+        description: Locally edited value applied to the occurrence.
+      - name: changed_at
+        description: Timestamp when the local patch version was created.
+      - name: changed_by
+        description: Local operating-system user that applied the batch.
