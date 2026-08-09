@@ -1,0 +1,12 @@
+dbt_dqm_demo:
+  target: demo
+  outputs:
+    demo:
+      type: bigquery
+      method: service-account
+      project: your-demo-gcp-project
+      dataset: dbt_dqm_demo
+      keyfile: ~/.credentials/dbt-dqm/service-account.json
+      location: US
+      threads: 4
+      priority: interactive

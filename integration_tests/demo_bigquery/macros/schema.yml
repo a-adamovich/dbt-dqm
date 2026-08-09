@@ -1,0 +1,19 @@
+version: 2
+
+macros:
+  - name: generate_schema_name
+    description: >
+      Demo-only schema resolver that keeps models, package relations, and stored test failures in
+      one pre-created BigQuery dataset for least-privilege integration testing.
+    arguments:
+      - name: custom_schema_name
+        type: string
+        description: Custom schema requested by dbt, including the stored-failure audit schema.
+      - name: node
+        type: ParsedNode
+        description: dbt node requesting a schema; unused by the demo override.
+  - name: reset_demo_dqm
+    description: >
+      Destructively resets only dbt-dqm tables, views, and stored-failure tables in the synthetic
+      target dataset. Use it to restart the demo lifecycle after an identity-format change; dbt
+      recreates all removed demo artifacts on the next run, test, and package build.

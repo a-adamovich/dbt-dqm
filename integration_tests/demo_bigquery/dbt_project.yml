@@ -1,0 +1,15 @@
+name: dbt_dqm_demo
+version: 0.1.0
+config-version: 2
+require-dbt-version: [">=1.11.0", "<1.12.0"]
+profile: dbt_dqm_demo
+
+model-paths: ["models"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+clean-targets: ["target", "dbt_packages", "logs"]
+
+vars:
+  dbt_dqm_test_tag: dqm
+  demo_scenario: initial
+

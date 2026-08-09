@@ -1,0 +1,13 @@
+scenario,issue_family,customer_id,order_id,line_id,email,amount,currency,sku,quantity,unit_price,reason,source_system
+initial,customer_email,CUST-001,,,broken-address,,,,,,Email has no domain,
+initial,customer_email,cust-001,,,BROKEN-ADDRESS,,,,,,Duplicate case variant,
+initial,customer_email,CUST-002,,,missing-at-sign.example,,,,,,Email has no at sign,
+initial,order_amount,CUST-010,ORD-100,,,-15.50,USD,,,,Negative settled amount,
+initial,order_amount,cust-010,ord-100,,,-15.50,usd,,,,Duplicate composite-key variant,
+initial,order_amount,CUST-011,ORD-101,,,0.00,EUR,,,,Zero settled amount,
+initial,order_line,CUST-020,ORD-200,LINE-1,,,,SKU-RED,-1,19.95,Negative quantity,erp
+initial,order_line,CUST-020,ORD-200,LINE-2,,,,SKU-BLUE,2,-3.25,Negative unit price,marketplace
+initial,order_line,CUST-021,ORD-201,LINE-1,,,,,4,8.50,Missing SKU,erp
+recurrence,customer_email,cust-001,,,still-broken,,,,,,Recurring customer email,
+recurrence,order_amount,cust-010,ord-100,,,-20.00,usd,,,,Recurring order amount,
+recurrence,order_line,cust-020,ord-200,line-1,,,,SKU-RED,-2,19.95,Recurring line issue,erp

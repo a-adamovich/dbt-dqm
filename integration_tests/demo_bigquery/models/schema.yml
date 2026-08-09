@@ -1,0 +1,66 @@
+version: 2
+
+models:
+  - name: demo_records
+    description: >
+      Scenario-filtered synthetic source for all dbt-dqm integration tests. The initial scenario
+      contains several simultaneous failure types, passed returns no records, and recurrence brings
+      back selected identities using different text casing.
+    columns:
+      - name: issue_family
+        description: Routes a synthetic record to one of the three singular data tests.
+      - name: customer_id
+        description: Customer-level key used by all demo grains.
+      - name: order_id
+        description: Order-level key used by the two- and three-column grains.
+      - name: line_id
+        description: Order-line key used by the three-column grain.
+      - name: email
+        description: Customer-test attribute showing the invalid email representation.
+      - name: amount
+        description: Order-test numeric attribute containing the invalid settled amount.
+      - name: currency
+        description: Order-test textual attribute for amount context.
+      - name: sku
+        description: Order-line attribute identifying the affected product.
+      - name: quantity
+        description: Order-line integer attribute used to demonstrate mixed attribute types.
+      - name: unit_price
+        description: Order-line numeric attribute used to demonstrate mixed attribute types.
+      - name: reason
+        description: Human-readable explanation returned by every demo test.
+      - name: source_system
+        description: Order-line attribute identifying the synthetic upstream system.
+
+seeds:
+  - name: demo_cases
+    description: >
+      Synthetic-only test fixture spanning initial failure and recurrence scenarios. Some rows vary
+      only by key casing so the demo proves case-insensitive identity and duplicate collapsing.
+    columns:
+      - name: scenario
+        description: Lifecycle phase selected through the demo_scenario project variable.
+      - name: issue_family
+        description: Failure category consumed by one singular test.
+      - name: customer_id
+        description: Synthetic customer identity component.
+      - name: order_id
+        description: Synthetic order identity component when applicable.
+      - name: line_id
+        description: Synthetic line identity component when applicable.
+      - name: email
+        description: Invalid email attribute for customer-level failures.
+      - name: amount
+        description: Invalid amount attribute for order-level failures.
+      - name: currency
+        description: Currency context for order-level failures.
+      - name: sku
+        description: Product context for order-line failures.
+      - name: quantity
+        description: Quantity context for order-line failures.
+      - name: unit_price
+        description: Price context for order-line failures.
+      - name: reason
+        description: Synthetic explanation of the failure.
+      - name: source_system
+        description: Synthetic origin for order-line failures.
