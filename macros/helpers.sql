@@ -31,7 +31,9 @@
   {{ return(tojson(value).replace(', ', ',').replace(': ', ':')) }}
 {%- endmacro %}
 
-{# Create the hook-owned execution and observation tables when they do not yet exist. #}
+{# Create the hook-owned execution and observation tables when they do not yet exist.
+   Partitioned by their event date and clustered by test so reconciliation and any future
+   time-scoped query can prune instead of scanning the whole append-only history. #}
 {% macro capture_tables_ddl() %}
     create table if not exists {{ dbt_dqm.relation_name('dqm_test_executions') }} (
       invocation_id string not null,
@@ -49,7 +51,9 @@
       collection_status string,
       collection_message string,
       granularity_signature string
-    );
+    )
+    partition by date(captured_at)
+    cluster by test_unique_id;
     create table if not exists {{ dbt_dqm.relation_name('dqm_issue_observations') }} (
       invocation_id string not null,
       observed_at timestamp not null,
@@ -61,7 +65,38 @@
       initial_poc_responsible string,
       initial_call_to_action string,
       test_tags string
-    );
+    )
+    partition by date(observed_at)
+    cluster by test_unique_id, unique_id;
+{% endmacro %}
+
+{# Apply the configured retention window, if any, to the hook-owned log tables via BigQuery
+   partition expiration. Unset (the default) means these tables are never pruned automatically —
+   this is opt-in because expiring a test's only recorded execution stops it from being reconciled
+   until it runs again; it never corrupts or reopens an already-reconciled occurrence, since
+   dqm_issue_occurrences is a separate, persisted table decoupled from this raw history. Set
+   `dbt_dqm_retention_days` once you've confirmed that window comfortably exceeds how
+   infrequently your slowest tracked test runs. #}
+{% macro apply_retention_policy() %}
+  {% if execute %}
+    {% set retention_days = var('dbt_dqm_retention_days', none) %}
+    {% if retention_days is not none %}
+      {% set custom_schema = var('dbt_dqm_schema', none) %}
+      {% set capture_schema = target.schema if custom_schema is none else generate_schema_name(custom_schema, none) %}
+      {% for table_name in ['dqm_test_executions', 'dqm_issue_observations'] %}
+        {% set relation = api.Relation.create(
+          database=target.database,
+          schema=capture_schema,
+          identifier=table_name,
+          type='table'
+        ) %}
+        {% do run_query(
+          'alter table ' ~ relation ~ ' set options(partition_expiration_days = '
+          ~ (retention_days | int) ~ ')'
+        ) %}
+      {% endfor %}
+    {% endif %}
+  {% endif %}
 {% endmacro %}
 
 {# Add a column to a relation if it is not already present. Generic replacement for hand-written,
@@ -80,6 +115,7 @@
 {% macro ensure_capture_tables() %}
   {% if execute %}
     {% do run_query(dbt_dqm.capture_tables_ddl()) %}
+    {% do dbt_dqm.apply_retention_policy() %}
     {% set custom_schema = var('dbt_dqm_schema', none) %}
     {% set capture_schema = target.schema if custom_schema is none else generate_schema_name(custom_schema, none) %}
     {% set execution_relation = api.Relation.create(

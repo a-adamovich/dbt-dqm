@@ -8,7 +8,8 @@
     incremental_strategy='merge',
     unique_key='occurrence_id',
     full_refresh=false,
-    on_schema_change='append_new_columns'
+    on_schema_change='append_new_columns',
+    cluster_by=['record_status', 'test_unique_id']
   )
 }}
 
@@ -42,6 +43,13 @@ with currently_tracked_tests as (
 -- keep satisfying still_active/newly_archived forever, racing orphaned_occurrences below for the
 -- same occurrence_id. Tracked-but-not-selected-this-invocation tests are unaffected, since this
 -- only ever narrows by manifest presence, not by what ran in this particular invocation.
+--
+-- `dbt_dqm_reconcile_lookback_days` is an opt-in cost lever: unset (the default), this scans the
+-- whole history to find each test's latest execution, exactly as before. Set it once you've
+-- confirmed the window comfortably exceeds how infrequently your slowest tracked test runs, and
+-- BigQuery can prune partitions instead of scanning dqm_test_executions in full on every
+-- reconciliation. A test whose last execution falls outside the window simply stops being
+-- reconciled until it runs again — its existing occurrences are untouched either way.
 latest_executions as (
   select * except(row_number)
   from (
@@ -56,6 +64,10 @@ latest_executions as (
       on execution.test_unique_id = tracked.test_unique_id
     where execution.collection_status in ('success', 'not_applicable')
       and lower(execution.test_status) in ('pass', 'warn', 'fail')
+      {% set lookback_days = var('dbt_dqm_reconcile_lookback_days', none) %}
+      {% if lookback_days is not none %}
+      and execution.captured_at >= timestamp_sub(current_timestamp(), interval {{ lookback_days | int }} day)
+      {% endif %}
   )
   where row_number = 1
 ),
