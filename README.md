@@ -5,6 +5,20 @@ single-user local review app. The dbt package (`models/`, `macros/`) supports Bi
 Postgres; the supported dbt line is 1.11.x. The local review app (`dbt-dqm app`) remains
 BigQuery-only for now — see [Local app](#local-app) below.
 
+## Install the dbt package
+
+dbt-dqm isn't on dbt Hub yet, so add it to your `packages.yml` as a git dependency, pinned to a
+tag:
+
+```yaml
+packages:
+  - git: "https://github.com/a-adamovich/dbt-dqm.git"
+    revision: v0.1.0
+```
+
+Then run `dbt deps`. Note that `pip install dbt-dqm` (for the local review app CLI below) does
+**not** also install the dbt package — the two are installed separately.
+
 ## Configure a tracked test
 
 ```sql
