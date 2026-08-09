@@ -22,6 +22,11 @@
 
   {% do dbt_dqm.ensure_capture_tables() %}
 
+  {% set execution_columns = [
+    'invocation_id', 'captured_at', 'command', 'test_unique_id', 'test_name', 'test_status',
+    'failure_count', 'test_tags', 'test_meta', 'execution_time', 'message', 'failure_relation',
+    'collection_status', 'collection_message', 'granularity_signature'
+  ] %}
   {% set execution_rows = [] %}
   {% for result in tracked %}
     {% set node = result.node %}
@@ -38,36 +43,44 @@
     {% set row %}
       select
         {{ dbt_dqm.sql_string(invocation_id) }} as invocation_id,
-        current_timestamp() as captured_at,
+        {{ dbt.current_timestamp() }} as captured_at,
         {{ dbt_dqm.sql_string(flags.WHICH) }} as command,
         {{ dbt_dqm.sql_string(node.unique_id) }} as test_unique_id,
         {{ dbt_dqm.sql_string(node.name) }} as test_name,
         {{ dbt_dqm.sql_string(result.status) }} as test_status,
-        cast({{ result.failures if result.failures is not none else 0 }} as int64) as failure_count,
+        cast({{ result.failures if result.failures is not none else 0 }} as {{ dbt.type_int() }}) as failure_count,
         {{ dbt_dqm.sql_string(tags_json) }} as test_tags,
         {{ dbt_dqm.sql_string(meta_json) }} as test_meta,
-        cast({{ result.execution_time or 0 }} as float64) as execution_time,
+        cast({{ result.execution_time or 0 }} as {{ dbt.type_float() }}) as execution_time,
         {{ dbt_dqm.sql_string(result.message) }} as message,
         {{ dbt_dqm.sql_string(relation_text) }} as failure_relation,
-        'pending' as collection_status,
-        cast(null as string) as collection_message,
+        {{ dbt_dqm.sql_string('pending') }} as collection_status,
+        cast(null as {{ dbt.type_string() }}) as collection_message,
         {{ dbt_dqm.sql_string(granularity_signature) }} as granularity_signature
     {% endset %}
     {% do execution_rows.append(row) %}
   {% endfor %}
 
   {% set execution_merge %}
-    merge {{ dbt_dqm.relation_name('dqm_test_executions') }} t
-    using ({{ execution_rows | join('\nunion all\n') }}) s
-      on t.invocation_id = s.invocation_id and t.test_unique_id = s.test_unique_id
-    when not matched then insert row
+    {{ dbt_dqm.insert_new_rows(
+      dbt_dqm.relation_name('dqm_test_executions'),
+      execution_rows | join('\nunion all\n'),
+      ['invocation_id', 'test_unique_id'],
+      execution_columns
+    ) }}
   {% endset %}
   {% do run_query(execution_merge) %}
 
+  {% set observation_columns = [
+    'invocation_id', 'observed_at', 'test_unique_id', 'test_name', 'unique_id',
+    'record_values_json', 'failure_row_count', 'initial_poc_responsible', 'initial_call_to_action',
+    'test_tags'
+  ] %}
+
   {# Tests with failing rows commit their own observation merge and status update immediately,
      one test at a time, rather than deferring both to one batched pair of statements at the very
-     end. Jinja has no try/except, so a single BigQuery error anywhere in this loop still aborts
-     the macro — but with per-test commits, everything already processed before that point is
+     end. Jinja has no try/except, so a single error anywhere in this loop still aborts the
+     macro — but with per-test commits, everything already processed before that point is
      durably saved instead of lost, and only the test being processed (and any after it) are left
      'pending' for a future invocation to pick up. Zero-failure tests carry no observation payload
      to protect, so they're still flipped to 'not_applicable' in one cheap batched update below. #}
@@ -98,8 +111,8 @@
         {% if grain_lower | length == 0 %}
           {% set error_update %}
             update {{ dbt_dqm.relation_name('dqm_test_executions') }}
-            set collection_status = 'configuration_error',
-                collection_message = 'meta.dbt_dqm.granularity is required and cannot be empty.'
+            set collection_status = {{ dbt_dqm.sql_string('configuration_error') }},
+                collection_message = {{ dbt_dqm.sql_string('meta.dbt_dqm.granularity is required and cannot be empty.') }}
             where invocation_id = {{ dbt_dqm.sql_string(invocation_id) }}
               and test_unique_id = {{ dbt_dqm.sql_string(node.unique_id) }}
           {% endset %}
@@ -108,7 +121,7 @@
         {% elif key_columns | length != grain_lower | length %}
           {% set error_update %}
             update {{ dbt_dqm.relation_name('dqm_test_executions') }}
-            set collection_status = 'configuration_error',
+            set collection_status = {{ dbt_dqm.sql_string('configuration_error') }},
                 collection_message = {{ dbt_dqm.sql_string(
                   'Every meta.dbt_dqm.granularity column must exist in the test output. Configured: '
                   ~ (configured_grain | join(', '))
@@ -122,29 +135,36 @@
           {% set tags_json = dbt_dqm.compact_json(node.config.tags) %}
           {% set owner = dqm_meta.get('poc_responsible') %}
           {% set action = dqm_meta.get('call_to_action') %}
+
+          {% set key_pairs = [] %}
+          {% for column in key_columns %}
+            {% set value_sql %}
+              case when {{ adapter.quote(column.name) }} is null then null
+                   else lower(trim(cast({{ adapter.quote(column.name) }} as {{ dbt.type_string() }}))) end
+            {% endset %}
+            {% do key_pairs.append((column.name | lower, value_sql)) %}
+          {% endfor %}
+
+          {% set record_pairs = [] %}
+          {% for column in columns %}
+            {% set value_sql %}
+              case when {{ adapter.quote(column.name) }} is null then null
+                   else cast({{ adapter.quote(column.name) }} as {{ dbt.type_string() }}) end
+            {% endset %}
+            {% do record_pairs.append((column.name, value_sql)) %}
+          {% endfor %}
+
           {% set query %}
             with failure_rows as (
               select
-                lower(to_hex(sha256(to_json_string(struct(
-                  {% for column in key_columns %}
-                    case when {{ adapter.quote(column.name) }} is null then null
-                         else lower(trim(cast({{ adapter.quote(column.name) }} as string))) end
-                      as {{ adapter.quote(column.name | lower) }}{% if not loop.last %},{% endif %}
-                  {% endfor %}
-                ))))) as unique_id,
-                to_json_string(struct(
-                  {% for column in columns %}
-                    case when {{ adapter.quote(column.name) }} is null then null
-                         else cast({{ adapter.quote(column.name) }} as string) end
-                      as {{ adapter.quote(column.name) }}{% if not loop.last %},{% endif %}
-                  {% endfor %}
-                )) as record_values_json
+                {{ dbt_dqm.sha256_hex(dbt_dqm.json_object_string(key_pairs)) }} as unique_id,
+                {{ dbt_dqm.json_object_string(record_pairs) }} as record_values_json
               from {{ relation }}
             ),
             deduplicated_failures as (
               select
               {{ dbt_dqm.sql_string(invocation_id) }} as invocation_id,
-              current_timestamp() as observed_at,
+              {{ dbt.current_timestamp() }} as observed_at,
               {{ dbt_dqm.sql_string(node.unique_id) }} as test_unique_id,
               {{ dbt_dqm.sql_string(node.name) }} as test_name,
               unique_id,
@@ -171,50 +191,28 @@
             where representative_rank = 1
           {% endset %}
           {% set observation_merge %}
-            merge {{ dbt_dqm.relation_name('dqm_issue_observations') }} t
-            using ({{ query }}) s
-              on t.invocation_id = s.invocation_id
-             and t.test_unique_id = s.test_unique_id
-             and t.unique_id = s.unique_id
-            when not matched then insert (
-              invocation_id,
-              observed_at,
-              test_unique_id,
-              test_name,
-              unique_id,
-              record_values_json,
-              failure_row_count,
-              initial_poc_responsible,
-              initial_call_to_action,
-              test_tags
-            ) values (
-              s.invocation_id,
-              s.observed_at,
-              s.test_unique_id,
-              s.test_name,
-              s.unique_id,
-              s.record_values_json,
-              s.failure_row_count,
-              s.initial_poc_responsible,
-              s.initial_call_to_action,
-              s.test_tags
-            )
+            {{ dbt_dqm.insert_new_rows(
+              dbt_dqm.relation_name('dqm_issue_observations'),
+              query,
+              ['invocation_id', 'test_unique_id', 'unique_id'],
+              observation_columns
+            ) }}
           {% endset %}
           {% do run_query(observation_merge) %}
           {% set status_update %}
             update {{ dbt_dqm.relation_name('dqm_test_executions') }}
-            set collection_status = 'success'
+            set collection_status = {{ dbt_dqm.sql_string('success') }}
             where invocation_id = {{ dbt_dqm.sql_string(invocation_id) }}
               and test_unique_id = {{ dbt_dqm.sql_string(node.unique_id) }}
-              and collection_status = 'pending'
+              and collection_status = {{ dbt_dqm.sql_string('pending') }}
           {% endset %}
           {% do run_query(status_update) %}
         {% endif %}
       {% else %}
         {% set relation_error %}
           update {{ dbt_dqm.relation_name('dqm_test_executions') }}
-          set collection_status = 'collection_error',
-              collection_message = 'The stored-failure relation was not available.'
+          set collection_status = {{ dbt_dqm.sql_string('collection_error') }},
+              collection_message = {{ dbt_dqm.sql_string('The stored-failure relation was not available.') }}
           where invocation_id = {{ dbt_dqm.sql_string(invocation_id) }}
             and test_unique_id = {{ dbt_dqm.sql_string(node.unique_id) }}
         {% endset %}
@@ -234,10 +232,10 @@
     {% for test_id in successful_test_ids %}{% do quoted_ids.append(dbt_dqm.sql_string(test_id)) %}{% endfor %}
     {% set success_update %}
       update {{ dbt_dqm.relation_name('dqm_test_executions') }}
-      set collection_status = 'not_applicable'
+      set collection_status = {{ dbt_dqm.sql_string('not_applicable') }}
       where invocation_id = {{ dbt_dqm.sql_string(invocation_id) }}
         and test_unique_id in ({{ quoted_ids | join(',') }})
-        and collection_status = 'pending'
+        and collection_status = {{ dbt_dqm.sql_string('pending') }}
     {% endset %}
     {% do run_query(success_update) %}
   {% endif %}

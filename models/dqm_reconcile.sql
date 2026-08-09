@@ -5,11 +5,11 @@
   config(
     alias='dqm_issue_occurrences',
     materialized='incremental',
-    incremental_strategy='merge',
+    incremental_strategy=dbt_dqm.incremental_upsert_strategy(),
     unique_key='occurrence_id',
     full_refresh=false,
     on_schema_change='append_new_columns',
-    cluster_by=['record_status', 'test_unique_id']
+    cluster_by=['record_status', 'test_unique_id'] if target.type == 'bigquery' else none
   )
 }}
 
@@ -28,13 +28,14 @@
 
 with currently_tracked_tests as (
   {% if tracked_test_ids | length > 0 %}
-    select test_unique_id from unnest([
-      {% for test_id in tracked_test_ids %}
-        {{ dbt_dqm.sql_string(test_id) }}{% if not loop.last %},{% endif %}
+    select {{ dbt_dqm.sql_string(tracked_test_ids[0]) }} as test_unique_id
+    {% if tracked_test_ids | length > 1 %}
+      {% for test_id in tracked_test_ids[1:] %}
+        union all select {{ dbt_dqm.sql_string(test_id) }}
       {% endfor %}
-    ]) as test_unique_id
+    {% endif %}
   {% else %}
-    select cast(null as string) as test_unique_id from unnest([1]) where false
+    select cast(null as {{ dbt.type_string() }}) as test_unique_id from {{ dbt_dqm.dual() }} where false
   {% endif %}
 ),
 
@@ -50,8 +51,25 @@ with currently_tracked_tests as (
 -- BigQuery can prune partitions instead of scanning dqm_test_executions in full on every
 -- reconciliation. A test whose last execution falls outside the window simply stops being
 -- reconciled until it runs again — its existing occurrences are untouched either way.
+-- Explicit column list instead of `select * except(row_number)`: BigQuery's EXCEPT-on-star
+-- shorthand isn't portable ANSI SQL, and every supported adapter accepts a plain column list.
 latest_executions as (
-  select * except(row_number)
+  select
+    invocation_id,
+    captured_at,
+    command,
+    test_unique_id,
+    test_name,
+    test_status,
+    failure_count,
+    test_tags,
+    test_meta,
+    execution_time,
+    message,
+    failure_relation,
+    collection_status,
+    collection_message,
+    granularity_signature
   from (
     select
       execution.*,
@@ -66,9 +84,9 @@ latest_executions as (
       and lower(execution.test_status) in ('pass', 'warn', 'fail')
       {% set lookback_days = var('dbt_dqm_reconcile_lookback_days', none) %}
       {% if lookback_days is not none %}
-      and execution.captured_at >= timestamp_sub(current_timestamp(), interval {{ lookback_days | int }} day)
+      and execution.captured_at >= {{ dbt.dateadd('day', -1 * (lookback_days | int), dbt.current_timestamp()) }}
       {% endif %}
-  )
+  ) row_numbered
   where row_number = 1
 ),
 
@@ -89,30 +107,30 @@ existing as (
 {% else %}
 existing as (
   select
-    cast(null as string) occurrence_id,
-    cast(null as string) test_unique_id,
-    cast(null as string) test_name,
-    cast(null as string) unique_id,
-    cast(null as int64) occurrence_number,
-    cast(null as string) record_values_json,
-    cast(null as int64) failure_row_count,
-    cast(null as string) test_tags,
-    cast(null as timestamp) first_seen_at,
-    cast(null as timestamp) last_seen_at,
-    cast(null as timestamp) archived_at,
-    cast(null as string) record_status,
-    cast(null as string) close_reason,
-    cast(null as string) first_seen_invocation,
-    cast(null as string) last_seen_invocation,
-    cast(null as string) last_evaluated_invocation,
-    cast(null as string) test_status,
-    cast(null as string) call_to_action,
-    cast(null as string) ticket_url,
-    cast(null as string) notes,
-    cast(null as string) poc_responsible,
-    cast(null as timestamp) annotation_updated_at,
-    cast(null as string) granularity_signature
-  from unnest([1])
+    cast(null as {{ dbt.type_string() }}) occurrence_id,
+    cast(null as {{ dbt.type_string() }}) test_unique_id,
+    cast(null as {{ dbt.type_string() }}) test_name,
+    cast(null as {{ dbt.type_string() }}) unique_id,
+    cast(null as {{ dbt.type_int() }}) occurrence_number,
+    cast(null as {{ dbt.type_string() }}) record_values_json,
+    cast(null as {{ dbt.type_int() }}) failure_row_count,
+    cast(null as {{ dbt.type_string() }}) test_tags,
+    cast(null as {{ dbt.type_timestamp() }}) first_seen_at,
+    cast(null as {{ dbt.type_timestamp() }}) last_seen_at,
+    cast(null as {{ dbt.type_timestamp() }}) archived_at,
+    cast(null as {{ dbt.type_string() }}) record_status,
+    cast(null as {{ dbt.type_string() }}) close_reason,
+    cast(null as {{ dbt.type_string() }}) first_seen_invocation,
+    cast(null as {{ dbt.type_string() }}) last_seen_invocation,
+    cast(null as {{ dbt.type_string() }}) last_evaluated_invocation,
+    cast(null as {{ dbt.type_string() }}) test_status,
+    cast(null as {{ dbt.type_string() }}) call_to_action,
+    cast(null as {{ dbt.type_string() }}) ticket_url,
+    cast(null as {{ dbt.type_string() }}) notes,
+    cast(null as {{ dbt.type_string() }}) poc_responsible,
+    cast(null as {{ dbt.type_timestamp() }}) annotation_updated_at,
+    cast(null as {{ dbt.type_string() }}) granularity_signature
+  from {{ dbt_dqm.dual() }}
   where false
 ),
 {% endif %}
@@ -139,9 +157,9 @@ still_active as (
     observation.test_tags,
     existing.first_seen_at,
     observation.observed_at as last_seen_at,
-    cast(null as timestamp) as archived_at,
+    cast(null as {{ dbt.type_timestamp() }}) as archived_at,
     'Active' as record_status,
-    cast(null as string) as close_reason,
+    cast(null as {{ dbt.type_string() }}) as close_reason,
     existing.first_seen_invocation,
     observation.invocation_id as last_seen_invocation,
     observation.invocation_id as last_evaluated_invocation,
@@ -160,9 +178,9 @@ still_active as (
 
 new_occurrences as (
   select
-    lower(to_hex(sha256(concat(
-      observation.test_unique_id, '|', observation.unique_id, '|', observation.invocation_id
-    )))) as occurrence_id,
+    {{ dbt_dqm.sha256_hex(
+      "concat(observation.test_unique_id, '|', observation.unique_id, '|', observation.invocation_id)"
+    ) }} as occurrence_id,
     observation.test_unique_id,
     observation.test_name,
     observation.unique_id,
@@ -172,18 +190,18 @@ new_occurrences as (
     observation.test_tags,
     observation.observed_at as first_seen_at,
     observation.observed_at as last_seen_at,
-    cast(null as timestamp) as archived_at,
+    cast(null as {{ dbt.type_timestamp() }}) as archived_at,
     'Active' as record_status,
-    cast(null as string) as close_reason,
+    cast(null as {{ dbt.type_string() }}) as close_reason,
     observation.invocation_id as first_seen_invocation,
     observation.invocation_id as last_seen_invocation,
     observation.invocation_id as last_evaluated_invocation,
     'NEW' as test_status,
     observation.initial_call_to_action as call_to_action,
-    cast(null as string) as ticket_url,
-    cast(null as string) as notes,
+    cast(null as {{ dbt.type_string() }}) as ticket_url,
+    cast(null as {{ dbt.type_string() }}) as notes,
     observation.initial_poc_responsible as poc_responsible,
-    cast(null as timestamp) as annotation_updated_at,
+    cast(null as {{ dbt.type_timestamp() }}) as annotation_updated_at,
     observation.current_granularity_signature as granularity_signature
   from latest_observations observation
   left join active_existing existing
@@ -257,7 +275,7 @@ orphaned_occurrences as (
     existing.test_tags,
     existing.first_seen_at,
     existing.last_seen_at,
-    current_timestamp() as archived_at,
+    {{ dbt.current_timestamp() }} as archived_at,
     'Archived' as record_status,
     'TEST_REMOVED' as close_reason,
     existing.first_seen_invocation,
