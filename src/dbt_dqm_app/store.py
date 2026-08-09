@@ -38,6 +38,17 @@ class Workspace:
         connection.row_factory = sqlite3.Row
         return connection
 
+    def _connect_immediate(self) -> sqlite3.Connection:
+        """A connection in manual-transaction (autocommit) mode, for callers that need to open
+        the transaction themselves with `BEGIN IMMEDIATE` before their first read. Python's
+        sqlite3 module only auto-opens a transaction ahead of a write statement, which is too
+        late for a read-modify-write sequence such as set_change's version counter: two
+        connections could both read the same "current" version before either has written,
+        and the second write would silently lose the first's increment."""
+        connection = sqlite3.connect(self.path, isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        return connection
+
     def _initialize(self) -> None:
         with self.connect() as connection:
             connection.executescript(
@@ -98,7 +109,9 @@ class Workspace:
             raise ValueError(f"Field is not editable: {field_name}")
         normalized = None if new_value is None else str(new_value)
         now = datetime.now(UTC).isoformat()
-        with self.connect() as connection:
+        connection = self._connect_immediate()
+        try:
+            connection.execute("begin immediate")
             row = connection.execute(
                 "select payload_json from snapshot where occurrence_id=?", (occurrence_id,)
             ).fetchone()
@@ -111,6 +124,7 @@ class Workspace:
                     "delete from pending_changes where occurrence_id=? and field_name=?",
                     (occurrence_id, field_name),
                 )
+                connection.commit()
                 return
             current = connection.execute(
                 "select version from pending_changes where occurrence_id=? and field_name=?",
@@ -129,6 +143,34 @@ class Workspace:
                 """,
                 (occurrence_id, field_name, base, normalized, version, now),
             )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def drifted_patches(self) -> list[Patch]:
+        """Pending patches whose recorded base (`old_value`) no longer matches the current
+        synced snapshot for that field — meaning the warehouse value changed since the patch
+        was staged. Applying now would use local-wins semantics and silently overwrite that
+        newer remote value; callers should surface this instead of applying quietly."""
+        with self.connect() as connection:
+            snapshots = {
+                row["occurrence_id"]: json.loads(row["payload_json"])
+                for row in connection.execute("select * from snapshot")
+            }
+            drifted = []
+            for patch_row in connection.execute("select * from pending_changes"):
+                patch = Patch(**dict(patch_row))
+                snapshot = snapshots.get(patch.occurrence_id)
+                if snapshot is None:
+                    continue
+                current = snapshot.get(patch.field_name)
+                current = None if current is None else str(current)
+                if current != patch.old_value:
+                    drifted.append(patch)
+        return drifted
 
     def pending(self) -> list[Patch]:
         with self.connect() as connection:

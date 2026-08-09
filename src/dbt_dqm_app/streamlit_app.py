@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import time
 from concurrent.futures import Future, ProcessPoolExecutor
@@ -22,6 +23,16 @@ from dbt_dqm_app.display import (
 )
 from dbt_dqm_app.store import EDITABLE_FIELDS, Workspace
 from dbt_dqm_app.warehouse import apply_worker, sync_worker
+
+PAGE_SIZE_OPTIONS = [25, 50, 100, 200]
+
+
+@st.cache_resource
+def _get_executor() -> ProcessPoolExecutor:
+    """One process pool shared by every session for the life of the app process, instead of one
+    per session. A per-session pool (the previous design) never got shut down when a session
+    ended, leaking one background process per browser tab opened over the app's lifetime."""
+    return ProcessPoolExecutor(max_workers=1)
 
 
 def run_app() -> None:
@@ -52,8 +63,8 @@ def run_app() -> None:
         unsafe_allow_html=True,
     )
 
+    executor = _get_executor()
     for key, default in (
-        ("executor", None),
         ("job", None),
         ("job_kind", None),
         ("job_patches", []),
@@ -62,15 +73,13 @@ def run_app() -> None:
     ):
         if key not in st.session_state:
             st.session_state[key] = default
-    if st.session_state.executor is None:
-        st.session_state.executor = ProcessPoolExecutor(max_workers=1)
 
     # Start each review session from current warehouse data. SQLite patches survive the refresh
     # and are overlaid after the new snapshot is installed.
     if not st.session_state.startup_sync_started and st.session_state.job is None:
         st.session_state.startup_sync_started = True
         st.session_state.job_kind = "sync"
-        st.session_state.job = st.session_state.executor.submit(sync_worker, config)
+        st.session_state.job = executor.submit(sync_worker, config)
 
     job: Future | None = st.session_state.job
     if job is not None and job.done():
@@ -107,14 +116,14 @@ def run_app() -> None:
         with col_sync:
             if st.button("Sync", disabled=busy):
                 st.session_state.job_kind = "sync"
-                st.session_state.job = st.session_state.executor.submit(sync_worker, config)
+                st.session_state.job = executor.submit(sync_worker, config)
                 st.rerun()
         with col_apply:
             if st.button("Apply and sync", disabled=busy or not pending, type="primary"):
                 frozen = list(pending)
                 st.session_state.job_patches = frozen
                 st.session_state.job_kind = "apply"
-                st.session_state.job = st.session_state.executor.submit(apply_worker, config, frozen)
+                st.session_state.job = executor.submit(apply_worker, config, frozen)
                 st.rerun()
         with col_state:
             if busy:
@@ -124,6 +133,19 @@ def run_app() -> None:
                     f"Pending changes: **{len(pending)}** · "
                     f"Last sync: {format_timestamp(workspace.last_sync(), 'Never')}"
                 )
+
+    if not busy:
+        drifted = workspace.drifted_patches()
+        if drifted:
+            preview = ", ".join(
+                f"{patch.occurrence_id[:8]}…/{patch.field_name}" for patch in drifted[:5]
+            )
+            more = f", and {len(drifted) - 5} more" if len(drifted) > 5 else ""
+            st.warning(
+                f"{len(drifted)} pending edit(s) were staged against a warehouse value that has "
+                f"since changed: {preview}{more}. Applying now overwrites the newer remote value "
+                "with your local edit (local-wins) — review before applying if that's unexpected."
+            )
 
     # Streamlit does not rerun merely because a Future completes. Poll while a serialized
     # worker job is active so completion or failure reaches the UI without another click.
@@ -225,7 +247,21 @@ def run_app() -> None:
                 help="Show issues created within this inclusive local calendar-date range.",
             )
     with search_col:
-        search = st.text_input("Search")
+        # A plain text_input reruns the whole script (re-filtering and re-stringifying every
+        # column of every row) on every keystroke. Wrapping it in a form defers that expensive
+        # search until Enter/the submit button, while every other filter above stays live.
+        with st.form("dqm-search-form", border=False):
+            search_field, search_button = st.columns([3, 1])
+            with search_field:
+                search_draft = st.text_input(
+                    "Search", value=st.session_state.get("applied_search", "")
+                )
+            with search_button:
+                st.markdown("<div style='height: 1.6rem'></div>", unsafe_allow_html=True)
+                search_submitted = st.form_submit_button("Apply")
+        if search_submitted:
+            st.session_state.applied_search = search_draft
+        search = st.session_state.get("applied_search", "")
 
     visible = frame[frame["record_status"].isin(lifecycle)] if lifecycle else frame
     if statuses:
@@ -260,10 +296,35 @@ def run_app() -> None:
         na_position="last",
     )
 
-    st.caption(f"Showing {len(visible)} issue record(s)")
+    # Rendering every visible issue as a full record card (per the app's design — no dense grid
+    # rows) doesn't scale past a few hundred issues if all of them render on one script run: each
+    # card registers several widgets, so page size and DOM size both grow with the filtered count.
+    # Paginate the already-filtered, already-sorted frame instead of rendering it in full.
+    total_visible = len(visible)
+    page_size_col, page_number_col, page_caption_col = st.columns([1, 1, 3])
+    with page_size_col:
+        page_size = st.selectbox(
+            "Per page", PAGE_SIZE_OPTIONS, index=0, key="dqm-page-size"
+        )
+    total_pages = max(1, math.ceil(total_visible / page_size))
+    page_key = "dqm-page-number"
+    if page_key in st.session_state and st.session_state[page_key] > total_pages:
+        st.session_state[page_key] = total_pages
+    with page_number_col:
+        page_number = st.number_input(
+            "Page", min_value=1, max_value=total_pages, step=1, value=1, key=page_key
+        )
+    start = (page_number - 1) * page_size
+    page_rows = visible.iloc[start : start + page_size]
+    with page_caption_col:
+        st.markdown("<div style='height: 1.6rem'></div>", unsafe_allow_html=True)
+        st.caption(
+            f"Showing {len(page_rows)} of {total_visible} issue record(s) "
+            f"(page {page_number} of {total_pages})"
+        )
     staged_change = False
     sync_token = workspace.last_sync() or "never"
-    for _, row in visible.iterrows():
+    for _, row in page_rows.iterrows():
         occurrence_id = str(row["occurrence_id"])
         test_name = str(row.get("test_name") or "Unnamed test")
         widget_prefix = f"{occurrence_id}-{sync_token}"

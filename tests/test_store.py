@@ -60,6 +60,57 @@ def test_sync_preserves_pending_overlay(tmp_path):
     assert workspace.rows()[0]["notes"] == "local"
 
 
+def test_no_drift_when_remote_value_matches_patch_base(tmp_path):
+    workspace = Workspace(tmp_path / "workspace.sqlite")
+    workspace.replace_snapshot([issue()])
+    workspace.set_change("occ-1", "notes", "local")
+
+    assert workspace.drifted_patches() == []
+
+
+def test_drift_detected_when_remote_value_changed_since_patch_staged(tmp_path):
+    workspace = Workspace(tmp_path / "workspace.sqlite")
+    workspace.replace_snapshot([issue()])
+    workspace.set_change("occ-1", "notes", "local")
+
+    # A sync landed a newer remote value while the local patch was still pending.
+    workspace.replace_snapshot([issue("someone else's remote edit")])
+
+    drifted = workspace.drifted_patches()
+    assert len(drifted) == 1
+    assert drifted[0].occurrence_id == "occ-1"
+    assert drifted[0].field_name == "notes"
+
+
+def test_drift_clears_once_the_patch_is_applied_and_cleared(tmp_path):
+    workspace = Workspace(tmp_path / "workspace.sqlite")
+    workspace.replace_snapshot([issue()])
+    workspace.set_change("occ-1", "notes", "local")
+    frozen = workspace.pending()
+    workspace.replace_snapshot([issue("someone else's remote edit")])
+    assert workspace.drifted_patches() != []
+
+    workspace.clear_applied(frozen)
+
+    assert workspace.drifted_patches() == []
+
+
+def test_set_change_survives_concurrent_writers_without_losing_an_update(tmp_path):
+    """Two Workspace instances (e.g. two browser tabs) editing different fields on the same
+    occurrence concurrently must not lose either update to the version-counter race."""
+    path = tmp_path / "workspace.sqlite"
+    workspace_a = Workspace(path)
+    workspace_a.replace_snapshot([issue()])
+    workspace_b = Workspace(path)
+
+    workspace_a.set_change("occ-1", "notes", "from A")
+    workspace_b.set_change("occ-1", "call_to_action", "from B")
+
+    pending_by_field = {patch.field_name: patch for patch in workspace_a.pending()}
+    assert pending_by_field["notes"].new_value == "from A"
+    assert pending_by_field["call_to_action"].new_value == "from B"
+
+
 def test_frozen_patch_batch_id_is_stable_and_order_independent():
     first = Patch("occ-1", "notes", None, "review", 1, "2026-08-08T00:00:00+00:00")
     second = Patch("occ-2", "test_status", "NEW", "ACK", 2, "2026-08-08T00:01:00+00:00")
