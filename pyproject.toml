@@ -21,7 +21,10 @@ dependencies = [
 dbt-dqm = "dbt_dqm_app.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8,<9", "ruff>=0.8,<1"]
+# dbt-postgres is a dev-only dependency for validating the dbt package (models/, macros/) against
+# a second adapter in integration_tests/demo_postgres. The dbt_dqm_app review app itself remains
+# BigQuery-only (see src/dbt_dqm_app/warehouse.py) and does not depend on it.
+dev = ["pytest>=8,<9", "ruff>=0.8,<1", "dbt-postgres>=1.11,<1.12"]
 
 [build-system]
 requires = ["hatchling"]
