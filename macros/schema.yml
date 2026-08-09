@@ -3,8 +3,8 @@ version: 2
 macros:
   - name: sql_string
     description: >
-      Converts a Jinja value into a safe BigQuery STRING SQL expression. Nulls remain typed nulls,
-      while quotes, backslashes, carriage returns, and newlines are escaped for generated hook SQL.
+      Converts a Jinja value into a safe SQL string expression, dispatched per adapter since
+      string-literal escaping rules genuinely differ across warehouses. Nulls remain typed nulls.
     arguments:
       - name: value
         type: any
@@ -21,8 +21,9 @@ macros:
 
   - name: relation_name
     description: >
-      Produces a fully qualified BigQuery relation name in the target schema or the schema selected
-      by dbt_dqm_schema. Centralizing this rule keeps hook tables and package models aligned.
+      Produces a fully qualified, adapter-correctly-quoted relation name in the target schema or the
+      schema selected by dbt_dqm_schema. Centralizing this rule keeps hook tables and package models
+      aligned across every supported adapter.
     arguments:
       - name: name
         type: string
@@ -39,14 +40,35 @@ macros:
 
   - name: capture_tables_ddl
     description: >
-      Returns BigQuery DDL that initializes dqm_test_executions and dqm_issue_observations. These
-      hook-owned tables exist before reconciliation models read them.
+      Returns DDL that initializes dqm_test_executions and dqm_issue_observations, dispatched per
+      adapter since partitioning/clustering are BigQuery-specific concepts with no portable
+      equivalent. These hook-owned tables exist before reconciliation models read them.
+
+  - name: apply_retention_policy
+    description: >
+      Applies the opt-in dbt_dqm_retention_days window to the hook-owned log tables via BigQuery
+      partition expiration. A no-op on adapters without a portable equivalent.
+
+  - name: ensure_column
+    description: >
+      Adds a column to a relation if it is not already present. Generic replacement for one-off
+      hardcoded migration branches — reuse this for every future additive schema change.
+    arguments:
+      - name: relation
+        type: Relation
+        description: Relation to alter.
+      - name: column_name
+        type: string
+        description: Column to add if missing.
+      - name: column_type
+        type: string
+        description: Portable column type, e.g. the result of dbt.type_string().
 
   - name: ensure_capture_tables
     description: >
       Executes capture-table initialization only during dbt execution, then inspects the existing
       observation schema and performs only required one-time column migrations. Routine collection
-      therefore causes no no-op BigQuery table-update operations.
+      therefore causes no no-op table-update operations.
 
   - name: migrate_occurrence_schema
     description: >
@@ -57,10 +79,84 @@ macros:
 
   - name: capture_test_results
     description: >
-      on-run-end collector that persists tracked test executions and a bulk union of deduplicated
-      failure observations. It validates mandatory meta.dbt_dqm.granularity, records collection
-      errors, and never treats inconclusive results as evidence that an issue passed.
+      on-run-end collector that persists tracked test executions and each failing test's
+      deduplicated observations, committed per test as it's processed. It validates mandatory
+      meta.dbt_dqm.granularity, records collection errors, and never treats inconclusive results as
+      evidence that an issue passed.
     arguments:
       - name: results
         type: list[RunResult]
         description: dbt invocation results supplied to the on-run-end hook.
+
+  - name: dual
+    description: >
+      A single-row FROM source for selecting typed literals from, e.g. an empty typed CTE via
+      dbt_dqm.dual() in the FROM clause paired with a false WHERE. Dispatched per adapter since
+      BigQuery has no bare dummy-row source usable with WHERE.
+
+  - name: sha256_hex
+    description: >
+      Lowercase hex-encoded SHA-256 of a SQL string expression, dispatched per adapter. A functional
+      requirement, not a style choice — unique_id/occurrence_id depend on every supported adapter
+      implementing this exact shape. Postgres requires the pgcrypto extension.
+    arguments:
+      - name: expression
+        type: string
+        description: SQL expression to hash.
+
+  - name: json_object_string
+    description: >
+      A JSON object serialized to a string, built from an ordered list of (key, value_sql) pairs,
+      dispatched per adapter since JSON-object construction syntax differs across warehouses.
+    arguments:
+      - name: pairs
+        type: list[tuple[string, string]]
+        description: Ordered (key, value_sql) pairs; value_sql is a SQL expression, already quoted/cast.
+
+  - name: insert_new_rows
+    description: >
+      Inserts rows from source_sql whose key_columns don't already exist in target_relation;
+      existing rows are left untouched. Dispatched per adapter — BigQuery has no unique-constraint
+      concept and uses MERGE; Postgres uses INSERT ... ON CONFLICT.
+    arguments:
+      - name: target_relation
+        type: Relation
+        description: Relation to insert into.
+      - name: source_sql
+        type: string
+        description: SELECT statement producing the candidate rows.
+      - name: key_columns
+        type: list[string]
+        description: Columns identifying an existing row as already present.
+      - name: insert_columns
+        type: list[string]
+        description: Columns to insert, in target-table order.
+
+  - name: ensure_unique_index
+    description: >
+      Postgres-only: creates the unique index insert_new_rows's ON CONFLICT requires, if missing.
+      A no-op on adapters (like BigQuery) that don't need one.
+    arguments:
+      - name: relation
+        type: Relation
+        description: Relation to index.
+      - name: columns
+        type: list[string]
+        description: Columns forming the unique constraint.
+
+  - name: incremental_upsert_strategy
+    description: >
+      Returns the incremental_strategy dqm_reconcile and dqm_annotation_changes should use for the
+      current target: 'merge' on BigQuery, 'delete+insert' everywhere else (dbt-postgres only gained
+      native 'merge' support targeting Postgres 15+; 'delete+insert' keyed by unique_key is
+      semantically equivalent here since every run regenerates the complete, correct set of rows for
+      whatever it touches).
+
+  - name: unsupported_adapter_error
+    description: >
+      Raises a clear compiler error naming the currently supported adapters, instead of letting an
+      unimplemented adapter dispatch fail with a confusing runtime SQL error.
+    arguments:
+      - name: feature
+        type: string
+        description: Human-readable name of the unimplemented feature, for the error message.
