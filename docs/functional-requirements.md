@@ -1,0 +1,58 @@
+# dbt-dqm functional requirements
+
+## Collection
+
+- dbt-dqm tracks data tests with the configured tag (`dqm` by default) and
+  `store_failures: true`.
+- The package captures conclusive test executions and their complete stored-failure rows in an
+  `on-run-end` hook. It never interprets an unselected, skipped, interrupted, or collection-error
+  test as a pass.
+- `meta.dbt_dqm.granularity` is the only source of issue identity columns. It is mandatory for
+  tracked tests, and every configured column must be returned by the test query.
+- Test tags are stored as a compact JSON string in manifest order.
+
+## Issue identity and lifecycle
+
+- `unique_id` is a lowercase SHA-256 of canonical JSON containing lowercase key names, lowercase
+  textual key values, and explicit null markers. Original values remain available for display.
+  Because null is a valid, meaningful identity value, several failing rows that legitimately share
+  a null in every configured granularity column will collapse into one issue, the same as any other
+  shared key — this is by design, not a defect, but it means a granularity choice with a
+  frequently-null column collapses more than a reviewer might expect.
+- Duplicate failed rows at the configured grain form one issue observation with a row count and a
+  deterministic representative payload.
+- The first observation creates an Active occurrence. Continued observations update it. A
+  conclusive run without the identity archives it as Passed — but only when the test's
+  `meta.dbt_dqm.granularity` is unchanged since the occurrence was last touched. If the granularity
+  changed (a column added, removed, or reordered), every previously Active occurrence's identity
+  hash changes too, and the old identity's apparent absence is archived as `IDENTITY_CHANGED`
+  instead of `Passed`, so a re-grained test doesn't read as a silently resolved backlog. A later
+  observation creates a new occurrence with blank annotations and `NEW` workflow status.
+- A test that is renamed or removed from the project can never again produce a conclusive
+  execution, so its occurrences can't reach the case above. Reconciliation separately sweeps Active
+  occurrences whose test is absent from the current manifest entirely (not just unselected in one
+  invocation) and archives them with `close_reason = 'TEST_REMOVED'`.
+- Row-level capture within one invocation commits per test as each test's failure evidence is
+  collected, rather than deferring every test's write to one shared batch at the end. A collection
+  error partway through an invocation only leaves the test being processed (and any after it in
+  that invocation) at `pending`, instead of losing already-collected evidence for tests processed
+  earlier in the same run. A `pending` execution is excluded from reconciliation and is picked up by
+  a future successful invocation of the same test.
+
+## Review application
+
+- The local app reads the dbt profile selected by project, profiles directory, and target. It stores
+  no credentials.
+- Local SQLite contains a synchronized snapshot and field-level patches only. Reviewers may edit
+  `test_status`, `call_to_action`, `ticket_url`, `notes`, and `poc_responsible`.
+- Workflow status is selected from `NEW`, `TRIAGED`, `IN_PROGRESS`, `BLOCKED`, `RESOLVED`,
+  `ACCEPTED_RISK`, and `FALSE_POSITIVE`. Historical custom values remain selectable during
+  migration.
+- Issues are rendered as record cards rather than single-line grid rows. Key and attribute fields
+  are combined into one two-column table with a separately bordered `Column | Value` row for every
+  field, keeping the whole failed record visible without horizontal scrolling.
+- Cards prioritize workflow status, current-lifecycle creation time, last user annotation update,
+  responsible person, and call to action. Technical hashes, tags, and test timestamps are collapsed.
+- Sync overlays unapplied local patches on fresh warehouse data. Apply uses local-wins semantics,
+  writes one audited bulk batch, refreshes the snapshot, and clears only the exact applied patch
+  versions.
