@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      - name: Pytest
+        run: uv run pytest -q
+
+  # Validates the dbt package (models/, macros/) end to end against a real warehouse without
+  # needing any secrets: a Postgres service container plus the synthetic demo project. There is
+  # no equivalent BigQuery job here since that would require committing or configuring warehouse
+  # credentials as repo secrets; add one separately (e.g. gated on a repo secret's presence) if
+  # BigQuery-specific coverage in CI is wanted later.
+  dbt-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: dbtdqm
+          POSTGRES_DB: dbt_dqm_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Enable pgcrypto
+        run: psql -h localhost -U postgres -d dbt_dqm_ci -c "create extension if not exists pgcrypto;"
+        env:
+          PGPASSWORD: dbtdqm
+
+      - name: Write profiles.yml
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml <<'PROFILES'
+          dbt_dqm_demo_postgres:
+            target: ci
+            outputs:
+              ci:
+                type: postgres
+                host: localhost
+                port: 5432
+                user: postgres
+                pass: dbtdqm
+                dbname: dbt_dqm_ci
+                schema: dbt_dqm_demo
+                threads: 4
+          PROFILES
+
+      - name: dbt deps
+        working-directory: integration_tests/demo_postgres
+        run: uv run dbt deps
+
+      - name: Full lifecycle walkthrough (initial -> passed -> recurrence)
+        working-directory: integration_tests/demo_postgres
+        run: |
+          set -e
+          uv run dbt run-operation reset_demo_dqm
+          uv run dbt seed
+          for scenario in initial passed recurrence; do
+            uv run dbt run --select demo_records --vars "{demo_scenario: $scenario}"
+            uv run dbt test --select tag:dqm --vars "{demo_scenario: $scenario}"
+            uv run dbt build --select package:dbt_dqm --vars "{demo_scenario: $scenario}"
+            uv run dbt test --select assert_scenario_outcomes --vars "{demo_scenario: $scenario}"
+          done
