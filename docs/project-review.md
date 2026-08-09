@@ -9,6 +9,11 @@ Two of the highest-severity claims below were independently verified by direct r
 referenced files (not just synthesized from exploration passes): the false-archival logic in
 `models/dqm_reconcile.sql` and the former FSL-1.1-MIT license text.
 
+**Status:** Phase 1 (Trust & correctness) and Phase 2 (Cost & scale hardening) are implemented and
+verified against live BigQuery — see the Roadmap section at the end for what each phase covered and
+what's still open. The findings below are left as originally written (a point-in-time record); they
+are not edited in place as items get fixed.
+
 ## Licensing and monetization direction (decided)
 
 The repo is now licensed Apache-2.0 in full — dbt package and review app alike — matching dbt-core's
@@ -188,20 +193,31 @@ so bugs aren't multiplied across adapters.
 
 ## Roadmap (directional — themes, not deadlines)
 
-1. **Trust & correctness** — fix false-archival-on-schema-change, fix orphaned-Active-on-rename,
-   make the capture hook resilient to partial failure, add an at-most-one-Active dbt test, turn the
-   demo walkthrough into scripted assertions, close the docs/reality gaps, fix the NULL-collapsing
-   and identity-hash-formatting edge cases, replace the ad hoc migration macros with a generic
-   mechanism.
-2. **Cost & scale hardening** — partitioning/clustering plus a retention policy on the log tables;
-   fix the Streamlit pagination cliff; debounce search; fix the `ProcessPoolExecutor` leak and the
-   `store.py` version-counter race; add a "remote changed since you staged this" warning instead of
-   the current silent local-wins clobber.
+1. **Trust & correctness — done.** Fixed false-archival-on-schema-change (`granularity_signature` +
+   `IDENTITY_CHANGED` close reason) and orphaned-Active-on-rename (`TEST_REMOVED` sweep, both proven
+   live against BigQuery via temporary fault injection). Made the capture hook commit per-test
+   instead of batching to the end. Added the at-most-one-Active dbt test and normalized identity-hash
+   whitespace. Turned the demo walkthrough into scripted assertions
+   (`assert_scenario_outcomes`). Closed the docs/reality gaps. Replaced the ad hoc migration pattern
+   with a generic `ensure_column` macro. NULL-collapsing was determined to be by-design (documented,
+   not changed) rather than a bug.
+2. **Cost & scale hardening — done.** Partitioned and clustered `dqm_test_executions`,
+   `dqm_issue_observations`, and `dqm_issue_occurrences`; added opt-in `dbt_dqm_retention_days`
+   (partition expiration) and `dbt_dqm_reconcile_lookback_days` (partition-pruning) cost levers,
+   both unset/full-scan by default to preserve existing behavior. Paginated the Streamlit issue list,
+   debounced full-text search behind an explicit submit, replaced the per-session
+   `ProcessPoolExecutor` with one shared via `st.cache_resource` (verified only one worker process
+   exists across multiple sessions), fixed `store.py`'s version-counter race with `BEGIN IMMEDIATE`,
+   and added a drift warning when a pending patch's base value no longer matches the synced snapshot.
+   The `dqm_annotation_changes` no-op-MERGE-on-every-build item was deliberately left as-is: every
+   materialization approach considered either couldn't be verified to actually reduce cost or risked
+   the audit table's external-write guarantee, and it was already flagged low severity.
 3. **Portability** — introduce an adapter-dispatch layer, starting with Snowflake and/or Postgres,
-   sequenced after (1) so correctness bugs aren't multiplied across warehouses.
-4. **Go-to-market mechanics** — first git commit and push, a minimal CI workflow (ruff + pytest + a
-   dbt build/test run against the demo), dbt Hub submission, PyPI metadata cleanup, fix the
-   packaging gap, add `SECURITY.md`/`CODE_OF_CONDUCT.md`, cut an actual first tagged release.
+   sequenced after (1)/(2) so correctness bugs aren't multiplied across warehouses.
+4. **Go-to-market mechanics** — first git commit and push (done — see git log), a minimal CI
+   workflow (ruff + pytest + a dbt build/test run against the demo), dbt Hub submission, PyPI
+   metadata cleanup, fix the packaging gap, add `SECURITY.md`/`CODE_OF_CONDUCT.md`, cut an actual
+   first tagged release.
 5. **Future hosted-product seam** (not built now — just cheap to keep in mind) — introduce a `Store`
    interface behind `store.py`'s `Workspace` so a Postgres-backed multi-tenant version is an
    extension rather than a rewrite, if and when a hosted product is actually pursued. No auth/tenant

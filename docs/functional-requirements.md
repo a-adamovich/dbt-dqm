@@ -55,4 +55,13 @@
   responsible person, and call to action. Technical hashes, tags, and test timestamps are collapsed.
 - Sync overlays unapplied local patches on fresh warehouse data. Apply uses local-wins semantics,
   writes one audited bulk batch, refreshes the snapshot, and clears only the exact applied patch
-  versions.
+  versions. If a pending patch's recorded base value no longer matches the freshly synced snapshot
+  — meaning the warehouse value changed since the patch was staged — the app surfaces a warning
+  instead of silently overwriting the newer remote value on apply.
+- Issue cards are paginated (25/50/100/200 per page, configurable) rather than all rendered in one
+  script run, so the record-card layout stays usable well beyond a few hundred issues.
+- The full-text search box only re-filters on explicit submit (Enter or the Apply button), not on
+  every keystroke, since it scans every column of every row. Every other filter (lifecycle, workflow
+  status, owner, created date) still reacts immediately.
+- One background-job process pool is shared across all review sessions for the life of the app
+  process, rather than one per session.

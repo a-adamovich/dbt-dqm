@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Partition `dqm_test_executions` (by `date(captured_at)`) and `dqm_issue_observations` (by
+  `date(observed_at)`), and cluster all three package tables (`test_unique_id` /
+  `test_unique_id, unique_id` / `record_status, test_unique_id`). Add opt-in, unset-by-default cost
+  levers: `dbt_dqm_retention_days` (BigQuery partition expiration on the two log tables) and
+  `dbt_dqm_reconcile_lookback_days` (lets reconciliation prune via partition filtering instead of a
+  full scan). Both preserve current behavior exactly until explicitly configured.
+- Paginate the Streamlit issue list (25/50/100/200 per page) instead of rendering every filtered
+  issue in one script run.
+- Debounce full-text search behind an explicit submit (Enter or an Apply button) instead of
+  re-filtering and re-stringifying every column of every row on each keystroke. Every other filter
+  stays live.
+- Share one `ProcessPoolExecutor` across all review sessions via `st.cache_resource` instead of
+  creating one per session that was never torn down.
+- Fix a read-modify-write race in `store.py`'s `set_change` version counter (two sessions editing
+  the same field concurrently could lose an update) using an explicit `BEGIN IMMEDIATE` transaction.
+- Add a warning when a pending local edit's recorded base value no longer matches the freshly synced
+  warehouse snapshot, instead of silently overwriting the newer remote value on apply
+  (`Workspace.drifted_patches`).
 - Relicense the entire project (dbt package and local app alike) under Apache-2.0, replacing
   FSL-1.1-MIT. No code-level open/paid split; a future hosted offering, if built, will live and be
   sold separately.
