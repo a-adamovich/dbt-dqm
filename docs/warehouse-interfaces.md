@@ -1,5 +1,16 @@
 # Warehouse interfaces
 
+## Adapter support
+
+BigQuery and Postgres are both supported, verified by an integration demo each
+(`integration_tests/demo_bigquery`, `integration_tests/demo_postgres`). The package prefers dbt-core's
+own portable macros (`dbt.type_string()`, `dbt.current_timestamp()`, `dbt.dateadd()`, ...) wherever
+they exist; the handful of things with no portable equivalent — SHA-256 hashing, JSON object
+construction, insert-if-not-matched, and DDL partitioning/clustering — are adapter-dispatched in
+`macros/adapters.sql`. Partitioning, clustering, and partition-expiration retention are BigQuery-only
+concepts and no-op elsewhere. See the README's "Supported warehouses" section for what's required to
+add another adapter.
+
 ## Hook-owned event tables
 
 `dqm_test_executions` stores one idempotent record per invocation and tracked test. It captures dbt
@@ -8,8 +19,8 @@ outcome of row collection, and a `granularity_signature` (the test's configured
 `meta.dbt_dqm.granularity` columns, case-folded and order-preserved) recorded for every conclusive
 execution regardless of whether it failed. Reconciliation only treats conclusive, successfully
 collected executions as lifecycle evidence, and uses the signature to tell a genuine pass apart from
-a grain/identity-scheme change. The table is partitioned by `date(captured_at)` and clustered by
-`test_unique_id`.
+a grain/identity-scheme change. On BigQuery, the table is partitioned by `date(captured_at)` and
+clustered by `test_unique_id`.
 
 `dqm_issue_observations` stores immutable, invocation-level failed identities. Each record contains
 the case-insensitive hash, original output display values, collapsed source-row count, initial
@@ -20,14 +31,15 @@ case-insensitive identity hash independently of the displayed record. The on-run
 each test's readable failures (merge plus status update) as soon as that test is processed, rather
 than deferring every tracked test's write to one shared batch — a mid-invocation collection error
 only leaves the test being processed, and any after it, unresolved at `pending` for a future
-invocation to pick up. This table is partitioned by `date(observed_at)` and clustered by
+invocation to pick up. On BigQuery, this table is partitioned by `date(observed_at)` and clustered by
 `test_unique_id, unique_id`.
 
-Neither log table is pruned automatically; set the `dbt_dqm_retention_days` project variable to opt
-into BigQuery partition expiration once you've confirmed the window comfortably exceeds how
+Neither log table is pruned automatically; on BigQuery, set the `dbt_dqm_retention_days` project
+variable to opt into partition expiration once you've confirmed the window comfortably exceeds how
 infrequently your slowest tracked test runs — see `models/dqm_reconcile.sql`'s `latest_executions`
-CTE for the matching opt-in `dbt_dqm_reconcile_lookback_days` cost lever, which lets reconciliation
-prune the same tables via partition filtering instead of a full scan.
+CTE for the matching opt-in `dbt_dqm_reconcile_lookback_days` cost lever (portable — it's a plain
+`captured_at` filter, not a BigQuery-specific mechanism), which lets reconciliation prune via
+partition filtering on BigQuery instead of a full scan.
 
 ## Model-owned lifecycle tables and views
 

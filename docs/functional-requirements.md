@@ -1,5 +1,14 @@
 # dbt-dqm functional requirements
 
+## Adapter support
+
+- The dbt package supports BigQuery and Postgres. Behavior described below (identity hashing,
+  lifecycle transitions, granularity handling) is a functional requirement, not an
+  implementation detail, and must hold identically on every supported adapter — a warehouse-specific
+  divergence in observable behavior is a bug. Adapter differences are confined to
+  `macros/adapters.sql`.
+- The local review app remains BigQuery-only; it talks to BigQuery directly rather than through dbt.
+
 ## Collection
 
 - dbt-dqm tracks data tests with the configured tag (`dqm` by default) and

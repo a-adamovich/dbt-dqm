@@ -9,8 +9,9 @@ Two of the highest-severity claims below were independently verified by direct r
 referenced files (not just synthesized from exploration passes): the false-archival logic in
 `models/dqm_reconcile.sql` and the former FSL-1.1-MIT license text.
 
-**Status:** Phase 1 (Trust & correctness) and Phase 2 (Cost & scale hardening) are implemented and
-verified against live BigQuery — see the Roadmap section at the end for what each phase covered and
+**Status:** Phase 1 (Trust & correctness), Phase 2 (Cost & scale hardening), and Phase 3
+(Portability — BigQuery + Postgres) are implemented and verified live (BigQuery, plus a local
+Postgres instance for Phase 3). See the Roadmap section at the end for what each phase covered and
 what's still open. The findings below are left as originally written (a point-in-time record); they
 are not edited in place as items get fixed.
 
@@ -212,8 +213,24 @@ so bugs aren't multiplied across adapters.
    The `dqm_annotation_changes` no-op-MERGE-on-every-build item was deliberately left as-is: every
    materialization approach considered either couldn't be verified to actually reduce cost or risked
    the audit table's external-write guarantee, and it was already flagged low severity.
-3. **Portability** — introduce an adapter-dispatch layer, starting with Snowflake and/or Postgres,
-   sequenced after (1)/(2) so correctness bugs aren't multiplied across warehouses.
+3. **Portability — done for BigQuery + Postgres.** Replaced hand-rolled BigQuery relation naming
+   with `api.Relation.create()`, and BigQuery type literals with dbt's portable `dbt.type_*()`/
+   `dbt.current_timestamp()`/`dbt.dateadd()` macros — used directly at call sites, no wrapping
+   needed. Added `macros/adapters.sql`, an `adapter.dispatch()` layer for the handful of things
+   with no dbt-core portable equivalent: `dual()` (empty-row source), `sha256_hex()`, an
+   `insert_new_rows()` that would (BigQuery `MERGE`) vs. `INSERT ... ON CONFLICT` (Postgres, plus
+   `ensure_unique_index()` for the constraint it needs), and `capture_tables_ddl()` for
+   partitioning/clustering (BigQuery-only, no-op elsewhere). `incremental_upsert_strategy()` picks
+   `merge` on BigQuery and `delete+insert` elsewhere, since dbt-postgres only gained native `merge`
+   targeting Postgres 15+. Added `integration_tests/demo_postgres`, mirroring the BigQuery demo.
+   Verified live against a local Postgres 14 instance: the full initial → passed → recurrence
+   walkthrough, plus both Phase 1 fault-injection tests (`IDENTITY_CHANGED` and `TEST_REMOVED`)
+   repeated to confirm they aren't BigQuery-specific behavior. One real bug was caught by this
+   testing and fixed: `SELECT * EXCEPT(...)` in `latest_executions` is BigQuery-only syntax,
+   replaced with an explicit column list. Snowflake/Databricks/Redshift are not implemented —
+   adding one means writing that adapter's overrides for the six macros above (see README's
+   "Supported warehouses"). The local review app (`src/dbt_dqm_app/`) remains BigQuery-only; it
+   was out of scope for this phase (it talks to BigQuery directly, not through dbt).
 4. **Go-to-market mechanics** — first git commit and push (done — see git log), a minimal CI
    workflow (ruff + pytest + a dbt build/test run against the demo), dbt Hub submission, PyPI
    metadata cleanup, fix the packaging gap, add `SECURITY.md`/`CODE_OF_CONDUCT.md`, cut an actual

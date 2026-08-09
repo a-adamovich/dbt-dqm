@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Add Postgres support to the dbt package alongside BigQuery. Replace BigQuery-only SQL
+  (hand-rolled relation naming, `int64`/`float64`/`timestamp` literals, `SELECT * EXCEPT(...)`,
+  `TO_JSON_STRING(STRUCT())`, `MERGE ... INSERT ROW`) with dbt-core's own portable macros
+  (`dbt.type_string()`, `dbt.current_timestamp()`, `dbt.dateadd()`, `api.Relation.create()`) plus a
+  new `macros/adapters.sql` `adapter.dispatch()` layer for the handful of things with no portable
+  equivalent (SHA-256 hashing, JSON object construction, insert-if-not-matched,
+  partitioning/clustering DDL). `dqm_reconcile` and `dqm_annotation_changes` pick their incremental
+  strategy per adapter (`merge` on BigQuery, `delete+insert` elsewhere). Add
+  `integration_tests/demo_postgres`, mirroring the BigQuery demo; both were run end-to-end
+  (including both Phase 1 fault-injection tests) against live BigQuery and a local Postgres 14
+  instance. The local review app remains BigQuery-only; adding a warehouse to it was out of scope.
 - Partition `dqm_test_executions` (by `date(captured_at)`) and `dqm_issue_observations` (by
   `date(observed_at)`), and cluster all three package tables (`test_unique_id` /
   `test_unique_id, unique_id` / `record_status, test_unique_id`). Add opt-in, unset-by-default cost

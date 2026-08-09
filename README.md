@@ -1,7 +1,9 @@
 # dbt-dqm
 
 dbt-dqm is a source-available dbt package for persistent, row-level test issue tracking plus a
-single-user local review app. The v1 adapter is BigQuery and the supported dbt line is 1.11.x.
+single-user local review app. The dbt package (`models/`, `macros/`) supports BigQuery and
+Postgres; the supported dbt line is 1.11.x. The local review app (`dbt-dqm app`) remains
+BigQuery-only for now — see [Local app](#local-app) below.
 
 ## Configure a tracked test
 
@@ -43,6 +45,19 @@ The package publishes `dqm_current_issues`, `dqm_all_issues`, `dqm_test_executio
 standard schema naming, a `dbt_dqm_schema: governance` override produces
 `<target_dataset>_governance`.
 
+## Supported warehouses
+
+BigQuery and Postgres are both fully supported and covered by an integration demo each
+(`integration_tests/demo_bigquery`, `integration_tests/demo_postgres`). Postgres requires the
+`pgcrypto` extension for identity hashing: `create extension if not exists pgcrypto;` — dbt-dqm
+doesn't create this automatically since `CREATE EXTENSION` commonly needs elevated privileges the
+package's own role may not have. A third adapter is added by implementing the handful of
+`adapter.dispatch()`-based macros in [`macros/adapters.sql`](macros/adapters.sql)
+(`dual`, `sha256_hex`, `json_object_string`, `insert_new_rows`, `ensure_unique_index`,
+`capture_tables_ddl`) for it — everything else in the package already uses dbt's own portable
+cross-database macros (`dbt.type_string()`, `dbt.current_timestamp()`, `dbt.dateadd()`, ...) and
+needs no adapter-specific code.
+
 ## Local app
 
 ```bash
@@ -52,11 +67,14 @@ dbt-dqm app \
   --target demo
 ```
 
-The app uses the selected dbt BigQuery profile, validates it with `dbt debug`, and automatically
+The app uses the selected dbt profile, validates it with `dbt debug`, and automatically
 synchronizes at the start of each browser session. It stores a project-and-target-specific snapshot
 plus field-level pending changes in a SQLite workspace under the operating system's user-data
 directory. Pending edits are overlaid after every refresh, and credentials are never copied into the
-workspace.
+workspace. Unlike the dbt package, the app itself (`src/dbt_dqm_app/warehouse.py`) is currently
+BigQuery-only — it talks to BigQuery directly via `google-cloud-bigquery` rather than through dbt,
+so it works against a BigQuery-target consumer project regardless of which adapter that project's
+own dbt-dqm reconciliation runs on.
 
 ## BigQuery demo
 
@@ -95,6 +113,26 @@ order shown above; running scenarios out of order or without the initial reset w
 expectations (and the "Initial failed rows" table above) inapplicable. No company data or code is
 included. See [`docs/warehouse-interfaces.md`](docs/warehouse-interfaces.md) for the package data
 contracts.
+
+## Postgres demo
+
+The same walkthrough against Postgres lives in `integration_tests/demo_postgres` — same seed data,
+same three tracked tests, same expected outcomes at each scenario, just a Postgres profile and no
+BigQuery-specific schema-scoping macro:
+
+```bash
+cd integration_tests/demo_postgres
+dbt deps
+dbt run-operation reset_demo_dqm
+dbt seed
+dbt run --select demo_records --vars '{demo_scenario: initial}'
+dbt test --select tag:dqm --vars '{demo_scenario: initial}'
+dbt build --select package:dbt_dqm --vars '{demo_scenario: initial}'
+dbt test --select assert_scenario_outcomes --vars '{demo_scenario: initial}'
+```
+
+Requires `create extension if not exists pgcrypto;` on the target database first (see
+[Supported warehouses](#supported-warehouses)).
 
 ## Roadmap
 
