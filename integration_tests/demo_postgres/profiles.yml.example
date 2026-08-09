@@ -1,0 +1,17 @@
+dbt_dqm_demo_postgres:
+  target: demo
+  outputs:
+    demo:
+      type: postgres
+      host: localhost
+      port: 5432
+      user: your-postgres-user
+      pass: your-postgres-password
+      dbname: dbt_dqm_demo
+      schema: dbt_dqm_demo
+      threads: 4
+
+# Postgres identity hashing requires the pgcrypto extension for its digest() function:
+#   create extension if not exists pgcrypto;
+# dbt-dqm does not create this automatically since CREATE EXTENSION commonly needs elevated
+# privileges the package's own role may not have.

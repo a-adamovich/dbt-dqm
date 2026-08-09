@@ -1,0 +1,4 @@
+packages:
+  - local: ../..
+    name: dbt_dqm
+sha1_hash: a2605932a9f1f51dc7fcce9c93bcc85a76004436

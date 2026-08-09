@@ -1,0 +1,17 @@
+version: 2
+
+data_tests:
+  - name: demo_customer_email_invalid
+    description: >
+      Customer-level failure sample with customer_id as its one-column grain and email plus reason
+      as attributes. Initial case variants prove duplicate collapse and case-insensitive identity.
+
+  - name: demo_order_amount_invalid
+    description: >
+      Order-level failure sample with customer_id and order_id as a two-column grain. Amount,
+      currency, and reason provide three attributes with both numeric and textual values.
+
+  - name: demo_order_line_invalid
+    description: >
+      Order-line failure sample with customer_id, order_id, and line_id as a three-column grain.
+      SKU, quantity, unit price, reason, and source system form the widest attribute set.
