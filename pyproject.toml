@@ -6,6 +6,16 @@ readme = "README.md"
 requires-python = ">=3.11,<3.12"
 license = "Apache-2.0"
 authors = [{ name = "Aliaksei Adamovich" }]
+keywords = ["dbt", "data-quality", "data-testing", "data-observability", "bigquery", "postgres"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Database",
+  "Topic :: Software Development :: Quality Assurance",
+]
 dependencies = [
   "dbt-core==1.11.11",
   "dbt-bigquery==1.11.3",
@@ -16,6 +26,12 @@ dependencies = [
   "pyyaml>=6,<7",
   "streamlit>=1.41,<2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/a-adamovich/dbt-dqm"
+Repository = "https://github.com/a-adamovich/dbt-dqm"
+Issues = "https://github.com/a-adamovich/dbt-dqm/issues"
+Changelog = "https://github.com/a-adamovich/dbt-dqm/blob/main/CHANGELOG.md"
 
 [project.scripts]
 dbt-dqm = "dbt_dqm_app.cli:main"
