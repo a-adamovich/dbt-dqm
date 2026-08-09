@@ -1,0 +1,7 @@
+selectors:
+  - name: dbt_dqm
+    description: All dbt-dqm package models.
+    definition:
+      method: package
+      value: dbt_dqm
+
