@@ -1,0 +1,28 @@
+name: Bug report
+description: Report incorrect collection, lifecycle, adapter, or app behavior
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: dbt-dqm, dbt, adapter, warehouse, and Python versions
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Data safety
+      options:
+        - label: I removed credentials, customer data, and complete failed-row contents.
+          required: true

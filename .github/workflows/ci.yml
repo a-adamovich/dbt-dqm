@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -9,10 +12,10 @@ jobs:
   lint-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           python-version: "3.11"
 
@@ -25,16 +28,50 @@ jobs:
       - name: Pytest
         run: uv run pytest -q
 
+      - name: Streamlit startup smoke test
+        run: |
+          mkdir -p /tmp/dbt-dqm-smoke-project /tmp/dbt-dqm-smoke-profiles
+          printf 'name: smoke\nprofile: smoke\n' > /tmp/dbt-dqm-smoke-project/dbt_project.yml
+          printf 'smoke:\n  outputs:\n    dev:\n      type: postgres\n      host: localhost\n      user: smoke\n      pass: smoke\n      dbname: smoke\n      schema: smoke\n' > /tmp/dbt-dqm-smoke-profiles/profiles.yml
+          timeout 20 uv run dbt-dqm app --project-dir /tmp/dbt-dqm-smoke-project --profiles-dir /tmp/dbt-dqm-smoke-profiles --target dev --port 8765 &
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl --fail --silent http://127.0.0.1:8765/_stcore/health; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+
   # Validates the dbt package (models/, macros/) end to end against a real warehouse without
   # needing any secrets: a Postgres service container plus the synthetic demo project. There is
   # no equivalent BigQuery job here since that would require committing or configuring warehouse
   # credentials as repo secrets; add one separately (e.g. gated on a repo secret's presence) if
   # BigQuery-specific coverage in CI is wanted later.
+  package-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.11"
+      - name: Build wheel and source distribution
+        run: uv build
+      - name: Check distribution metadata
+        run: uvx --from twine twine check dist/*
+      - name: Install the wheel into a clean environment and smoke-test the CLI
+        run: |
+          uv venv /tmp/dbt-dqm-wheel-smoke --python 3.11
+          uv pip install --python /tmp/dbt-dqm-wheel-smoke/bin/python dist/*.whl
+          /tmp/dbt-dqm-wheel-smoke/bin/dbt-dqm --help
+
   dbt-postgres:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["14", "16"]
     services:
       postgres:
-        image: postgres:16
+        image: postgres:${{ matrix.postgres }}
         env:
           POSTGRES_PASSWORD: dbtdqm
           POSTGRES_DB: dbt_dqm_ci
@@ -46,10 +83,10 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           python-version: "3.11"
 
@@ -92,6 +129,59 @@ jobs:
           for scenario in initial passed recurrence; do
             uv run dbt run --select demo_records --vars "{demo_scenario: $scenario}"
             uv run dbt test --select tag:dqm --vars "{demo_scenario: $scenario}"
+            uv run dbt test --select assert_collection_guardrail_fixtures
             uv run dbt build --select package:dbt_dqm --vars "{demo_scenario: $scenario}"
             uv run dbt test --select assert_scenario_outcomes --vars "{demo_scenario: $scenario}"
           done
+
+      - name: Replay multiple executions between reconciliations
+        working-directory: integration_tests/demo_postgres
+        run: |
+          set -e
+          uv run dbt run-operation reset_demo_dqm
+          uv run dbt run --select demo_records --vars '{demo_scenario: initial}'
+          uv run dbt test --select tag:dqm --vars '{demo_scenario: initial}'
+          uv run dbt run --select demo_records --vars '{demo_scenario: passed}'
+          uv run dbt test --select tag:dqm --vars '{demo_scenario: passed}'
+          uv run dbt build --select package:dbt_dqm --vars '{demo_scenario: passed}'
+          uv run dbt test --select assert_scenario_outcomes --vars '{demo_scenario: passed}'
+          uv run dbt run-operation reset_demo_dqm
+          for scenario in initial passed recurrence; do
+            uv run dbt run --select demo_records --vars "{demo_scenario: $scenario}"
+            uv run dbt test --select tag:dqm --vars "{demo_scenario: $scenario}"
+          done
+          uv run dbt build --select package:dbt_dqm --vars '{demo_scenario: recurrence}'
+          uv run dbt test --select assert_scenario_outcomes --vars '{demo_scenario: recurrence}'
+          uv run dbt run-operation assert_postgres_query_plans
+
+  bigquery-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: uv sync --all-groups
+      - name: Write compile-only profile
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml <<'PROFILES'
+          dbt_dqm_demo_bigquery:
+            target: ci
+            outputs:
+              ci:
+                type: bigquery
+                method: oauth
+                project: dbt-dqm-compile-only
+                dataset: dbt_dqm_demo
+                location: US
+                threads: 1
+          PROFILES
+      - name: Parse and compile without warehouse introspection
+        working-directory: integration_tests/demo_bigquery
+        run: |
+          uv run dbt deps
+          uv run dbt parse
+          uv run dbt compile --no-introspect

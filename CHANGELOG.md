@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.1.1 - Unreleased
+
+### Package
+
+- Reject missing stored-failure relations, invalid/duplicate/empty grains, missing configured
+  columns, and inconclusive statuses as lifecycle evidence.
+- Introduce byte-exact `dqm-id-v1` identity serialization, cross-adapter golden hashes, and the
+  versioned `identity_scheme_signature` contract.
+- Replay every unprocessed conclusive execution through a durable per-test checkpoint, preserving
+  short fail/pass/recur episodes and making retries idempotent.
+- Add identity-only, allowlisted-context, and full-row capture modes; identity-only is the safer
+  default. Add portable cleanup, validated cost variables, Postgres indexes, and schema migration
+  history.
+- Introduce `workflow_status`, annotation compare-and-set versions, server-derived audit values,
+  source relation metadata, severity metadata, and documented compatibility aliases.
+
+### App
+
+- Secure workspace directories and SQLite files with owner-only permissions and add `workspace
+  info` / `workspace purge` commands.
+- Require an explicit reviewer choice for drift conflicts and reject later concurrent annotation
+  writes through warehouse compare-and-set.
+- Support BigQuery and Postgres app backends, dbt-rendered `env_var()` profiles, and manifest-based
+  relation discovery for custom schema naming.
+
+### Project
+
+- Add package-build/metadata/clean-wheel CLI checks, Postgres 14/16 lifecycle matrices, delayed
+  reconciliation scenarios, and compile-only BigQuery CI. Pin actions by SHA and declare read-only
+  workflow permissions.
+- Correct open-source/contribution language and separate the dated historical review from the live
+  roadmap.
+
 ## 0.1.0 - 2026-08-09
 
 Initial release. Nothing has shipped before this; everything below is new.

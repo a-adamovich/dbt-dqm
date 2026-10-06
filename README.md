@@ -1,9 +1,9 @@
 # dbt-dqm
 
-dbt-dqm is a source-available dbt package for persistent, row-level test issue tracking plus a
+dbt-dqm is an open-source dbt package for persistent, row-level test issue tracking plus a
 single-user local review app. The dbt package (`models/`, `macros/`) supports BigQuery and
-Postgres; the supported dbt line is 1.11.x. The local review app (`dbt-dqm app`) remains
-BigQuery-only for now — see [Local app](#local-app) below.
+Postgres; the supported dbt line is 1.11.x. The local review app (`dbt-dqm app`) supports both
+package adapters — see [Local app](#local-app) below.
 
 ## Install the dbt package
 
@@ -26,7 +26,11 @@ Then run `dbt deps`. Note that `pip install dbt-dqm` (for the local review app C
   config(
     tags=['dqm'],
     store_failures=true,
-    meta={'dbt_dqm': {'granularity': ['customer_id']}}
+    meta={'dbt_dqm': {
+      'granularity': ['customer_id'],
+      'capture_mode': 'allowlist',
+      'context_columns': ['reason']
+    }}
   )
 }}
 
@@ -34,7 +38,8 @@ select customer_id, reason from {{ ref('customers') }} where is_invalid
 ```
 
 Every failed-row query must return the configured granularity columns. Text identity comparisons
-are case-insensitive; original key and attribute values remain visible to reviewers. There is no
+are case-insensitive. The safer default capture mode is `identity_only`; `allowlist` adds only
+named context columns, while `full` explicitly opts into complete failed-row storage. There is no
 column-name inference: `meta.dbt_dqm.granularity` is mandatory, and all configured columns must
 exist in the test output.
 
@@ -59,6 +64,10 @@ The package publishes `dqm_current_issues`, `dqm_all_issues`, `dqm_test_executio
 standard schema naming, a `dbt_dqm_schema: governance` override produces
 `<target_dataset>_governance`.
 
+Optional `dbt_dqm_retention_days` and `dbt_dqm_reconcile_lookback_days` values must be positive
+YAML integers. BigQuery applies partition expiration; on either adapter, explicit cleanup is
+available with `dbt run-operation cleanup_dqm_logs --args '{retention_days: 90}'`.
+
 ## Supported warehouses
 
 BigQuery and Postgres are both fully supported and covered by an integration demo each
@@ -82,13 +91,20 @@ dbt-dqm app \
 ```
 
 The app uses the selected dbt profile, validates it with `dbt debug`, and automatically
-synchronizes at the start of each browser session. It stores a project-and-target-specific snapshot
-plus field-level pending changes in a SQLite workspace under the operating system's user-data
-directory. Pending edits are overlaid after every refresh, and credentials are never copied into the
-workspace. Unlike the dbt package, the app itself (`src/dbt_dqm_app/warehouse.py`) is currently
-BigQuery-only — it talks to BigQuery directly via `google-cloud-bigquery` rather than through dbt,
-so it works against a BigQuery-target consumer project regardless of which adapter that project's
-own dbt-dqm reconciliation runs on.
+synchronizes at the start of each browser session. It uses dbt's rendered profile and generated
+manifest, including `env_var()` authentication and custom `generate_schema_name` behavior. It
+stores a project-and-target-specific failed-row snapshot plus field-level pending changes in an
+owner-only SQLite workspace under the operating system's user-data directory; credentials are
+never copied into it. Annotation updates use compare-and-set versions and return an explicit
+conflict if another writer changed an occurrence. Inspect or permanently delete local data with:
+
+```bash
+dbt-dqm workspace info --project-dir /path/to/project --target demo
+dbt-dqm workspace purge --project-dir /path/to/project --target demo
+```
+
+By default SQLite retains Active issues plus 90 days of Archived history. Pass
+`--archive-cache-days 0` to cache Active issues only, or choose another non-negative window.
 
 ## BigQuery demo
 
@@ -153,7 +169,7 @@ Requires `create extension if not exists pgcrypto;` on the target database first
 The dbt package and the local review app are, and will stay, fully open source. A hosted/managed
 offering is planned for the future — in the same spirit as how dbt Labs offers dbt Cloud alongside
 the open-source dbt-core — but nothing about the package or app you're using today is gated behind
-it.
+it. See [the current roadmap](docs/roadmap.md) for implemented gates and remaining work.
 
 ## License
 

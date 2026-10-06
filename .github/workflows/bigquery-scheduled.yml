@@ -1,0 +1,55 @@
+name: Scheduled BigQuery lifecycle
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  lifecycle:
+    if: vars.BIGQUERY_LIFECYCLE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: uv sync --all-groups
+      - name: Write credentialed profile
+        env:
+          DBT_DQM_BIGQUERY_KEYFILE_JSON: ${{ secrets.DBT_DQM_BIGQUERY_KEYFILE_JSON }}
+          DBT_DQM_BIGQUERY_PROJECT: ${{ vars.DBT_DQM_BIGQUERY_PROJECT }}
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml <<'PROFILES'
+          dbt_dqm_demo_bigquery:
+            target: ci
+            outputs:
+              ci:
+                type: bigquery
+                method: service-account-json
+                project: "{{ env_var('DBT_DQM_BIGQUERY_PROJECT') }}"
+                dataset: dbt_dqm_scheduled_ci
+                location: US
+                keyfile_json: "{{ env_var('DBT_DQM_BIGQUERY_KEYFILE_JSON') | as_native }}"
+                threads: 4
+          PROFILES
+      - name: Full credentialed lifecycle
+        working-directory: integration_tests/demo_bigquery
+        run: |
+          set -e
+          uv run dbt deps
+          uv run dbt run-operation reset_demo_dqm
+          uv run dbt seed
+          for scenario in initial passed recurrence; do
+            uv run dbt run --select demo_records --vars "{demo_scenario: $scenario}"
+            uv run dbt test --select tag:dqm --vars "{demo_scenario: $scenario}"
+            uv run dbt test --select assert_collection_guardrail_fixtures
+            uv run dbt build --select package:dbt_dqm --vars "{demo_scenario: $scenario}"
+            uv run dbt test --select assert_scenario_outcomes --vars "{demo_scenario: $scenario}"
+          done

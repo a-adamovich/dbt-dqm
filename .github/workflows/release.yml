@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: pypi
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: dbtdqm
+          POSTGRES_DB: dbt_dqm_release
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.11"
+      - name: Verify, build, and inspect distributions
+        run: |
+          uv sync --all-groups
+          uv run ruff check .
+          uv run pytest -q
+          uv build
+          uvx --from twine twine check dist/*
+      - name: Configure release-gate Postgres
+        run: |
+          psql -h localhost -U postgres -d dbt_dqm_release -c "create extension if not exists pgcrypto;"
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml <<'PROFILES'
+          dbt_dqm_demo_postgres:
+            target: release
+            outputs:
+              release:
+                type: postgres
+                host: localhost
+                port: 5432
+                user: postgres
+                pass: dbtdqm
+                dbname: dbt_dqm_release
+                schema: dbt_dqm_demo
+                threads: 4
+          PROFILES
+        env:
+          PGPASSWORD: dbtdqm
+      - name: Full Postgres release lifecycle
+        working-directory: integration_tests/demo_postgres
+        run: |
+          uv run dbt deps
+          uv run dbt run-operation reset_demo_dqm
+          uv run dbt seed
+          for scenario in initial passed recurrence; do
+            uv run dbt run --select demo_records --vars "{demo_scenario: $scenario}"
+            uv run dbt test --select tag:dqm --vars "{demo_scenario: $scenario}"
+            uv run dbt test --select assert_collection_guardrail_fixtures
+            uv run dbt build --select package:dbt_dqm --vars "{demo_scenario: $scenario}"
+            uv run dbt test --select assert_scenario_outcomes --vars "{demo_scenario: $scenario}"
+          done
+      - name: Attest distribution provenance
+        uses: actions/attest-build-provenance@00014ed6ed5efc5b1ab7f7f34a39eb55d41aa4f8 # v3.1.0
+        with:
+          subject-path: dist/*
+      - name: Publish to PyPI through trusted publishing
+        run: uv publish
+      - name: Create GitHub release
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes --verify-tag
+        env:
+          GH_TOKEN: ${{ github.token }}

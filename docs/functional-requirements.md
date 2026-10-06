@@ -7,23 +7,28 @@
   implementation detail, and must hold identically on every supported adapter — a warehouse-specific
   divergence in observable behavior is a bug. Adapter differences are confined to
   `macros/adapters.sql`.
-- The local review app remains BigQuery-only; it talks to BigQuery directly rather than through dbt.
+- The local review app supports BigQuery and Postgres and resolves package relations from dbt's
+  generated manifest.
 
 ## Collection
 
 - dbt-dqm tracks data tests with the configured tag (`dqm` by default) and
   `store_failures: true`.
-- The package captures conclusive test executions and their complete stored-failure rows in an
+- The package captures conclusive test executions and configured stored-failure fields in an
   `on-run-end` hook. It never interprets an unselected, skipped, interrupted, or collection-error
   test as a pass.
 - `meta.dbt_dqm.granularity` is the only source of issue identity columns. It is mandatory for
-  tracked tests, and every configured column must be returned by the test query.
+  every tracked test (including passing tests), must be a non-empty list of distinct non-empty
+  names after case folding, and every configured column must be returned by a failing test query.
+- Capture modes are `identity_only` (default), `allowlist` with `context_columns`, and explicit
+  `full`. Invalid capture metadata is a configuration error and never lifecycle evidence.
 - Test tags are stored as a compact JSON string in manifest order.
 
 ## Issue identity and lifecycle
 
-- `unique_id` is a lowercase SHA-256 of canonical JSON containing lowercase key names, lowercase
-  textual key values, and explicit null markers. Original values remain available for display.
+- `unique_id` is a lowercase SHA-256 of the versioned `dqm-id-v1` length-prefixed byte contract,
+  containing ordered lowercase key names, trimmed/lowercase textual values, and explicit null
+  markers. Display JSON is never a hash input.
   Because null is a valid, meaningful identity value, several failing rows that legitimately share
   a null in every configured granularity column will collapse into one issue, the same as any other
   shared key — this is by design, not a defect, but it means a granularity choice with a
@@ -47,13 +52,18 @@
   that invocation) at `pending`, instead of losing already-collected evidence for tests processed
   earlier in the same run. A `pending` execution is excluded from reconciliation and is picked up by
   a future successful invocation of the same test.
+- Reconciliation processes every unprocessed conclusive execution in `captured_at, invocation_id`
+  order and checkpoints only after a successful model write. Deterministic occurrence IDs make
+  retries idempotent and preserve brief fail/pass episodes between package builds.
 
 ## Review application
 
 - The local app reads the dbt profile selected by project, profiles directory, and target. It stores
   no credentials.
-- Local SQLite contains a synchronized snapshot and field-level patches only. Reviewers may edit
-  `test_status`, `call_to_action`, `ticket_url`, `notes`, and `poc_responsible`.
+- Local SQLite contains failed-row snapshot data and field-level patches, uses owner-only filesystem
+  permissions, and can be inspected or purged from the CLI. Reviewers may edit `workflow_status`,
+  `call_to_action`, `ticket_url`, `notes`, and `poc_responsible`; `test_status` is a deprecated
+  compatibility alias.
 - Workflow status is selected from `NEW`, `TRIAGED`, `IN_PROGRESS`, `BLOCKED`, `RESOLVED`,
   `ACCEPTED_RISK`, and `FALSE_POSITIVE`. Historical custom values remain selectable during
   migration.
@@ -62,11 +72,12 @@
   field, keeping the whole failed record visible without horizontal scrolling.
 - Cards prioritize workflow status, current-lifecycle creation time, last user annotation update,
   responsible person, and call to action. Technical hashes, tags, and test timestamps are collapsed.
-- Sync overlays unapplied local patches on fresh warehouse data. Apply uses local-wins semantics,
+- Sync overlays unapplied local patches on fresh warehouse data. Apply uses annotation versions,
   writes one audited bulk batch, refreshes the snapshot, and clears only the exact applied patch
   versions. If a pending patch's recorded base value no longer matches the freshly synced snapshot
-  — meaning the warehouse value changed since the patch was staged — the app surfaces a warning
-  instead of silently overwriting the newer remote value on apply.
+  — meaning the warehouse value changed since the patch was staged — Apply is blocked until the
+  reviewer discards the patch or explicitly rebases it for overwrite. A later concurrent write
+  still returns a compare-and-set conflict.
 - Issue cards are paginated (25/50/100/200 per page, configurable) rather than all rendered in one
   script run, so the record-card layout stays usable well beyond a few hundred issues.
 - The full-text search box only re-filters on explicit submit (Enter or the Apply button), not on
