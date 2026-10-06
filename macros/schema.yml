@@ -40,14 +40,8 @@ macros:
 
   - name: capture_tables_ddl
     description: >
-      Returns DDL that initializes dqm_test_executions and dqm_issue_observations, dispatched per
-      adapter since partitioning/clustering are BigQuery-specific concepts with no portable
-      equivalent. These hook-owned tables exist before reconciliation models read them.
-
-  - name: apply_retention_policy
-    description: >
-      Applies the opt-in dbt_dqm_retention_days window to the hook-owned log tables via BigQuery
-      partition expiration. A no-op on adapters without a portable equivalent.
+      Returns DDL for hook-owned tracking tables, with BigQuery partitions and Postgres indexes.
+      App-written audit and missed-issue models own their tables separately.
 
   - name: ensure_column
     description: >
@@ -66,31 +60,14 @@ macros:
 
   - name: ensure_capture_tables
     description: >
-      Executes capture-table initialization only during dbt execution, then inspects the existing
-      observation schema and performs only required one-time column migrations. Routine collection
-      therefore causes no no-op table-update operations.
-
-  - name: migrate_occurrence_schema
-    description: >
-      Idempotent reconciliation pre-hook that inspects and, only when necessary, migrates the
-      dqm_issue_occurrences record-detail column before the incremental model queries it. It
-      backfills record_values_json from prior split JSON fields before removing them, and does
-      nothing on a first installation where the occurrence table does not yet exist.
+      Executes guarded installation and ordered, verified additive migrations under the
+      schema coordination protocol. Existing history and annotations are preserved.
 
   - name: positive_integer_var
     description: Validates an optional dbt variable as a strictly positive YAML integer.
 
   - name: cleanup_dqm_logs
     description: Deletes execution and observation log rows older than a positive retention window.
-
-  - name: advance_reconciliation_state
-    description: Advances per-test replay checkpoints after successful reconciliation.
-
-  - name: record_schema_migration
-    description: Idempotently records a completed versioned warehouse migration.
-
-  - name: ensure_annotation_indexes
-    description: Adds adapter-appropriate annotation audit lookup indexes.
 
   - name: capture_test_results
     description: >
@@ -185,3 +162,18 @@ macros:
       - name: feature
         type: string
         description: Human-readable name of the unimplemented feature, for the error message.
+
+  - name: dqm_relation
+    description: Resolves durable tables using the reconcile model database and schema.
+  - name: reconcile_pre
+    description: Returns ordered setup, input freeze, late check and stage SQL.
+  - name: apply_reconciliation
+    description: Atomically applies lifecycle changes, events, receipts and generation updates.
+  - name: migrations
+    description: Ordered adapter-dispatched registry of idempotent apply, backfill and verify macros.
+  - name: issues_with_history
+    description: Public occurrence projection with previous-history and Passed recurrence context.
+  - name: dqm_skip_late_evidence
+    description: Records explicitly reviewed late evidence as an audited gap under generation fencing.
+  - name: dqm_abandon_runs
+    description: Fences expired runs before removing their BigQuery stages.

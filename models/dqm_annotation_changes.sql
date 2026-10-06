@@ -6,8 +6,7 @@
     incremental_strategy=dbt_dqm.incremental_upsert_strategy(),
     unique_key=['batch_id', 'occurrence_id', 'field_name'],
     full_refresh=false,
-    on_schema_change='append_new_columns',
-    post_hook="{{ dbt_dqm.ensure_annotation_indexes() }}"
+    on_schema_change='append_new_columns'
   )
 }}
 

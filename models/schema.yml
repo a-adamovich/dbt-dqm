@@ -3,9 +3,8 @@ version: 2
 models:
   - name: dqm_reconcile
     description: >
-      Internal incremental reconciliation model, materialized as dqm_issue_occurrences. It turns
-      immutable observations into durable Active and Archived occurrences, retains annotations for
-      continuous failures, and creates clean occurrences for later recurrences.
+      Stable view over hook-owned dqm_issue_occurrences, maintained by transactional runtime hooks.
+      Frozen evidence becomes durable Active and Archived occurrences while annotations are preserved.
     columns:
       - name: occurrence_id
         description: Stable SHA-256 identifier for one lifecycle occurrence of a test failure.
@@ -21,7 +20,7 @@ models:
         description: One-based recurrence number within a test and failure identity.
       - name: record_values_json
         description: >
-          Portable JSON object stored as text, mapping every stored-failure output column to its
+          Portable JSON object stored as text, mapping captured stored-failure output columns to their
           original display value. JSON null and empty string remain distinct; configured
           meta.dbt_dqm.granularity determines which properties form unique_id.
       - name: failure_row_count
@@ -83,10 +82,23 @@ models:
       - name: identity_scheme_signature
         description: Versioned identity algorithm plus ordered grain, used for identity changes.
 
+      - name: review_verdict
+        description: Audited classification independent of workflow; new occurrences start unreviewed.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [UNREVIEWED, TRUE_POSITIVE, FALSE_POSITIVE]
+      - name: workflow_status_at_close
+        description: Workflow captured atomically from the target on closure, then immutable.
+      - name: test_priority
+        description: Optional business priority, refreshed on Active issues and frozen on archival.
+      - name: test_criticality
+        description: Optional string describing criticality.
+
   - name: dqm_current_issues
     description: >
       Public review view containing only Active occurrences. It exposes identity, failure context,
-      lifecycle timestamps, test tags, and the five editable annotation fields.
+      lifecycle timestamps, test tags, and the six editable annotation fields.
     columns:
       - name: occurrence_id
         description: Stable identifier of the active lifecycle occurrence.
@@ -121,7 +133,7 @@ models:
       - name: occurrence_id
         description: Occurrence whose annotation field was changed.
       - name: field_name
-        description: One of the five application-editable annotation fields.
+        description: One of the six application-editable annotation fields.
       - name: old_value
         description: Value present in the local synchronization base before editing.
       - name: new_value
@@ -134,3 +146,12 @@ models:
         description: Occurrence annotation version locked and read by the server before applying.
       - name: resulting_annotation_version
         description: Occurrence annotation version after the audited batch was applied.
+
+  - name: dqm_issue_timeline
+    description: Occurrence intervals with latest payload; not payload-version history.
+  - name: dqm_missed_issues
+    description: Known missed issues reported manually; no recall rate is inferred.
+  - name: dqm_test_health
+    description: Test health with explicit populations and rate denominators.
+  - name: dqm_area_health
+    description: Root-project models and sources; test totals overlap across direct dependencies.

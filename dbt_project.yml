@@ -1,5 +1,5 @@
 name: dbt_dqm
-version: 0.1.1
+version: 0.2.0
 config-version: 2
 require-dbt-version: [">=1.11.0", "<1.12.0"]
 
@@ -9,14 +9,27 @@ clean-targets: ["target", "dbt_packages", "logs"]
 
 on-run-end:
   - "{{ dbt_dqm.capture_test_results(results) }}"
+  - "{{ dbt_dqm.retention_hook() }}"
+
+on-run-start:
+  - "{{ dbt_dqm.empty_preflight() }}"
 
 models:
   dbt_dqm:
     +schema: "{{ var('dbt_dqm_schema', none) }}"
     dqm_reconcile:
       +pre-hook:
-        - "{{ dbt_dqm.ensure_capture_tables() }}"
-        - "{{ dbt_dqm.migrate_occurrence_schema() }}"
+        - "{{ dbt_dqm.reconcile_lock() }}"
+        - "{{ dbt_dqm.reconcile_pre() }}"
       +post-hook:
-        - "{{ dbt_dqm.record_schema_migration('001_identity_scheme_and_ordered_replay') }}"
-        - "{{ dbt_dqm.advance_reconciliation_state() }}"
+        - "{{ dbt_dqm.apply_reconciliation() }}"
+    dqm_annotation_changes:
+      +post-hook: "{{ dbt_dqm.app_table_finish('dqm_annotation_changes') }}"
+      +pre-hook:
+        - "{{ dbt_dqm.reconcile_lock() }}"
+        - "{{ dbt_dqm.app_table_setup() }}"
+    dqm_missed_issues:
+      +post-hook: "{{ dbt_dqm.app_table_finish('dqm_missed_issues') }}"
+      +pre-hook:
+        - "{{ dbt_dqm.reconcile_lock() }}"
+        - "{{ dbt_dqm.app_table_setup() }}"

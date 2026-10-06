@@ -1,7 +1,3 @@
--- Reviewer-facing projection containing only currently active issue occurrences.
--- Lifecycle history remains available through dqm_all_issues.
+-- depends_on: {{ ref('dqm_reconcile') }}
 {{ config(materialized='view') }}
-
-select *
-from {{ ref('dqm_reconcile') }}
-where record_status = 'Active'
+{{ dbt_dqm.issues_with_history(true) }}
