@@ -99,18 +99,16 @@ def owner_label(value: Any) -> str:
 
 def owner_editor_options(values: Any) -> list[str]:
     """Return distinct existing owners plus an explicit choice that clears ownership."""
-    owners = {
-        owner
-        for value in values
-        if (owner := owner_label(value)) != "Unassigned"
-    }
+    owners = {owner for value in values if (owner := owner_label(value)) != "Unassigned"}
     return [OWNER_UNASSIGNED_OPTION, *sorted(owners, key=lambda owner: (owner.casefold(), owner))]
 
 
 def owner_value_from_selection(value: Any) -> str | None:
     """Convert the editor's unassigned choice to the nullable warehouse annotation."""
-    if value is None or value == OWNER_UNASSIGNED_OPTION or (
-        isinstance(value, float) and math.isnan(value)
+    if (
+        value is None
+        or value == OWNER_UNASSIGNED_OPTION
+        or (isinstance(value, float) and math.isnan(value))
     ):
         return None
     normalized = str(value).strip()
@@ -190,3 +188,22 @@ def record_fields_html(
       {rows or f'<div class="dqm-field-row"><div class="dqm-field-name">⚠</div><div class="dqm-field-value">{escape(empty_message)}</div></div>'}
     </div>
     """
+
+
+REVIEW_VERDICTS = ("UNREVIEWED", "TRUE_POSITIVE", "FALSE_POSITIVE")
+
+
+def tag_list(value: Any) -> list[str]:
+    """Accept the portable JSON tag array and ignore malformed optional metadata."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return []
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(tag.strip() for tag in value if isinstance(tag, str) and tag.strip()))
+
+
+def priority_rank(value: Any) -> int:
+    return {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(str(value).lower(), 4)

@@ -10,6 +10,7 @@ from typing import Any
 
 EDITABLE_FIELDS = (
     "workflow_status",
+    "review_verdict",
     "call_to_action",
     "ticket_url",
     "notes",
@@ -79,6 +80,9 @@ class Workspace:
                   base_annotation_version integer not null default 0,
                   primary key (occurrence_id, field_name)
                 );
+                create table if not exists health_snapshot (
+                  kind text primary key, payload_json text not null, synced_at text not null
+                );
                 create table if not exists metadata (
                   key text primary key,
                   value text
@@ -100,10 +104,17 @@ class Workspace:
 
     def replace_snapshot(self, rows: Iterable[dict[str, Any]]) -> None:
         now = datetime.now(UTC).isoformat()
-        records = [
-            (str(row["occurrence_id"]), json.dumps(row, default=str), now) for row in rows
-        ]
+        records = [(str(row["occurrence_id"]), json.dumps(row, default=str), now) for row in rows]
         with self.connect() as connection:
+            incoming = {record[0] for record in records}
+            retained = connection.execute(
+                "select distinct snapshot.* from snapshot join pending_changes using(occurrence_id)"
+            ).fetchall()
+            for row in retained:
+                if row["occurrence_id"] not in incoming:
+                    payload = json.loads(row["payload_json"])
+                    payload["_outside_cache"] = True
+                    records.append((row["occurrence_id"], json.dumps(payload), now))
             connection.execute("delete from snapshot")
             connection.executemany(
                 "insert into snapshot(occurrence_id, payload_json, synced_at) values (?, ?, ?)",
@@ -114,6 +125,22 @@ class Workspace:
                 "on conflict(key) do update set value=excluded.value",
                 (now,),
             )
+
+    def replace_health(self, health: dict[str, Any]) -> None:
+        now = datetime.now(UTC).isoformat()
+        with self.connect() as connection:
+            connection.execute("delete from health_snapshot")
+            connection.executemany(
+                "insert into health_snapshot(kind,payload_json,synced_at) values (?,?,?)",
+                [(kind, json.dumps(value, default=str), now) for kind, value in health.items()],
+            )
+
+    def health_rows(self) -> dict[str, Any]:
+        with self.connect() as connection:
+            return {
+                row["kind"]: json.loads(row["payload_json"])
+                for row in connection.execute("select * from health_snapshot")
+            }
 
     def rows(self) -> list[dict[str, Any]]:
         with self.connect() as connection:
@@ -131,6 +158,12 @@ class Workspace:
         if field_name not in EDITABLE_FIELDS:
             raise ValueError(f"Field is not editable: {field_name}")
         normalized = None if new_value is None else str(new_value)
+        if field_name == "review_verdict" and normalized not in {
+            "UNREVIEWED",
+            "TRUE_POSITIVE",
+            "FALSE_POSITIVE",
+        }:
+            raise ValueError("Invalid review verdict")
         now = datetime.now(UTC).isoformat()
         connection = self._connect_immediate()
         try:
@@ -212,9 +245,10 @@ class Workspace:
 
     def pending(self) -> list[Patch]:
         with self.connect() as connection:
-            return [Patch(**dict(row)) for row in connection.execute(
-                "select * from pending_changes order by changed_at"
-            )]
+            return [
+                Patch(**dict(row))
+                for row in connection.execute("select * from pending_changes order by changed_at")
+            ]
 
     def clear_applied(self, patches: Iterable[Patch]) -> None:
         with self.connect() as connection:

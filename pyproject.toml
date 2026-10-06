@@ -1,6 +1,6 @@
 [project]
 name = "dbt-dqm"
-version = "0.1.1"
+version = "0.2.0"
 description = "Persistent dbt test issue tracking and a local review application"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"

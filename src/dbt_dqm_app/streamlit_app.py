@@ -3,13 +3,16 @@ from __future__ import annotations
 import math
 import os
 import time
+import uuid
 from concurrent.futures import Future, ProcessPoolExecutor
+from datetime import UTC, datetime
 
 import pandas as pd
 import streamlit as st
 
 from dbt_dqm_app.config import load_config
 from dbt_dqm_app.display import (
+    REVIEW_VERDICTS,
     WORKFLOW_STATUSES,
     calendar_date,
     column_value_pairs,
@@ -18,12 +21,20 @@ from dbt_dqm_app.display import (
     owner_label,
     owner_value_from_selection,
     paired_display,
+    priority_rank,
     record_fields_html,
+    tag_list,
     workflow_status_help,
     workflow_status_options,
 )
 from dbt_dqm_app.store import EDITABLE_FIELDS, Workspace
-from dbt_dqm_app.warehouse import apply_worker, sync_worker
+from dbt_dqm_app.warehouse import (
+    MISSED_ROOT_CAUSES,
+    apply_worker,
+    insert_missed_issue,
+    manifest_nodes,
+    sync_worker,
+)
 
 PAGE_SIZE_OPTIONS = [25, 50, 100, 200]
 
@@ -87,15 +98,18 @@ def run_app() -> None:
     if job is not None and job.done():
         try:
             if st.session_state.job_kind == "apply":
-                batch_id, rows = job.result()
-                workspace.replace_snapshot(rows)
+                batch_id, snapshot = job.result()
                 workspace.clear_applied(st.session_state.job_patches)
+                workspace.replace_snapshot(snapshot["issues"])
+                workspace.replace_health(snapshot["health"])
                 st.session_state.job_notice = (
                     "success",
                     f"Applied batch {batch_id} and synchronized local data.",
                 )
             else:
-                workspace.replace_snapshot(job.result())
+                snapshot = job.result()
+                workspace.replace_snapshot(snapshot["issues"])
+                workspace.replace_health(snapshot["health"])
                 st.session_state.job_notice = ("success", "Local data synchronized.")
         except Exception as error:  # noqa: BLE001 - patches must survive worker failures.
             st.session_state.job_notice = ("error", f"Background job failed: {error}")
@@ -124,7 +138,9 @@ def run_app() -> None:
         with col_apply:
             if st.button(
                 "Apply and sync",
-                disabled=busy or not pending or (bool(drifted) and not st.session_state.allow_drift_overwrite),
+                disabled=busy
+                or not pending
+                or (bool(drifted) and not st.session_state.allow_drift_overwrite),
                 type="primary",
             ):
                 frozen = list(pending)
@@ -172,10 +188,20 @@ def run_app() -> None:
         time.sleep(0.5)
         st.rerun()
 
+    issues_tab, health_tab, missed_tab = st.tabs(["Issues", "Health", "Report missed issue"])
+    with issues_tab:
+        _render_issues(workspace, pending)
+    with health_tab:
+        _render_health(workspace)
+    with missed_tab:
+        _render_missed_form(config)
+
+
+def _render_issues(workspace, pending) -> None:
     rows = workspace.rows()
     if not rows:
         st.info("No local data. Select Sync after building the dbt-dqm package models.")
-        st.stop()
+        return
 
     frame = pd.DataFrame(rows)
     required_columns = {
@@ -218,7 +244,13 @@ def run_app() -> None:
     blocked_count = int(
         ((frame["record_status"] == "Active") & (frame["workflow_status"] == "BLOCKED")).sum()
     )
-    metric_active, metric_new, metric_blocked, metric_local = st.columns(4)
+    metric_active, metric_new, metric_blocked, metric_local, metric_recurring = st.columns(5)
+    metric_recurring.metric(
+        "Recurring",
+        sum(
+            row.get("record_status") == "Active" and bool(row.get("is_recurrence")) for row in rows
+        ),
+    )
     metric_active.metric("Active issues", active_count)
     metric_new.metric("New", new_count)
     metric_blocked.metric("Blocked", blocked_count)
@@ -239,9 +271,7 @@ def run_app() -> None:
         [0.9, 1.2, 1.45, 1.65, 2]
     )
     with lifecycle_col:
-        lifecycle = st.multiselect(
-            "Lifecycle", lifecycle_options, default=lifecycle_default
-        )
+        lifecycle = st.multiselect("Lifecycle", lifecycle_options, default=lifecycle_default)
     with status_col:
         statuses = st.multiselect("Workflow status", status_options, default=status_options)
     with owner_col:
@@ -282,7 +312,30 @@ def run_app() -> None:
             st.session_state.applied_search = search_draft
         search = st.session_state.get("applied_search", "")
 
+    priority_col, tags_col, recurring_col = st.columns(3)
+    with priority_col:
+        priorities = st.multiselect("Priority", ["critical", "high", "medium", "low", "unset"])
+    with tags_col:
+        all_tags = sorted({tag for row in rows for tag in tag_list(row.get("test_tags"))})
+        tags = st.multiselect("Tags", all_tags)
+    with recurring_col:
+        recurring_only = st.checkbox("Recurrences only")
+    pending_only = st.checkbox("Pending edits only", help="Includes edits hidden by other filters.")
     visible = frame[frame["record_status"].isin(lifecycle)] if lifecycle else frame
+    if priorities:
+        visible = visible[
+            visible.get("test_priority", pd.Series(index=visible.index, dtype=object))
+            .fillna("unset")
+            .isin(priorities)
+        ]
+    if tags:
+        visible = visible[
+            visible["test_tags"].map(lambda value: bool(set(tag_list(value)) & set(tags)))
+        ]
+    if recurring_only:
+        visible = visible[
+            visible.get("is_recurrence", pd.Series(False, index=visible.index)).fillna(False)
+        ]
     if statuses:
         visible = visible[visible["workflow_status"].isin(statuses)]
     if owners:
@@ -306,12 +359,17 @@ def run_app() -> None:
         "ACCEPTED_RISK": 5,
         "FALSE_POSITIVE": 6,
     }
+    if pending_only:
+        visible = frame[frame["_dirty"]]
     visible = visible.copy()
+    visible["_priority"] = visible.get(
+        "test_priority", pd.Series(index=visible.index, dtype=object)
+    ).map(priority_rank)
     visible["_status_priority"] = visible["workflow_status"].map(priority).fillna(99)
     visible["_created_sort"] = pd.to_datetime(visible.get("first_seen_at"), errors="coerce")
     visible = visible.sort_values(
-        ["_dirty", "_status_priority", "_created_sort"],
-        ascending=[False, True, True],
+        ["_dirty", "_priority", "_status_priority", "_created_sort", "occurrence_id"],
+        ascending=[False, True, True, True, True],
         na_position="last",
     )
 
@@ -322,9 +380,7 @@ def run_app() -> None:
     total_visible = len(visible)
     page_size_col, page_number_col, page_caption_col = st.columns([1, 1, 3])
     with page_size_col:
-        page_size = st.selectbox(
-            "Per page", PAGE_SIZE_OPTIONS, index=0, key="dqm-page-size"
-        )
+        page_size = st.selectbox("Per page", PAGE_SIZE_OPTIONS, index=0, key="dqm-page-size")
     total_pages = max(1, math.ceil(total_visible / page_size))
     page_key = "dqm-page-number"
     if page_key in st.session_state and st.session_state[page_key] > total_pages:
@@ -379,9 +435,47 @@ def run_app() -> None:
                     key=f"{widget_prefix}-workflow_status",
                     help=workflow_status_help(),
                 )
+            if row.get("_outside_cache") is True:
+                st.warning(
+                    "This pending edit is outside the synchronized issue window. Synchronize or discard it before applying."
+                )
             st.caption(
                 f"Created: {format_timestamp(row.get('first_seen_at'))} · "
                 f"User updated: {format_timestamp(row.get('annotation_updated_at'), 'Never')}"
+            )
+
+            badges = tag_list(row.get("test_tags"))
+            for field, label in (
+                ("test_priority", "Priority"),
+                ("test_criticality", "Criticality"),
+            ):
+                if pd.notna(row.get(field)) and row.get(field):
+                    badges.insert(0, f"{label}: {row[field]}")
+            if badges:
+                st.badge(" · ".join(badges))
+            if row.get("has_previous_occurrence"):
+                banner = (
+                    f"Previous occurrence closed {format_timestamp(row.get('previous_archived_at'))} "
+                    f"({row.get('previous_close_reason')}); workflow at close: "
+                    f"{row.get('previous_workflow_status_at_close') or 'unknown'}."
+                )
+                if row.get("is_potential_regression"):
+                    st.warning("Potential regression. " + banner)
+                else:
+                    st.info(
+                        ("Recurrence. " if row.get("is_recurrence") else "Previous history. ")
+                        + banner
+                    )
+                with st.expander("Previous investigation", key=f"previous-{occurrence_id}"):
+                    st.write(row.get("previous_ticket_url") or "No previous ticket")
+                    st.write(row.get("previous_notes") or "No previous notes")
+            current_verdict = row.get("review_verdict") or "UNREVIEWED"
+            review_verdict = st.selectbox(
+                "Review verdict",
+                REVIEW_VERDICTS,
+                index=REVIEW_VERDICTS.index(current_verdict),
+                key=f"{widget_prefix}-review_verdict",
+                help="Classify whether this occurrence is a real issue, independently of its workflow status.",
             )
 
             record_pairs = column_value_pairs(row.get("record_values_json"))
@@ -399,9 +493,7 @@ def run_app() -> None:
                 )
                 call_to_action = st.text_area(
                     "Call to action",
-                    value=""
-                    if pd.isna(row.get("call_to_action"))
-                    else str(row["call_to_action"]),
+                    value="" if pd.isna(row.get("call_to_action")) else str(row["call_to_action"]),
                     key=f"{widget_prefix}-call_to_action",
                     height=90,
                 )
@@ -420,6 +512,7 @@ def run_app() -> None:
 
             edited_values = {
                 "workflow_status": workflow_status,
+                "review_verdict": review_verdict,
                 "poc_responsible": poc_responsible,
                 "ticket_url": ticket_url,
                 "call_to_action": call_to_action,
@@ -438,6 +531,95 @@ def run_app() -> None:
 
     if workspace.pending():
         st.warning("There are unapplied local changes. Apply them before closing the application.")
+
+
+def _render_health(workspace) -> None:
+    health = workspace.health_rows()
+    if not health:
+        st.info("Synchronize after building the health views.")
+        return
+    st.caption(f"Last health sync: {format_timestamp(health.get('synced_at'))}")
+    st.caption(
+        "Review: occurrences created in the reporting window. Resolution: Passed closures in the window. Backlog: current Active issues."
+    )
+    for kind, label in (("tests", "Test health"), ("areas", "Area health")):
+        st.subheader(label)
+        frame = pd.DataFrame(health.get(kind, []))
+        if frame.empty:
+            st.info("No tracked data in this population.")
+        else:
+            if "attention_flags" in frame:
+                frame["_flags"] = frame["attention_flags"].map(
+                    lambda value: len([v for v in str(value).split(",") if v])
+                )
+                frame = frame.sort_values("_flags", ascending=False).drop(columns="_flags")
+            st.dataframe(frame, hide_index=True)
+    st.caption(
+        "Area totals overlap: a test belongs to each direct model/source dependency. Known misses are reported observations, not a false-negative rate."
+    )
+
+
+def _render_missed_form(config) -> None:
+    try:
+        nodes = manifest_nodes(config)
+    except (OSError, ValueError):
+        nodes = {}
+    areas = {
+        id: node
+        for id, node in nodes.items()
+        if node.get("resource_type") in ("model", "source")
+        and node.get("package_name") != "dbt_dqm"
+    }
+    tests = {
+        id: node
+        for id, node in nodes.items()
+        if node.get("resource_type") == "test" and node.get("package_name") != "dbt_dqm"
+    }
+    if "missed_submission_id" not in st.session_state:
+        st.session_state.missed_submission_id = str(uuid.uuid4())
+    with st.form("missed-issue"):
+        source = st.selectbox(
+            "Affected model or source",
+            [None, *sorted(areas)],
+            format_func=lambda id: "Unmapped area" if id is None else id,
+        )
+        area_label = st.text_input("Area name (required for an unmapped area)")
+        test = st.selectbox(
+            "Test that should have detected it",
+            [None, *sorted(tests)],
+            format_func=lambda id: id or "Unknown / no test",
+        )
+        discovered = st.date_input("Discovered on")
+        description = st.text_area("Description")
+        evidence = st.text_input("Evidence URL")
+        priority = st.selectbox(
+            "Priority",
+            [None, "critical", "high", "medium", "low"],
+            format_func=lambda v: v or "Unset",
+        )
+        detection = st.text_input("How it was detected")
+        root_cause = st.selectbox("Root cause", MISSED_ROOT_CAUSES)
+        submitted = st.form_submit_button("Report missed issue")
+    if submitted:
+        issue = {
+            "missed_issue_id": st.session_state.missed_submission_id,
+            "discovered_at": datetime.combine(discovered, datetime.min.time(), tzinfo=UTC),
+            "source_unique_id": source,
+            "area_label": area_label or None,
+            "test_unique_id": test,
+            "description": description,
+            "evidence_url": evidence or None,
+            "priority": priority,
+            "detection_method": detection or None,
+            "root_cause": root_cause,
+        }
+        try:
+            insert_missed_issue(config, issue)
+        except Exception as error:  # noqa: BLE001 - retain submission ID for safe retry.
+            st.error(f"Report could not be confirmed; retry uses the same ID. {error}")
+        else:
+            st.success("Missed issue recorded. Synchronize to refresh health reporting.")
+            st.session_state.missed_submission_id = str(uuid.uuid4())
 
 
 if __name__ == "__main__":

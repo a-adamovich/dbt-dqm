@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import getpass
+import hashlib
 import json
 import subprocess
 import sys
 import uuid
 from collections.abc import Iterable
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import psycopg2
+from google.api_core.exceptions import Conflict, NotFound
 from google.cloud import bigquery
 from google.oauth2 import service_account
 from psycopg2.extras import RealDictCursor
@@ -52,8 +55,7 @@ def client_for(config: AppConfig) -> bigquery.Client:
 def _relation_parts(config: AppConfig, name: str) -> tuple[str | None, str, str]:
     manifest_path = (config.target_path or (config.project_dir / "target")) / "manifest.json"
     if manifest_path.exists():
-        manifest = json.loads(manifest_path.read_text())
-        nodes = manifest.get("nodes", {})
+        nodes = manifest_nodes(config)
         node = nodes.get(f"model.dbt_dqm.{name}")
         if node is None:
             node = next(
@@ -68,6 +70,9 @@ def _relation_parts(config: AppConfig, name: str) -> tuple[str | None, str, str]
             )
         if node:
             return node.get("database"), node["schema"], node.get("alias") or name
+        reconcile = nodes.get("model.dbt_dqm.dqm_reconcile")
+        if reconcile and name.startswith("dqm_"):
+            return reconcile.get("database"), reconcile["schema"], name
     return config.project_id, config.dataset, name
 
 
@@ -157,6 +162,12 @@ def _batch_id(patches: Iterable[Patch]) -> str:
 
 def apply_patches(config: AppConfig, patches: Iterable[Patch]) -> str:
     patches = list(patches)
+    if any(
+        patch.field_name == "review_verdict"
+        and patch.new_value not in {"UNREVIEWED", "TRUE_POSITIVE", "FALSE_POSITIVE"}
+        for patch in patches
+    ):
+        raise ValueError("Invalid review verdict")
     if config.adapter_type == "postgres":
         return _apply_postgres_patches(config, patches)
     return _apply_bigquery_patches(config, patches)
@@ -383,12 +394,120 @@ def _apply_postgres_patches(config: AppConfig, patches: list[Patch]) -> str:
     return batch_id
 
 
-def sync_worker(config: AppConfig) -> list[dict[str, Any]]:
+def sync_worker(config: AppConfig) -> dict[str, Any]:
     validate_dbt(config)
-    return fetch_issues(config)
+    return {"issues": fetch_issues(config), "health": fetch_health(config)}
 
 
-def apply_worker(config: AppConfig, patches: list[Patch]) -> tuple[str, list[dict[str, Any]]]:
+def apply_worker(config: AppConfig, patches: list[Patch]) -> tuple[str, dict[str, Any]]:
     validate_dbt(config)
     batch_id = apply_patches(config, patches)
-    return batch_id, fetch_issues(config)
+    return batch_id, {"issues": fetch_issues(config), "health": fetch_health(config)}
+
+
+MISSED_ROOT_CAUSES = ("no_test", "test_logic_gap", "threshold_too_loose", "test_not_run", "other")
+MISSED_COLUMNS = (
+    "missed_issue_id",
+    "discovered_at",
+    "reported_at",
+    "reporter",
+    "source_unique_id",
+    "area_label",
+    "test_unique_id",
+    "description",
+    "evidence_url",
+    "priority",
+    "detection_method",
+    "root_cause",
+)
+
+
+def manifest_nodes(config: AppConfig) -> dict[str, dict[str, Any]]:
+    path = (config.target_path or (config.project_dir / "target")) / "manifest.json"
+    manifest = json.loads(path.read_text())
+    return {**manifest.get("nodes", {}), **manifest.get("sources", {})}
+
+
+def fetch_health(config: AppConfig) -> dict[str, Any]:
+    health: dict[str, Any] = {"synced_at": datetime.now(UTC).isoformat()}
+    for kind, table in (("tests", "dqm_test_health"), ("areas", "dqm_area_health")):
+        query = f"select * from {_table(config, table)}"
+        if config.adapter_type == "bigquery":
+            health[kind] = [dict(row.items()) for row in client_for(config).query(query).result()]
+        else:
+            with (
+                _postgres_connection(config) as connection,
+                connection.cursor(cursor_factory=RealDictCursor) as cursor,
+            ):
+                cursor.execute(query)
+                health[kind] = [dict(row) for row in cursor.fetchall()]
+    return health
+
+
+def insert_missed_issue(config: AppConfig, issue: dict[str, Any]) -> str:
+    """Reuse the caller's submission ID; a retry never creates another report."""
+    if not issue.get("missed_issue_id") or not str(issue.get("description") or "").strip():
+        raise ValueError("A stable submission ID and description are required")
+    if not issue.get("source_unique_id") and not str(issue.get("area_label") or "").strip():
+        raise ValueError("Select a source or describe an unmapped area")
+    if issue.get("root_cause") not in MISSED_ROOT_CAUSES:
+        raise ValueError("Invalid root cause")
+    if issue.get("priority") not in (None, "critical", "high", "medium", "low"):
+        raise ValueError("Invalid priority")
+    values = {column: issue.get(column) for column in MISSED_COLUMNS}
+    values["reporter"] = values["reporter"] or getpass.getuser()
+    values["reported_at"] = values["reported_at"] or datetime.now(UTC)
+    values["discovered_at"] = values["discovered_at"] or values["reported_at"]
+    table = _table(config, "dqm_missed_issues")
+    if config.adapter_type == "bigquery":
+        params = [
+            bigquery.ScalarQueryParameter(
+                column,
+                "TIMESTAMP" if column in ("reported_at", "discovered_at") else "STRING",
+                values[column],
+            )
+            for column in MISSED_COLUMNS
+        ]
+        select = ",".join(f"@{column} as {column}" for column in MISSED_COLUMNS)
+        _insert_missed_bigquery(
+            config,
+            table,
+            values["missed_issue_id"],
+            f"merge {table} target using (select {select}) source "
+            "on target.missed_issue_id=source.missed_issue_id when not matched then insert "
+            f"({','.join(MISSED_COLUMNS)}) values ({','.join('source.' + c for c in MISSED_COLUMNS)})",
+            bigquery.QueryJobConfig(query_parameters=params),
+        )
+    else:
+        with _postgres_connection(config) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                f"insert into {table} ({','.join(MISSED_COLUMNS)}) "
+                f"values ({','.join(['%s'] * len(MISSED_COLUMNS))}) "
+                "on conflict(missed_issue_id) do nothing",
+                [values[column] for column in MISSED_COLUMNS],
+            )
+    return str(values["missed_issue_id"])
+
+
+def _insert_missed_bigquery(config, table, submission_id, query, job_config) -> None:
+    """Deterministic job IDs also deduplicate overlapping retries of an uncertain insert.
+
+    Confirmed failed jobs get a new attempt number; successful/in-flight jobs are reused.
+    MERGE still protects ordinary retries after BigQuery's job metadata expires.
+    """
+    client = client_for(config)
+    identity = hashlib.sha256(f"{table}\0{submission_id}".encode()).hexdigest()
+    for attempt in range(100):
+        job_id = f"dqm_missed_{identity}_{attempt}"
+        try:
+            job = client.get_job(job_id, location=config.location)
+        except NotFound:
+            try:
+                job = client.query(query, job_config=job_config, job_id=job_id)
+            except Conflict:
+                job = client.get_job(job_id, location=config.location)
+        if job.state == "DONE" and job.error_result:
+            continue
+        job.result()
+        return
+    raise RuntimeError("Too many failed submissions for this report; resolve the warehouse error.")
