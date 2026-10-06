@@ -154,6 +154,11 @@ jobs:
           uv run dbt test --select assert_scenario_outcomes --vars '{demo_scenario: recurrence}'
           uv run dbt run-operation assert_postgres_query_plans
 
+      - name: Transactional acceptance and application interfaces
+        run: uv run pytest -q integration_tests/acceptance/test_postgres.py
+        env:
+          DBT_DQM_TEST_DSN: host=localhost port=5432 dbname=dbt_dqm_ci user=postgres password=dbtdqm
+
   bigquery-compile:
     runs-on: ubuntu-latest
     steps:
@@ -168,7 +173,7 @@ jobs:
         run: |
           mkdir -p ~/.dbt
           cat > ~/.dbt/profiles.yml <<'PROFILES'
-          dbt_dqm_demo_bigquery:
+          dbt_dqm_demo:
             target: ci
             outputs:
               ci:
@@ -184,4 +189,4 @@ jobs:
         run: |
           uv run dbt deps
           uv run dbt parse
-          uv run dbt compile --no-introspect
+          uv run python ../../scripts/compile_bigquery.py

@@ -8,6 +8,7 @@
     meta={
       'dbt_dqm': {
         'granularity': ['customer_id', 'order_id'],
+        'owner_column': 'assigned_owner',
         'capture_mode': 'allowlist',
         'context_columns': ['amount', 'currency', 'reason'],
         'poc_responsible': 'finance_data_owner',
@@ -17,6 +18,7 @@
   )
 }}
 
-select customer_id, order_id, amount, currency, reason
+select customer_id, order_id, amount, currency, reason,
+  cast(null as {{ dbt.type_string() }}) as assigned_owner
 from {{ ref('demo_records') }}
 where issue_family = 'order_amount'

@@ -10,8 +10,15 @@ permissions:
 
 jobs:
   lifecycle:
+    concurrency:
+      group: dbt-dqm-${{ vars.DBT_DQM_BIGQUERY_PROJECT }}-dbt_dqm_scheduled_ci
+      cancel-in-progress: false
     if: vars.BIGQUERY_LIFECYCLE_ENABLED == 'true'
     runs-on: ubuntu-latest
+    env:
+      DBT_DQM_BIGQUERY_PROJECT: ${{ vars.DBT_DQM_BIGQUERY_PROJECT }}
+      DBT_DQM_BIGQUERY_TEST_PROJECT: ${{ vars.DBT_DQM_BIGQUERY_PROJECT }}
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/dbt-dqm-ci-key.json
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install uv
@@ -26,17 +33,24 @@ jobs:
           DBT_DQM_BIGQUERY_PROJECT: ${{ vars.DBT_DQM_BIGQUERY_PROJECT }}
         run: |
           mkdir -p ~/.dbt
+          python - <<'PYKEY'
+          import os
+          from pathlib import Path
+          path = Path('/tmp/dbt-dqm-ci-key.json')
+          path.write_text(os.environ['DBT_DQM_BIGQUERY_KEYFILE_JSON'])
+          path.chmod(0o600)
+          PYKEY
           cat > ~/.dbt/profiles.yml <<'PROFILES'
-          dbt_dqm_demo_bigquery:
+          dbt_dqm_demo:
             target: ci
             outputs:
               ci:
                 type: bigquery
-                method: service-account-json
+                method: service-account
                 project: "{{ env_var('DBT_DQM_BIGQUERY_PROJECT') }}"
                 dataset: dbt_dqm_scheduled_ci
                 location: US
-                keyfile_json: "{{ env_var('DBT_DQM_BIGQUERY_KEYFILE_JSON') | as_native }}"
+                keyfile: /tmp/dbt-dqm-ci-key.json
                 threads: 4
           PROFILES
       - name: Full credentialed lifecycle
@@ -53,3 +67,6 @@ jobs:
             uv run dbt build --select package:dbt_dqm --vars "{demo_scenario: $scenario}"
             uv run dbt test --select assert_scenario_outcomes --vars "{demo_scenario: $scenario}"
           done
+
+      - name: Credentialed transactional release gate
+        run: uv run pytest -q integration_tests/acceptance/test_bigquery.py

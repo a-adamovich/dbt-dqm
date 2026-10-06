@@ -11,8 +11,19 @@
   {% endif %}
 
   {% for identifier, relation_type in [
+    ('dqm_area_health', 'view'),
+    ('dqm_test_health', 'view'),
+    ('dqm_issue_timeline', 'view'),
     ('dqm_current_issues', 'view'),
     ('dqm_all_issues', 'view'),
+    ('dqm_reconcile', 'view'),
+    ('dqm_missed_issues', 'table'),
+    ('dqm_issue_events', 'table'),
+    ('dqm_reconciliation_inputs', 'table'),
+    ('dqm_reconciliation_receipts', 'table'),
+    ('dqm_reconciliation_runs', 'table'),
+    ('dqm_reconciliation_control', 'table'),
+    ('dqm_install', 'table'),
     ('dqm_annotation_changes', 'table'),
     ('dqm_issue_occurrences', 'table'),
     ('dqm_test_executions', 'table'),

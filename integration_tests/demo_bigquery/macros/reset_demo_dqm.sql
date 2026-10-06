@@ -11,6 +11,17 @@
   {% endif %}
 
   {% set statement %}
+    drop view if exists `{{ target.database }}.{{ target.schema }}.dqm_area_health`;
+    drop view if exists `{{ target.database }}.{{ target.schema }}.dqm_test_health`;
+    drop view if exists `{{ target.database }}.{{ target.schema }}.dqm_issue_timeline`;
+    drop view if exists `{{ target.database }}.{{ target.schema }}.dqm_reconcile`;
+    drop table if exists `{{ target.database }}.{{ target.schema }}.dqm_missed_issues`;
+    drop table if exists `{{ target.database }}.{{ target.schema }}.dqm_issue_events`;
+    drop table if exists `{{ target.database }}.{{ target.schema }}.dqm_reconciliation_inputs`;
+    drop table if exists `{{ target.database }}.{{ target.schema }}.dqm_reconciliation_receipts`;
+    drop table if exists `{{ target.database }}.{{ target.schema }}.dqm_reconciliation_runs`;
+    drop table if exists `{{ target.database }}.{{ target.schema }}.dqm_reconciliation_control`;
+    drop table if exists `{{ target.database }}.{{ target.schema }}.dqm_install`;
     drop view if exists `{{ target.database }}.{{ target.schema }}.dqm_current_issues`;
     drop view if exists `{{ target.database }}.{{ target.schema }}.dqm_all_issues`;
     drop table if exists `{{ target.database }}.{{ target.schema }}.dqm_annotation_changes`;

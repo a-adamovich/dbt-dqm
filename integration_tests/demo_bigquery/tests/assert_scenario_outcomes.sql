@@ -82,4 +82,4 @@ mismatches as (
      or expected.max_occurrence_number is distinct from actual.max_occurrence_number
 )
 
-select * from mismatches
+select * from mismatches {% if dbt_dqm.empty_mode() %}where false{% endif %}
