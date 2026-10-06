@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 EDITABLE_FIELDS = (
-    "test_status",
+    "workflow_status",
     "call_to_action",
     "ticket_url",
     "notes",
@@ -25,17 +25,26 @@ class Patch:
     new_value: str | None
     version: int
     changed_at: str
+    base_annotation_version: int = 0
 
 
 class Workspace:
     def __init__(self, path: str | Path):
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.path.parent.chmod(0o700)
         self._initialize()
+        self._secure_files()
+
+    def _secure_files(self) -> None:
+        for path in (self.path, Path(f"{self.path}-wal"), Path(f"{self.path}-shm")):
+            if path.exists():
+                path.chmod(0o600)
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
+        self._secure_files()
         return connection
 
     def _connect_immediate(self) -> sqlite3.Connection:
@@ -47,6 +56,7 @@ class Workspace:
         and the second write would silently lose the first's increment."""
         connection = sqlite3.connect(self.path, isolation_level=None)
         connection.row_factory = sqlite3.Row
+        self._secure_files()
         return connection
 
     def _initialize(self) -> None:
@@ -66,6 +76,7 @@ class Workspace:
                   new_value text,
                   version integer not null,
                   changed_at text not null,
+                  base_annotation_version integer not null default 0,
                   primary key (occurrence_id, field_name)
                 );
                 create table if not exists metadata (
@@ -73,6 +84,18 @@ class Workspace:
                   value text
                 );
                 """
+            )
+            columns = {
+                row["name"] for row in connection.execute("pragma table_info(pending_changes)")
+            }
+            if "base_annotation_version" not in columns:
+                connection.execute(
+                    "alter table pending_changes add column "
+                    "base_annotation_version integer not null default 0"
+                )
+            connection.execute(
+                "update pending_changes set field_name='workflow_status' "
+                "where field_name='test_status'"
             )
 
     def replace_snapshot(self, rows: Iterable[dict[str, Any]]) -> None:
@@ -117,8 +140,10 @@ class Workspace:
             ).fetchone()
             if row is None:
                 raise KeyError(occurrence_id)
-            base = json.loads(row["payload_json"]).get(field_name)
+            snapshot = json.loads(row["payload_json"])
+            base = snapshot.get(field_name)
             base = None if base is None else str(base)
+            base_annotation_version = int(snapshot.get("annotation_version") or 0)
             if normalized == base:
                 connection.execute(
                     "delete from pending_changes where occurrence_id=? and field_name=?",
@@ -134,14 +159,23 @@ class Workspace:
             connection.execute(
                 """
                 insert into pending_changes
-                  (occurrence_id, field_name, old_value, new_value, version, changed_at)
-                values (?, ?, ?, ?, ?, ?)
+                  (occurrence_id, field_name, old_value, new_value, version, changed_at,
+                   base_annotation_version)
+                values (?, ?, ?, ?, ?, ?, ?)
                 on conflict(occurrence_id, field_name) do update set
                   new_value=excluded.new_value,
                   version=excluded.version,
                   changed_at=excluded.changed_at
                 """,
-                (occurrence_id, field_name, base, normalized, version, now),
+                (
+                    occurrence_id,
+                    field_name,
+                    base,
+                    normalized,
+                    version,
+                    now,
+                    base_annotation_version,
+                ),
             )
             connection.commit()
         except BaseException:
@@ -168,7 +202,11 @@ class Workspace:
                     continue
                 current = snapshot.get(patch.field_name)
                 current = None if current is None else str(current)
-                if current != patch.old_value:
+                current_annotation_version = int(snapshot.get("annotation_version") or 0)
+                if (
+                    current != patch.old_value
+                    or current_annotation_version != patch.base_annotation_version
+                ):
                     drifted.append(patch)
         return drifted
 
@@ -184,6 +222,41 @@ class Workspace:
                 "delete from pending_changes where occurrence_id=? and field_name=? and version=?",
                 [(p.occurrence_id, p.field_name, p.version) for p in patches],
             )
+
+    def discard_patches(self, patches: Iterable[Patch] | None = None) -> None:
+        with self.connect() as connection:
+            if patches is None:
+                connection.execute("delete from pending_changes")
+            else:
+                connection.executemany(
+                    "delete from pending_changes where occurrence_id=? and field_name=? and version=?",
+                    [(p.occurrence_id, p.field_name, p.version) for p in patches],
+                )
+
+    def rebase_patches(self, patches: Iterable[Patch]) -> None:
+        """Explicit local-wins choice: move selected patches onto the latest synced version."""
+        with self.connect() as connection:
+            for patch in patches:
+                row = connection.execute(
+                    "select payload_json from snapshot where occurrence_id=?",
+                    (patch.occurrence_id,),
+                ).fetchone()
+                if row is None:
+                    continue
+                snapshot = json.loads(row["payload_json"])
+                current = snapshot.get(patch.field_name)
+                current = None if current is None else str(current)
+                connection.execute(
+                    "update pending_changes set old_value=?, base_annotation_version=? "
+                    "where occurrence_id=? and field_name=? and version=?",
+                    (
+                        current,
+                        int(snapshot.get("annotation_version") or 0),
+                        patch.occurrence_id,
+                        patch.field_name,
+                        patch.version,
+                    ),
+                )
 
     def last_sync(self) -> str | None:
         with self.connect() as connection:

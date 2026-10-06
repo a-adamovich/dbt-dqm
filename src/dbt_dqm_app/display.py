@@ -17,6 +17,17 @@ WORKFLOW_STATUSES = (
     "FALSE_POSITIVE",
 )
 
+WORKFLOW_STATUS_HELP = """Choose the review state for this issue.
+
+- **NEW** — not yet reviewed.
+- **TRIAGED** — reviewed and categorized; next action is known.
+- **IN_PROGRESS** — someone is actively investigating or fixing it.
+- **BLOCKED** — progress depends on another person, system, or decision.
+- **RESOLVED** — the remediation is complete; the next passing dbt test should archive it.
+- **ACCEPTED_RISK** — known and intentionally tolerated for now.
+- **FALSE_POSITIVE** — not a real data-quality issue; improve or remove the test when practical.
+"""
+
 OWNER_UNASSIGNED_OPTION = "— Unassigned —"
 
 
@@ -71,6 +82,11 @@ def workflow_status_options(current_value: Any) -> list[str]:
     if current and current not in options:
         options.append(current)
     return options
+
+
+def workflow_status_help() -> str:
+    """Return the shared tooltip copy used beside each status selector."""
+    return WORKFLOW_STATUS_HELP
 
 
 def owner_label(value: Any) -> str:

@@ -1,6 +1,6 @@
 [project]
 name = "dbt-dqm"
-version = "0.1.0"
+version = "0.1.1"
 description = "Persistent dbt test issue tracking and a local review application"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
@@ -19,6 +19,7 @@ classifiers = [
 dependencies = [
   "dbt-core==1.11.11",
   "dbt-bigquery==1.11.3",
+  "dbt-postgres>=1.11,<1.12",
   "google-cloud-bigquery>=3.25,<4",
   "pandas>=2.2,<3",
   "platformdirs>=4,<5",
@@ -37,10 +38,7 @@ Changelog = "https://github.com/a-adamovich/dbt-dqm/blob/main/CHANGELOG.md"
 dbt-dqm = "dbt_dqm_app.cli:main"
 
 [dependency-groups]
-# dbt-postgres is a dev-only dependency for validating the dbt package (models/, macros/) against
-# a second adapter in integration_tests/demo_postgres. The dbt_dqm_app review app itself remains
-# BigQuery-only (see src/dbt_dqm_app/warehouse.py) and does not depend on it.
-dev = ["pytest>=8,<9", "ruff>=0.8,<1", "dbt-postgres>=1.11,<1.12"]
+dev = ["pytest>=8,<9", "ruff>=0.8,<1"]
 
 [build-system]
 requires = ["hatchling"]

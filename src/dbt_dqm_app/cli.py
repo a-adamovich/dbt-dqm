@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from dbt_dqm_app.config import resolve_workspace_path
+
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="dbt-dqm")
@@ -15,12 +17,51 @@ def parser() -> argparse.ArgumentParser:
     app.add_argument("--profiles-dir", required=True)
     app.add_argument("--target", required=True)
     app.add_argument("--port", type=int, default=8501)
+    app.add_argument(
+        "--archive-cache-days",
+        type=int,
+        default=90,
+        help="Archived history retained in SQLite; zero disables archived caching",
+    )
+    workspace = commands.add_parser("workspace", help="Inspect or purge local failed-row data")
+    workspace_commands = workspace.add_subparsers(dest="workspace_command", required=True)
+    for name, help_text in (
+        ("info", "Show the local workspace location and size"),
+        ("purge", "Permanently delete the local snapshot and pending patches"),
+    ):
+        command = workspace_commands.add_parser(name, help=help_text)
+        command.add_argument("--project-dir", required=True)
+        command.add_argument("--target", required=True)
     return root
 
 
 def main() -> None:
     args = parser().parse_args()
+    if args.command == "workspace":
+        workspace_path = resolve_workspace_path(args.project_dir, args.target)
+        related_paths = [
+            workspace_path,
+            Path(f"{workspace_path}-wal"),
+            Path(f"{workspace_path}-shm"),
+        ]
+        if args.workspace_command == "info":
+            size = sum(path.stat().st_size for path in related_paths if path.exists())
+            print(f"Workspace: {workspace_path}")
+            print(f"Exists: {'yes' if workspace_path.exists() else 'no'}")
+            print(f"Size: {size} bytes")
+            return
+        for path in related_paths:
+            if path.exists():
+                path.unlink()
+        try:
+            workspace_path.parent.rmdir()
+        except OSError:
+            pass
+        print(f"Purged workspace: {workspace_path}")
+        return
     if args.command == "app":
+        if args.archive_cache_days < 0:
+            raise SystemExit("--archive-cache-days must be zero or a positive integer")
         environment = os.environ.copy()
         environment.update(
             {
@@ -28,6 +69,7 @@ def main() -> None:
                 "DBT_DQM_PROFILES_DIR": str(Path(args.profiles_dir).expanduser().resolve()),
                 "DBT_DQM_TARGET": args.target,
                 "STREAMLIT_BROWSER_GATHER_USAGE_STATS": "false",
+                "DBT_DQM_ARCHIVE_CACHE_DAYS": str(args.archive_cache_days),
             }
         )
         app_path = Path(__file__).with_name("streamlit_app.py")

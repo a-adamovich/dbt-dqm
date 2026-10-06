@@ -1,4 +1,6 @@
 import json
+import stat
+import threading
 
 from dbt_dqm_app.display import (
     calendar_date,
@@ -9,6 +11,7 @@ from dbt_dqm_app.display import (
     owner_value_from_selection,
     paired_display,
     record_fields_html,
+    workflow_status_help,
     workflow_status_options,
 )
 from dbt_dqm_app.store import Patch, Workspace
@@ -19,7 +22,9 @@ def issue(notes=None):
     return {
         "occurrence_id": "occ-1",
         "record_status": "Active",
+        "workflow_status": "NEW",
         "test_status": "NEW",
+        "annotation_version": 0,
         "call_to_action": None,
         "ticket_url": None,
         "notes": notes,
@@ -82,6 +87,19 @@ def test_drift_detected_when_remote_value_changed_since_patch_staged(tmp_path):
     assert drifted[0].field_name == "notes"
 
 
+def test_annotation_version_drift_detected_when_another_field_changed(tmp_path):
+    workspace = Workspace(tmp_path / "workspace.sqlite")
+    workspace.replace_snapshot([issue()])
+    workspace.set_change("occ-1", "notes", "local")
+    newer = issue()
+    newer["annotation_version"] = 1
+    newer["call_to_action"] = "someone changed another field"
+
+    workspace.replace_snapshot([newer])
+
+    assert [patch.field_name for patch in workspace.drifted_patches()] == ["notes"]
+
+
 def test_drift_clears_once_the_patch_is_applied_and_cleared(tmp_path):
     workspace = Workspace(tmp_path / "workspace.sqlite")
     workspace.replace_snapshot([issue()])
@@ -96,24 +114,61 @@ def test_drift_clears_once_the_patch_is_applied_and_cleared(tmp_path):
 
 
 def test_set_change_survives_concurrent_writers_without_losing_an_update(tmp_path):
-    """Two Workspace instances (e.g. two browser tabs) editing different fields on the same
-    occurrence concurrently must not lose either update to the version-counter race."""
+    """Simultaneous same-field writers serialize before reading the version counter."""
     path = tmp_path / "workspace.sqlite"
     workspace_a = Workspace(path)
     workspace_a.replace_snapshot([issue()])
     workspace_b = Workspace(path)
 
-    workspace_a.set_change("occ-1", "notes", "from A")
-    workspace_b.set_change("occ-1", "call_to_action", "from B")
+    barrier = threading.Barrier(3)
+    errors = []
 
-    pending_by_field = {patch.field_name: patch for patch in workspace_a.pending()}
-    assert pending_by_field["notes"].new_value == "from A"
-    assert pending_by_field["call_to_action"].new_value == "from B"
+    def write(workspace, value):
+        try:
+            barrier.wait()
+            workspace.set_change("occ-1", "notes", value)
+        except Exception as error:  # noqa: BLE001 - forwarded to the main test thread.
+            errors.append(error)
+
+    threads = [
+        threading.Thread(target=write, args=(workspace_a, "from A")),
+        threading.Thread(target=write, args=(workspace_b, "from B")),
+    ]
+    for thread in threads:
+        thread.start()
+    barrier.wait()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    final = workspace_a.pending()
+    assert len(final) == 1
+    assert final[0].field_name == "notes"
+    assert final[0].new_value in {"from A", "from B"}
+    assert final[0].version == 2
+
+
+def test_workspace_uses_owner_only_permissions(tmp_path):
+    workspace = Workspace(tmp_path / "private" / "workspace.sqlite")
+    assert stat.S_IMODE(workspace.path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(workspace.path.stat().st_mode) == 0o600
+
+
+def test_discard_only_selected_conflicts(tmp_path):
+    workspace = Workspace(tmp_path / "workspace.sqlite")
+    workspace.replace_snapshot([issue()])
+    workspace.set_change("occ-1", "notes", "local note")
+    workspace.set_change("occ-1", "call_to_action", "local action")
+    note_patch = next(patch for patch in workspace.pending() if patch.field_name == "notes")
+
+    workspace.discard_patches([note_patch])
+
+    assert [patch.field_name for patch in workspace.pending()] == ["call_to_action"]
 
 
 def test_frozen_patch_batch_id_is_stable_and_order_independent():
     first = Patch("occ-1", "notes", None, "review", 1, "2026-08-08T00:00:00+00:00")
-    second = Patch("occ-2", "test_status", "NEW", "ACK", 2, "2026-08-08T00:01:00+00:00")
+    second = Patch("occ-2", "workflow_status", "NEW", "ACK", 2, "2026-08-08T00:01:00+00:00")
 
     assert _batch_id([first, second]) == _batch_id([second, first])
 
@@ -196,6 +251,12 @@ def test_warehouse_rows_accept_json_objects_and_optional_null_attributes():
 
 def test_status_options_retain_a_legacy_value():
     assert workflow_status_options("custom_status")[-1] == "CUSTOM_STATUS"
+
+
+def test_status_help_defines_every_supported_workflow_state():
+    help_text = workflow_status_help()
+    for status in ("NEW", "TRIAGED", "IN_PROGRESS", "BLOCKED", "RESOLVED", "ACCEPTED_RISK", "FALSE_POSITIVE"):
+        assert status in help_text
 
 
 def test_owner_label_groups_blank_values_as_unassigned():

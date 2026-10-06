@@ -326,11 +326,12 @@ wheels = [
 
 [[package]]
 name = "dbt-dqm"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "dbt-bigquery" },
     { name = "dbt-core" },
+    { name = "dbt-postgres" },
     { name = "google-cloud-bigquery" },
     { name = "pandas" },
     { name = "platformdirs" },
@@ -341,7 +342,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "dbt-postgres" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -350,6 +350,7 @@ dev = [
 requires-dist = [
     { name = "dbt-bigquery", specifier = "==1.11.3" },
     { name = "dbt-core", specifier = "==1.11.11" },
+    { name = "dbt-postgres", specifier = ">=1.11,<1.12" },
     { name = "google-cloud-bigquery", specifier = ">=3.25,<4" },
     { name = "pandas", specifier = ">=2.2,<3" },
     { name = "platformdirs", specifier = ">=4,<5" },
@@ -360,7 +361,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "dbt-postgres", specifier = ">=1.11,<1.12" },
     { name = "pytest", specifier = ">=8,<9" },
     { name = "ruff", specifier = ">=0.8,<1" },
 ]

@@ -19,6 +19,7 @@ from dbt_dqm_app.display import (
     owner_value_from_selection,
     paired_display,
     record_fields_html,
+    workflow_status_help,
     workflow_status_options,
 )
 from dbt_dqm_app.store import EDITABLE_FIELDS, Workspace
@@ -70,6 +71,7 @@ def run_app() -> None:
         ("job_patches", []),
         ("job_notice", None),
         ("startup_sync_started", False),
+        ("allow_drift_overwrite", False),
     ):
         if key not in st.session_state:
             st.session_state[key] = default
@@ -111,6 +113,7 @@ def run_app() -> None:
 
     busy = st.session_state.job is not None
     pending = workspace.pending()
+    drifted = workspace.drifted_patches() if not busy else []
     with st.container(key="dqm-action-bar"):
         col_sync, col_apply, col_state = st.columns([1, 1.35, 3])
         with col_sync:
@@ -119,7 +122,11 @@ def run_app() -> None:
                 st.session_state.job = executor.submit(sync_worker, config)
                 st.rerun()
         with col_apply:
-            if st.button("Apply and sync", disabled=busy or not pending, type="primary"):
+            if st.button(
+                "Apply and sync",
+                disabled=busy or not pending or (bool(drifted) and not st.session_state.allow_drift_overwrite),
+                type="primary",
+            ):
                 frozen = list(pending)
                 st.session_state.job_patches = frozen
                 st.session_state.job_kind = "apply"
@@ -135,7 +142,6 @@ def run_app() -> None:
                 )
 
     if not busy:
-        drifted = workspace.drifted_patches()
         if drifted:
             preview = ", ".join(
                 f"{patch.occurrence_id[:8]}…/{patch.field_name}" for patch in drifted[:5]
@@ -143,9 +149,22 @@ def run_app() -> None:
             more = f", and {len(drifted) - 5} more" if len(drifted) > 5 else ""
             st.warning(
                 f"{len(drifted)} pending edit(s) were staged against a warehouse value that has "
-                f"since changed: {preview}{more}. Applying now overwrites the newer remote value "
-                "with your local edit (local-wins) — review before applying if that's unexpected."
+                f"since changed: {preview}{more}. Choose whether to discard those local edits or "
+                "explicitly overwrite the newer warehouse values."
             )
+            discard_col, overwrite_col, _ = st.columns([1.2, 1.4, 3])
+            with discard_col:
+                if st.button("Discard conflicts"):
+                    workspace.discard_patches(drifted)
+                    st.session_state.allow_drift_overwrite = False
+                    st.rerun()
+            with overwrite_col:
+                if st.button("Allow overwrite", type="secondary"):
+                    workspace.rebase_patches(drifted)
+                    st.session_state.allow_drift_overwrite = True
+                    st.rerun()
+        elif st.session_state.allow_drift_overwrite:
+            st.session_state.allow_drift_overwrite = False
 
     # Streamlit does not rerun merely because a Future completes. Poll while a serialized
     # worker job is active so completion or failure reaches the UI without another click.
@@ -163,7 +182,7 @@ def run_app() -> None:
         "occurrence_id",
         "record_status",
         "test_name",
-        "test_status",
+        "workflow_status",
         "first_seen_at",
         "record_values_json",
     }
@@ -185,7 +204,7 @@ def run_app() -> None:
         lambda row: paired_display(row.get("record_values_json")),
         axis=1,
     )
-    frame["test_status"] = frame["test_status"].fillna("NEW").astype(str).str.upper()
+    frame["workflow_status"] = frame["workflow_status"].fillna("NEW").astype(str).str.upper()
     frame["_created_date"] = frame["first_seen_at"].map(calendar_date)
     if "poc_responsible" not in frame:
         frame["poc_responsible"] = None
@@ -194,10 +213,10 @@ def run_app() -> None:
 
     active_count = int((frame["record_status"] == "Active").sum())
     new_count = int(
-        ((frame["record_status"] == "Active") & (frame["test_status"] == "NEW")).sum()
+        ((frame["record_status"] == "Active") & (frame["workflow_status"] == "NEW")).sum()
     )
     blocked_count = int(
-        ((frame["record_status"] == "Active") & (frame["test_status"] == "BLOCKED")).sum()
+        ((frame["record_status"] == "Active") & (frame["workflow_status"] == "BLOCKED")).sum()
     )
     metric_active, metric_new, metric_blocked, metric_local = st.columns(4)
     metric_active.metric("Active issues", active_count)
@@ -210,10 +229,10 @@ def run_app() -> None:
     status_options = [
         status
         for status in WORKFLOW_STATUSES
-        if status in set(frame["test_status"].dropna().unique())
+        if status in set(frame["workflow_status"].dropna().unique())
     ]
     status_options.extend(
-        sorted(set(frame["test_status"].dropna().unique()) - set(status_options))
+        sorted(set(frame["workflow_status"].dropna().unique()) - set(status_options))
     )
     owner_options = sorted(frame["owner"].unique())
     lifecycle_col, status_col, owner_col, created_col, search_col = st.columns(
@@ -265,7 +284,7 @@ def run_app() -> None:
 
     visible = frame[frame["record_status"].isin(lifecycle)] if lifecycle else frame
     if statuses:
-        visible = visible[visible["test_status"].isin(statuses)]
+        visible = visible[visible["workflow_status"].isin(statuses)]
     if owners:
         visible = visible[visible["owner"].isin(owners)]
     if len(created_range) == 2:
@@ -288,7 +307,7 @@ def run_app() -> None:
         "FALSE_POSITIVE": 6,
     }
     visible = visible.copy()
-    visible["_status_priority"] = visible["test_status"].map(priority).fillna(99)
+    visible["_status_priority"] = visible["workflow_status"].map(priority).fillna(99)
     visible["_created_sort"] = pd.to_datetime(visible.get("first_seen_at"), errors="coerce")
     visible = visible.sort_values(
         ["_dirty", "_status_priority", "_created_sort"],
@@ -351,13 +370,14 @@ def run_app() -> None:
                 )
                 poc_responsible = owner_value_from_selection(owner_selection)
             with workflow_col:
-                current_status = str(row.get("test_status") or "NEW").upper()
+                current_status = str(row.get("workflow_status") or "NEW").upper()
                 status_choices = workflow_status_options(current_status)
-                test_status = st.selectbox(
+                workflow_status = st.selectbox(
                     "Status",
                     status_choices,
                     index=status_choices.index(current_status),
-                    key=f"{widget_prefix}-test_status",
+                    key=f"{widget_prefix}-workflow_status",
+                    help=workflow_status_help(),
                 )
             st.caption(
                 f"Created: {format_timestamp(row.get('first_seen_at'))} · "
@@ -399,7 +419,7 @@ def run_app() -> None:
                 st.text(f"Last seen: {format_timestamp(row.get('last_seen_at'))}")
 
             edited_values = {
-                "test_status": test_status,
+                "workflow_status": workflow_status,
                 "poc_responsible": poc_responsible,
                 "ticket_url": ticket_url,
                 "call_to_action": call_to_action,
