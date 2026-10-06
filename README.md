@@ -1,5 +1,7 @@
 # dbt-dqm
 
+Version 0.2 requires a **fresh DQM schema**. Set `dbt_dqm_schema` to a new schema; the package preserves existing 0.1 tables and rejects reusing them. See [warehouse interfaces](docs/warehouse-interfaces.md) for installation, migration, grants, recovery, health populations and retention changes, and [verification](docs/implementation-0.2.md) for release checks.
+
 dbt-dqm is an open-source dbt package for persistent, row-level test issue tracking plus a
 single-user local review app. The dbt package (`models/`, `macros/`) supports BigQuery and
 Postgres; the supported dbt line is 1.11.x. The local review app (`dbt-dqm app`) supports both
@@ -13,7 +15,7 @@ tag:
 ```yaml
 packages:
   - git: "https://github.com/a-adamovich/dbt-dqm.git"
-    revision: v0.1.0
+    revision: v0.2.0 # use after the 0.2 release gate passes and the tag is published
 ```
 
 Then run `dbt deps`. Note that `pip install dbt-dqm` (for the local review app CLI below) does
@@ -64,22 +66,21 @@ The package publishes `dqm_current_issues`, `dqm_all_issues`, `dqm_test_executio
 standard schema naming, a `dbt_dqm_schema: governance` override produces
 `<target_dataset>_governance`.
 
-Optional `dbt_dqm_retention_days` and `dbt_dqm_reconcile_lookback_days` values must be positive
-YAML integers. BigQuery applies partition expiration; on either adapter, explicit cleanup is
-available with `dbt run-operation cleanup_dqm_logs --args '{retention_days: 90}'`.
+Optional `dbt_dqm_retention_days` values must be positive
+YAML integers. Both adapters apply receipt-aware cleanup after runs; explicit cleanup is
+available with `dbt run-operation cleanup_dqm_logs --vars '{dbt_dqm_retention_days: 90}'`.
 
 ## Supported warehouses
 
-BigQuery and Postgres are both fully supported and covered by an integration demo each
+Postgres 14/16 and BigQuery have adapter implementations and an integration demo each.
+BigQuery 0.2 parity is gated on credentialed lifecycle and concurrency acceptance.
 (`integration_tests/demo_bigquery`, `integration_tests/demo_postgres`). Postgres requires the
 `pgcrypto` extension for identity hashing: `create extension if not exists pgcrypto;` — dbt-dqm
 doesn't create this automatically since `CREATE EXTENSION` commonly needs elevated privileges the
 package's own role may not have. A third adapter is added by implementing the handful of
 `adapter.dispatch()`-based macros in [`macros/adapters.sql`](macros/adapters.sql)
-(`dual`, `sha256_hex`, `json_object_string`, `insert_new_rows`, `ensure_unique_index`,
-`capture_tables_ddl`) for it — everything else in the package already uses dbt's own portable
-cross-database macros (`dbt.type_string()`, `dbt.current_timestamp()`, `dbt.dateadd()`, ...) and
-needs no adapter-specific code.
+and adding that adapter's transaction, locking, schema and grant behavior. The package uses dbt's
+portable type/date macros for common SQL, but concurrency guarantees require adapter-specific verification.
 
 ## Local app
 
@@ -175,3 +176,15 @@ it. See [the current roadmap](docs/roadmap.md) for implemented gates and remaini
 
 Copyright 2026 Aliaksei Adamovich. Licensed under the Apache License, Version 2.0. See
 [LICENSE.md](LICENSE.md).
+
+### Row owners and review metadata
+
+```sql
+{{ config(tags=['dqm'], store_failures=true, severity='warn',
+    meta={'dbt_dqm': {'granularity': ['campaign_id'], 'owner_column': 'DQM_OWNER',
+      'poc_responsible': 'analytics', 'priority': 'high', 'criticality': 'customer reporting'}}) }}
+select campaign_id, case when region='EU' then 'eu_team' else 'global_team' end as DQM_OWNER
+from {{ ref('campaigns') }} where invalid_flag
+```
+
+The default discovers `DQM_OWNER` when present. Blank or conflicting row owners use the static fallback. Ownership is initialized only for new occurrences; reviewer edits persist. Owners are independent of identity and payload capture. Priority and tags are visible and filterable. Review verdicts classify true/false positives independently of workflow. The Health tab shows denominator-aware warehouse metrics, and the missed-issue form records confirmed escapes without claiming a false-negative rate.

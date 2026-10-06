@@ -1,82 +1,114 @@
-# Warehouse interfaces
+# Warehouse interfaces for 0.2
 
-## Stability levels
+0.2 requires a fresh `dbt_dqm_schema`. Recognizable 0.1 tables are rejected before an install marker is written. The package does not delete, baseline or migrate existing history. Keep that schema for historical queries and point the new package at another schema. Later upgrades use ordered, verified, idempotent migrations; columns are added and backfilled, never removed automatically. Identity remains `dqm-id-v1` and changes only through an explicit identity scheme version.
 
-| Relation | Stability | Contract |
-| --- | --- | --- |
-| `dqm_current_issues`, `dqm_all_issues` | Public 0.x | Additive columns are allowed; removals/renames require a documented deprecation. |
-| `dqm_annotation_changes` | Public 0.x audit | Compound event identity and audit meaning are stable; additive metadata is allowed. |
-| `dqm_test_executions`, `dqm_issue_observations` | Advanced 0.x | Useful for operations/debugging; additive schema changes and documented migrations are expected. |
-| `dqm_issue_occurrences` | Internal writable | Package/app coordination table; write only documented annotation columns through compare-and-set. |
-| `dqm_reconciliation_state`, `dqm_schema_migrations` | Internal | No consumer query contract. |
+## Relations and ownership
 
-Within public issue views, lifecycle/identity columns are package-managed and stable through 0.x.
-`workflow_status`, `call_to_action`, `ticket_url`, `notes`, and `poc_responsible` are the supported
-annotation interface. `test_status` is deprecated and will remain a synchronized alias throughout
-the announced 0.x transition; all other additions are backward-compatible.
+| Relation | Ownership and contract |
+| --- | --- |
+| `dqm_reconcile` | Stable dbt view and runnable reconciliation entry point. |
+| `dqm_issue_occurrences` | Hook-owned durable lifecycle table. Only documented annotations are editable. |
+| `dqm_all_issues`, `dqm_current_issues` | Public additive 0.x interfaces, reading the durable table directly. A dependency comment orders them after reconciliation; reconciliation alone preserves these views. |
+| `dqm_issue_timeline` | Occurrence intervals and latest payload; not a history of every payload version. |
+| `dqm_issue_events` | Hook-owned immutable event ledger, written atomically with lifecycle changes. |
+| `dqm_annotation_changes` | dbt-owned append-only audit ledger, with a unique batch/occurrence/field key on Postgres. |
+| `dqm_missed_issues` | dbt-owned application-written log of known missed issues. |
+| `dqm_test_health`, `dqm_area_health` | Warehouse-computed views with explicit populations and rate denominators. |
+| `dqm_test_executions`, `dqm_issue_observations` | Hook-owned raw execution and failed-identity evidence. |
+| Install, control, migration, run, input, receipt and state tables | Internal coordination interfaces; do not edit directly. |
 
-## Adapter support
+`dqm_relation(name)` resolves durable tables using the reconcile model's database and schema. The Python application uses the same rule. Package models use static configuration; runtime stages are never model aliases and cannot become stale through partial parsing.
 
-BigQuery and Postgres are both supported, verified by an integration demo each
-(`integration_tests/demo_bigquery`, `integration_tests/demo_postgres`). The package prefers dbt-core's
-own portable macros (`dbt.type_string()`, `dbt.current_timestamp()`, `dbt.dateadd()`, ...) wherever
-they exist; the handful of things with no portable equivalent — SHA-256 hashing, JSON object
-construction, insert-if-not-matched, and DDL partitioning/clustering — are adapter-dispatched in
-`macros/adapters.sql`. Partitioning, clustering, and partition-expiration retention are BigQuery-only
-concepts and no-op elsewhere. See the README's "Supported warehouses" section for what's required to
-add another adapter.
+## Evidence and lifecycle
 
-## Hook-owned event tables
+Capture records each tagged, stored-failure test execution. Tracked tests require `fail_calc=count(*)` after whitespace/case normalization, no configured `limit`, and effective table failure storage. Sampling inside test SQL violates this complete-evidence contract. Configuration, collection and inconclusive outcomes never archive issues. A passing test's grain and explicitly configured owner column are checked from column metadata without scanning rows.
 
-`dqm_test_executions` stores one idempotent record per invocation and tracked test. It captures dbt
-status, failure count, ordered tag JSON, test metadata, timing, message, failure relation, the
-outcome of row collection, and a `granularity_signature` (the test's configured
-`meta.dbt_dqm.granularity` columns, case-folded and order-preserved) plus the broader
-`identity_scheme_signature` (algorithm version and ordered grain), recorded for every conclusive
-execution regardless of whether it failed. Reconciliation only treats conclusive, successfully
-collected executions as lifecycle evidence, and uses the signature to tell a genuine pass apart from
-a grain/identity-scheme change. On BigQuery, the table is partitioned by `date(captured_at)` and
-clustered by `test_unique_id`.
+Reconciliation freezes all unreceipted conclusive execution IDs. It replays them in `(captured_at, invocation_id)` order. Passing evidence closes an Active issue as `Passed`; identity scheme changes close it as `IDENTITY_CHANGED`; a removed tracked test closes it as `TEST_REMOVED`. New occurrences start with clean annotations. Public history context matches the previous occurrence within the same identity scheme. Recurrence requires its previous closure to be `Passed`; potential regression additionally requires the previous closure workflow snapshot to be `RESOLVED`.
 
-`dqm_issue_observations` stores immutable, invocation-level failed identities. Each record contains
-the case-insensitive hash, capture-mode-selected display values, collapsed source-row count, initial
-annotations, and test tags. `record_values_json` stores one portable JSON object as text, mapping
-each retained stored-failure output column directly to its display value. JSON null and empty string remain
-distinct, and names cannot lose alignment with values. `meta.dbt_dqm.granularity` determines the
-case-insensitive identity hash independently of the displayed record. The on-run-end hook commits
-each test's readable failures (merge plus status update) as soon as that test is processed, rather
-than deferring every tracked test's write to one shared batch — a mid-invocation collection error
-only leaves the test being processed, and any after it, unresolved at `pending` for a future
-invocation to pick up. On BigQuery, this table is partitioned by `date(observed_at)` and clustered by
-`test_unique_id, unique_id`.
+Postgres 14/16 uses a transaction-scoped advisory lock and an EXCLUSIVE occurrence lock, a temporary stage on the same connection, and `ON CONFLICT` lifecycle updates inside dbt's transaction. The temporary stage disappears at commit. BigQuery uses an invocation-specific stage and one transaction for lifecycle changes, events, receipts, state, generation and completion. Generation, setup readiness and run status guard against stale or abandoned applies; concurrent transactions update the common control row. A known SQL failure abandons the run with a generation increment, allowing a fresh invocation to retry. A lost runner is recovered through timeout abandonment. BigQuery lifecycle and concurrency parity requires credentialed acceptance runs; offline compilation alone does not establish it.
 
-Neither log table is pruned automatically; on BigQuery, set the `dbt_dqm_retention_days` project
-variable to opt into partition expiration once you've confirmed the window comfortably exceeds how
-infrequently your slowest tracked test runs — see `models/dqm_reconcile.sql`'s `latest_executions`
-CTE for the matching opt-in `dbt_dqm_reconcile_lookback_days` cost lever (portable — it's a plain
-`captured_at` filter, not a BigQuery-specific mechanism), which lets reconciliation prune via
-partition filtering on BigQuery instead of a full scan. Both settings reject non-positive or
-non-integer values. `dbt run-operation cleanup_dqm_logs --args '{retention_days: 90}'` provides
-portable explicit cleanup on both adapters.
+Matched updates preserve all reviewer annotations and annotation versions. `workflow_status_at_close` snapshots the current target workflow atomically on Active→Archived. It does not change afterward. Every rerun freezes again and rebuilds against current state. A successful commit with a lost client response leaves receipted inputs; the next invocation makes no duplicate lifecycle changes.
 
-`dqm_reconciliation_state` stores the last successfully replayed execution tuple per tracked test.
-`dqm_schema_migrations` records completed versioned warehouse migrations.
+## Annotations and metadata
 
-## Model-owned lifecycle tables and views
+The six audited editable fields are `workflow_status`, `review_verdict`, `call_to_action`, `ticket_url`, `notes`, and `poc_responsible`. The app uses compare-and-set against `annotation_version` and writes server-derived old values to the audit ledger in the same transaction. `test_status` remains the deprecated synchronized workflow alias through 0.x.
 
-`dqm_issue_occurrences` is the alias of `dqm_reconcile`. It is the durable lifecycle table and owns
-the five editable annotations, `annotation_version`, and the package-managed identity signatures used to detect
-identity-scheme changes. A conclusive pass archives an Active occurrence with `close_reason =
-'Passed'`; recurrence creates a new numbered occurrence with clean annotations. Two other archival
-paths exist: `close_reason = 'IDENTITY_CHANGED'` when the test's granularity changed since the
-occurrence was last touched (the old identity's absence isn't a verified pass), and `close_reason =
-'TEST_REMOVED'` when the test itself is no longer present in the project manifest at all.
+Verdicts are `UNREVIEWED`, `TRUE_POSITIVE`, or `FALSE_POSITIVE`, independently of workflow. New occurrences start unreviewed. The legacy `FALSE_POSITIVE` workflow option remains available during 0.x.
 
-`dqm_current_issues` exposes Active occurrences for routine review. `dqm_all_issues` exposes the full
-Active and Archived history. `dqm_annotation_changes` is the field-level audit ledger populated by
-idempotent local-application batches.
+Row ownership uses explicit case-insensitive `meta.dbt_dqm.owner_column`, otherwise a discovered `DQM_OWNER` column. Trimmed blanks fall back to static `poc_responsible`. Multiple distinct nonblank owners for one identity also use that fallback, record an execution warning, and increment `owner_conflict_identity_count`. Ownership initializes only new occurrences; changing test metadata never replaces reviewer assignments. The owner column does not affect identity or expand payload capture.
 
-Identity and lifecycle columns are package-managed. Only `workflow_status`, `call_to_action`,
-`ticket_url`, `notes`, and `poc_responsible` are editable. `test_status` is a synchronized,
-deprecated 0.x compatibility alias. Audit rows store server-derived old values plus base and
-resulting annotation versions.
+`test_priority` is optional `critical`, `high`, `medium`, or `low`; `test_criticality` is an optional string. Active metadata refreshes from the latest processed execution, including clearing removed values. Archived metadata is frozen. Tags remain ordered JSON text.
+
+## History events
+
+Events include `APPEARED`, `REAPPEARED`, `VALUES_CHANGED`, `DISAPPEARED`, `CLOSED_STRUCTURAL`, and `EVIDENCE_SKIPPED`. `dbt_dqm_emit_still_failing_events: true` also emits `STILL_FAILING`. Value changes retain before/after payloads and require `allowlist` or `full` capture. IDs use SHA-256 over the canonical length-prefixed, null-safe `dqm-event-v1` encoding of test, occurrence, original invocation and event type. Skipped evidence has a null occurrence ID and includes the test ID, so skipping two tests from one invocation creates two distinct events.
+
+## Recovery and retention
+
+Late unreceipted evidence at or before the processed high-water fails before lifecycle writes. Review the execution, then explicitly acknowledge a gap:
+
+```sh
+dbt run-operation dqm_skip_late_evidence --args '{items: [{test_unique_id: test.example.check, invocation_id: original-run-id}], reason: "Reviewed delayed collection; historical replay intentionally skipped"}'
+dbt run-operation dqm_abandon_runs --args '{older_than_minutes: 60}'
+dbt run-operation dqm_cleanup_stages
+dbt run-operation cleanup_dqm_logs --vars '{dbt_dqm_retention_days: 90}'
+```
+
+Skip validates conclusive, late, unreceipted inputs and atomically writes receipts, gap events and a generation increment. Abandon fences the run before dropping its BigQuery stage; resumed runners fail apply. Completed BigQuery stages are eligible for cleanup at least 24 hours after completion; expiration is extended at completion. Failed stage cleanup warns and does not roll back lifecycle changes.
+
+Raw-log retention is opt-in, receipt-aware and portable. Observations, executions and receipts are pruned together only after processing and outside unfinished runs. High-water state is never pruned. Unconditional BigQuery partition expiration is removed. `dbt_dqm_reconcile_lookback_days` is deprecated, warns and is ignored. Events persist indefinitely unless `dbt_dqm_event_retention_days` is configured. Health exposes the raw retention boundary separately from zero observed activity.
+
+`run --empty` and `build --empty` require initialized current tracking tables. They skip capture, reconciliation, migrations, table grants and cleanup, and project zero rows. Ordinary dbt relation DDL still occurs; no DQM tracking-data changes occur.
+
+## Grants
+
+Public-view grants use normal dbt model configuration. `dbt_dqm_table_grants` maps each table to native privileges and lists of principals. Setup only grants requested privileges; it never revokes unrelated grants.
+
+```yaml
+vars:
+  dbt_dqm_schema: dqm_v02
+  dbt_dqm_table_grants:
+    dqm_issue_occurrences:
+      select: [dqm_reviewer]
+      update: [dqm_reviewer]
+    dqm_annotation_changes:
+      select: [dqm_reviewer]
+      insert: [dqm_reviewer]
+    dqm_missed_issues:
+      select: [dqm_reviewer]
+      insert: [dqm_reviewer]
+```
+
+On BigQuery use native IAM privilege maps, e.g. `roles/bigquery.dataViewer: ["user:reviewer@example.com"]` and `roles/bigquery.dataEditor` on writable tables. The runner also needs dataset table creation and control/migration permissions. The app needs reads on public issue/health views and direct reads of occurrences/audit, occurrence updates, audit inserts and missed-issue inserts. The BigQuery app's existing annotation staging path additionally needs staging-table create/load/read access and jobs.create; Postgres does not create app staging tables.
+
+## Health populations
+
+Defaults are a 30-day reporting window and 14-day stale threshold, configured through positive integer vars `dbt_dqm_metrics_window_days` and `dbt_dqm_stale_days`.
+
+| Metric | Population / denominator |
+| --- | --- |
+| Reviewed precision | TP / (TP + FP), occurrences first seen in the window. |
+| FP share | FP / (TP + FP), same population. |
+| Review coverage | Assessed / all occurrences first seen in the window. |
+| Time to pass | Passed closures in the window; structural closures excluded. |
+| Backlog age, stale NEW, accepted risk | Current Active occurrences. |
+| Collection coverage | Conclusive collected executions / recorded executions in the window. |
+| Processing coverage | Applied executions / conclusive executions in the window. Skips remain evidence gaps. |
+| Processing lag | All retained unreceipted conclusive executions, including those older than the reporting window. |
+| Known missed issues | Reports discovered in the window; observed counts, with no recall or false-negative rate. |
+
+All rate denominators are published; zero denominators produce null. Collection coverage does not claim that scheduled tests ran: its denominator is recorded executions. Raw retention limits are explicit. Area health includes root-project models and sources; a test belongs to every direct dependency, so area totals overlap. Unmapped missed reports have separate area rows. No observed failures is informational, not evidence that a test is ineffective. Health snapshots cache these rows and their reporting window/sync time locally; unsaved issue edits remain accessible.
+
+## SQL path for known misses
+
+Use a stable caller-generated ID on retry. Postgres example:
+
+```sql
+insert into your_dqm_schema.dqm_missed_issues
+  (missed_issue_id,discovered_at,reported_at,reporter,area_label,description,root_cause)
+values
+  ('stable-uuid',current_timestamp,current_timestamp,current_user,'Unmapped area','Confirmed issue missed by the tests','no_test')
+on conflict (missed_issue_id) do nothing;
+```
+
+BigQuery callers use a parameterized `MERGE … WHEN NOT MATCHED THEN INSERT` keyed by `missed_issue_id`. Root causes are `no_test`, `test_logic_gap`, `threshold_too_loose`, `test_not_run`, or `other`.

@@ -42,3 +42,9 @@ control plane, and measure activation, weekly reviewed issues, recurrence, assig
 demand without collecting failed-row contents. If collaboration demand is proven, build a separate
 metadata-only-by-default hosted/self-hosted control plane and monetize collaboration, governance,
 integrations, managed operation, and support—not failure-row volume.
+
+## 0.2 delivery
+
+Implemented: transactional tracking and recovery, fresh installation and additive migrations, row owners, metadata and verdicts, durable history and missed reports, and warehouse health with local caching. Credentialed BigQuery fault/concurrency verification is a release gate.
+
+Deferred: VCG adoption/migration and warehouse-side issue filtering, search and cursor pagination. Pending local edits must remain accessible as that pagination work proceeds.

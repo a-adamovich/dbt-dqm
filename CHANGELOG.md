@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+- Requires a fresh DQM schema; 0.1 history is preserved in its original schema and is not migrated. Later upgrades use verified additive migrations.
+- Replaces checkpoint replay and whole-row merges with frozen inputs, transactional lifecycle-only apply, receipts and generation fencing. Reviewer annotations and versions are preserved; closure workflow is captured atomically.
+- Adds row owners, conflict warnings, priority/criticality, visible tags, independent review verdicts, recurrence context, timeline and durable payload-change events.
+- Adds known missed-issue reporting and warehouse health views with explicit populations, denominators and local offline snapshots.
+- Retires reconciliation lookback and unconditional BigQuery raw-log expiration. Receipt-aware retention preserves unprocessed evidence; events have separate opt-in retention.
+- Schema-only runs require initialized current tables and leave tracking data unchanged.
+- BigQuery adapter parity remains gated on credentialed lifecycle/concurrency tests.
+
+
 ## 0.1.1 - Unreleased
 
 ### Package

@@ -85,3 +85,11 @@
   status, owner, created date) still reacts immediately.
 - One background-job process pool is shared across all review sessions for the life of the app
   process, rather than one per session.
+
+## 0.2 additions
+
+Reconciliation must be idempotent across retries and protect concurrent annotations. Each run freezes exact execution IDs, rejects late evidence, and applies occurrences, events, receipts and state atomically under a generation guard. Installation rejects recognizable legacy tables before writes; subsequent additive migrations preserve history. Schema-only runs have zero-row projections and no tracking-data changes.
+
+Ownership may come from each failed row without expanding captured payloads. Conflicts use the static fallback and are measurable. Priority/criticality refresh Active issues and freeze on closure. Review verdicts are separate, audited annotations. History distinguishes previous occurrences, Passed recurrences and potential regressions, and persists payload changes independently of raw-log retention.
+
+Known misses accept mapped or unmapped areas and stable retry IDs. Health publishes denominators and null undefined rates, explicitly separating review, closure and backlog populations, collection from processing coverage, and retention gaps from inactivity.
