@@ -77,6 +77,21 @@ macros:
       backfills record_values_json from prior split JSON fields before removing them, and does
       nothing on a first installation where the occurrence table does not yet exist.
 
+  - name: positive_integer_var
+    description: Validates an optional dbt variable as a strictly positive YAML integer.
+
+  - name: cleanup_dqm_logs
+    description: Deletes execution and observation log rows older than a positive retention window.
+
+  - name: advance_reconciliation_state
+    description: Advances per-test replay checkpoints after successful reconciliation.
+
+  - name: record_schema_migration
+    description: Idempotently records a completed versioned warehouse migration.
+
+  - name: ensure_annotation_indexes
+    description: Adds adapter-appropriate annotation audit lookup indexes.
+
   - name: capture_test_results
     description: >
       on-run-end collector that persists tracked test executions and each failing test's
@@ -112,6 +127,16 @@ macros:
       - name: pairs
         type: list[tuple[string, string]]
         description: Ordered (key, value_sql) pairs; value_sql is a SQL expression, already quoted/cast.
+
+  - name: canonical_identity_string
+    description: >
+      Produces the byte-stable, length-prefixed dqm-id-v1 identity preimage from ordered normalized
+      key/value expressions. Unlike display JSON, its output is required to be identical on every
+      supported adapter and is protected by golden hash vectors.
+    arguments:
+      - name: pairs
+        type: list[tuple[string, string]]
+        description: Ordered lowercase key names and normalized nullable SQL string expressions.
 
   - name: insert_new_rows
     description: >

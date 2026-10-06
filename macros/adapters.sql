@@ -81,6 +81,38 @@
   )::text
 {% endmacro %}
 
+{#
+  Byte-stable issue identity input. Display JSON is intentionally adapter-native, but it must not
+  be used as a hash preimage: warehouses are free to render semantically identical JSON with
+  different whitespace. This length-prefixed representation is unambiguous and uses only character
+  length plus already-normalized string values, whose behavior is identical on supported adapters.
+
+  Shape: dqm-id-v1|k<key-length>:<key>|n| for null, or
+         dqm-id-v1|k<key-length>:<key>|s<value-length>:<value>| for a string.
+#}
+{% macro canonical_identity_string(pairs) %}
+  {{ return(adapter.dispatch('canonical_identity_string', 'dbt_dqm')(pairs)) }}
+{% endmacro %}
+
+{% macro default__canonical_identity_string(pairs) %}
+  concat(
+    {{ dbt_dqm.sql_string('dqm-id-v1|') }}
+    {% for key, value_sql in pairs %}
+      , {{ dbt_dqm.sql_string('k' ~ (key | length) ~ ':' ~ key ~ '|') }}
+      , case
+          when {{ value_sql }} is null then {{ dbt_dqm.sql_string('n|') }}
+          else concat(
+            {{ dbt_dqm.sql_string('s') }},
+            cast(length({{ value_sql }}) as {{ dbt.type_string() }}),
+            {{ dbt_dqm.sql_string(':') }},
+            {{ value_sql }},
+            {{ dbt_dqm.sql_string('|') }}
+          )
+        end
+    {% endfor %}
+  )
+{% endmacro %}
+
 {# Insert rows from source_sql whose key_columns don't already exist in target_relation; existing
    rows are left untouched (no update-on-match — every current caller only ever inserts
    immutable, invocation-scoped rows that are never revised in place). BigQuery has no unique/
@@ -121,6 +153,25 @@
   {{ return(adapter.dispatch('ensure_unique_index', 'dbt_dqm')(relation, columns)) }}
 {% endmacro %}
 
+{# Postgres query-support indexes. BigQuery uses clustering instead, so the default is a no-op. #}
+{% macro ensure_index(relation, columns, suffix=none, where=none) %}
+  {{ return(adapter.dispatch('ensure_index', 'dbt_dqm')(relation, columns, suffix, where)) }}
+{% endmacro %}
+
+{% macro default__ensure_index(relation, columns, suffix=none, where=none) %}
+{% endmacro %}
+
+{% macro postgres__ensure_index(relation, columns, suffix=none, where=none) %}
+  {% if execute %}
+    {% set index_suffix = suffix or (columns | join('_')) %}
+    {% set index_name = (relation.identifier ~ '_' ~ index_suffix ~ '_idx') | lower %}
+    {% set statement = 'create index if not exists ' ~ index_name ~ ' on ' ~ relation
+      ~ ' (' ~ (columns | join(', ')) ~ ')' %}
+    {% if where is not none %}{% set statement = statement ~ ' where ' ~ where %}{% endif %}
+    {% do run_query(statement) %}
+  {% endif %}
+{% endmacro %}
+
 {% macro default__ensure_unique_index(relation, columns) %}
 {% endmacro %}
 
@@ -142,4 +193,31 @@
    patching existing rows. #}
 {% macro incremental_upsert_strategy() %}
   {{ return('merge' if target.type == 'bigquery' else 'delete+insert') }}
+{% endmacro %}
+
+{% macro upsert_reconciliation_state(source_sql) %}
+  {{ return(adapter.dispatch('upsert_reconciliation_state', 'dbt_dqm')(source_sql)) }}
+{% endmacro %}
+
+{% macro default__upsert_reconciliation_state(source_sql) %}
+  {{ dbt_dqm.unsupported_adapter_error('reconciliation checkpoint upsert') }}
+{% endmacro %}
+
+{% macro bigquery__upsert_reconciliation_state(source_sql) %}
+  merge {{ dbt_dqm.relation_name('dqm_reconciliation_state') }} t
+  using ({{ source_sql }}) s
+    on t.test_unique_id = s.test_unique_id
+  when matched then update set captured_at = s.captured_at, invocation_id = s.invocation_id
+  when not matched then insert (test_unique_id, captured_at, invocation_id)
+    values (s.test_unique_id, s.captured_at, s.invocation_id)
+{% endmacro %}
+
+{% macro postgres__upsert_reconciliation_state(source_sql) %}
+  insert into {{ dbt_dqm.relation_name('dqm_reconciliation_state') }} (
+    test_unique_id, captured_at, invocation_id
+  )
+  {{ source_sql }}
+  on conflict (test_unique_id) do update set
+    captured_at = excluded.captured_at,
+    invocation_id = excluded.invocation_id
 {% endmacro %}

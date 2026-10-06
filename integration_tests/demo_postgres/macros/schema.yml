@@ -6,3 +6,6 @@ macros:
       Destructively resets only dbt-dqm tables, views, and stored-failure tables in the synthetic
       target schema. Use it to restart the demo lifecycle after an identity-format change; dbt
       recreates all removed demo artifacts on the next run, test, and package build.
+
+  - name: assert_postgres_query_plans
+    description: Ensures representative scale-sensitive package lookups have usable indexes.

@@ -5,7 +5,9 @@
     materialized='incremental',
     incremental_strategy=dbt_dqm.incremental_upsert_strategy(),
     unique_key=['batch_id', 'occurrence_id', 'field_name'],
-    full_refresh=false
+    full_refresh=false,
+    on_schema_change='append_new_columns',
+    post_hook="{{ dbt_dqm.ensure_annotation_indexes() }}"
   )
 }}
 
@@ -16,6 +18,8 @@ select
   cast(null as {{ dbt.type_string() }}) as old_value,
   cast(null as {{ dbt.type_string() }}) as new_value,
   cast(null as {{ dbt.type_timestamp() }}) as changed_at,
-  cast(null as {{ dbt.type_string() }}) as changed_by
+  cast(null as {{ dbt.type_string() }}) as changed_by,
+  cast(null as {{ dbt.type_int() }}) as base_annotation_version,
+  cast(null as {{ dbt.type_int() }}) as resulting_annotation_version
 from {{ dbt_dqm.dual() }}
 where false

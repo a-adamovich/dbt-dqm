@@ -8,6 +8,8 @@
     meta={
       'dbt_dqm': {
         'granularity': ['customer_id'],
+        'capture_mode': 'allowlist',
+        'context_columns': ['email', 'reason'],
         'poc_responsible': 'customer_data_owner',
         'call_to_action': 'Correct the customer email address'
       }

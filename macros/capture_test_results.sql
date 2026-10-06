@@ -25,7 +25,8 @@
   {% set execution_columns = [
     'invocation_id', 'captured_at', 'command', 'test_unique_id', 'test_name', 'test_status',
     'failure_count', 'test_tags', 'test_meta', 'execution_time', 'message', 'failure_relation',
-    'collection_status', 'collection_message', 'granularity_signature'
+    'collection_status', 'collection_message', 'granularity_signature',
+    'identity_scheme_signature', 'source_unique_id', 'source_relation', 'test_severity'
   ] %}
   {% set execution_rows = [] %}
   {% for result in tracked %}
@@ -39,7 +40,27 @@
        identity. #}
     {% set dqm_meta = (node.config.meta or {}).get('dbt_dqm', {}) %}
     {% set configured_grain = dqm_meta.get('granularity', []) or [] %}
-    {% set granularity_signature = dbt_dqm.compact_json(configured_grain | map('lower') | list) %}
+    {% set signature_grain = [] %}
+    {% if configured_grain is sequence and configured_grain is not string %}
+      {% for grain_name in configured_grain %}
+        {% if grain_name is string %}{% do signature_grain.append(grain_name | trim | lower) %}{% endif %}
+      {% endfor %}
+    {% endif %}
+    {% set granularity_signature = dbt_dqm.compact_json(signature_grain) %}
+    {% set identity_scheme_signature = dbt_dqm.compact_json({
+      'version': 'dqm-id-v1',
+      'granularity': signature_grain
+    }) %}
+    {% set source = namespace(unique_id=none, relation=none) %}
+    {% for dependency_id in node.depends_on.nodes %}
+      {% if source.unique_id is none %}
+        {% set dependency = graph.nodes.get(dependency_id, graph.sources.get(dependency_id)) %}
+        {% if dependency is not none and dependency.resource_type in ['model', 'seed', 'snapshot', 'source'] %}
+          {% set source.unique_id = dependency.unique_id %}
+          {% set source.relation = dependency.relation_name %}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
     {% set row %}
       select
         {{ dbt_dqm.sql_string(invocation_id) }} as invocation_id,
@@ -56,7 +77,11 @@
         {{ dbt_dqm.sql_string(relation_text) }} as failure_relation,
         {{ dbt_dqm.sql_string('pending') }} as collection_status,
         cast(null as {{ dbt.type_string() }}) as collection_message,
-        {{ dbt_dqm.sql_string(granularity_signature) }} as granularity_signature
+        {{ dbt_dqm.sql_string(granularity_signature) }} as granularity_signature,
+        {{ dbt_dqm.sql_string(identity_scheme_signature) }} as identity_scheme_signature,
+        {{ dbt_dqm.sql_string(source.unique_id) }} as source_unique_id,
+        {{ dbt_dqm.sql_string(source.relation) }} as source_relation,
+        {{ dbt_dqm.sql_string(node.config.severity) }} as test_severity
     {% endset %}
     {% do execution_rows.append(row) %}
   {% endfor %}
@@ -87,7 +112,79 @@
   {% set successful_test_ids = [] %}
   {% for result in tracked %}
     {% set node = result.node %}
-    {% if result.failures is not none and result.failures | int > 0 and node.relation_name %}
+    {% set meta = node.config.meta or {} %}
+    {% set dqm_meta = meta.get('dbt_dqm', {}) %}
+    {% set configured_grain = dqm_meta.get('granularity', []) %}
+    {% set capture_mode = dqm_meta.get('capture_mode', var('dbt_dqm_capture_mode', 'identity_only')) %}
+    {% set context_columns = dqm_meta.get('context_columns', []) %}
+    {% set grain_errors = [] %}
+    {% set grain_lower = [] %}
+    {% if configured_grain is string or configured_grain is not sequence or configured_grain | length == 0 %}
+      {% do grain_errors.append('meta.dbt_dqm.granularity must be a non-empty list of column names.') %}
+    {% else %}
+      {% for grain_name in configured_grain %}
+        {% if grain_name is not string or grain_name | trim == '' %}
+          {% do grain_errors.append('Every meta.dbt_dqm.granularity entry must be a non-empty string.') %}
+        {% else %}
+          {% set normalized_name = grain_name | trim | lower %}
+          {% if normalized_name in grain_lower %}
+            {% do grain_errors.append('meta.dbt_dqm.granularity contains a duplicate column: ' ~ grain_name) %}
+          {% else %}
+            {% do grain_lower.append(normalized_name) %}
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+    {% if capture_mode not in ['identity_only', 'allowlist', 'full'] %}
+      {% do grain_errors.append(
+        "meta.dbt_dqm.capture_mode must be one of: identity_only, allowlist, full."
+      ) %}
+    {% endif %}
+    {% if context_columns is string or context_columns is not sequence %}
+      {% do grain_errors.append('meta.dbt_dqm.context_columns must be a list of column names.') %}
+    {% else %}
+      {% set context_lower = [] %}
+      {% for context_name in context_columns %}
+        {% if context_name is not string or context_name | trim == '' %}
+          {% do grain_errors.append('Every meta.dbt_dqm.context_columns entry must be a non-empty string.') %}
+        {% elif context_name | trim | lower in context_lower %}
+          {% do grain_errors.append('meta.dbt_dqm.context_columns contains a duplicate column: ' ~ context_name) %}
+        {% else %}
+          {% do context_lower.append(context_name | trim | lower) %}
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+
+    {% if grain_errors | length > 0 %}
+      {% set error_update %}
+        update {{ dbt_dqm.relation_name('dqm_test_executions') }}
+        set collection_status = {{ dbt_dqm.sql_string('configuration_error') }},
+            collection_message = {{ dbt_dqm.sql_string(grain_errors | join(' ')) }}
+        where invocation_id = {{ dbt_dqm.sql_string(invocation_id) }}
+          and test_unique_id = {{ dbt_dqm.sql_string(node.unique_id) }}
+      {% endset %}
+      {% do run_query(error_update) %}
+      {% do log('dbt-dqm skipped ' ~ node.unique_id ~ ': ' ~ (grain_errors | join(' ')), info=true) %}
+    {% elif result.status | lower not in ['pass', 'warn', 'fail'] %}
+      {% set inconclusive_update %}
+        update {{ dbt_dqm.relation_name('dqm_test_executions') }}
+        set collection_status = {{ dbt_dqm.sql_string('inconclusive') }},
+            collection_message = {{ dbt_dqm.sql_string('The dbt test result was not conclusive.') }}
+        where invocation_id = {{ dbt_dqm.sql_string(invocation_id) }}
+          and test_unique_id = {{ dbt_dqm.sql_string(node.unique_id) }}
+      {% endset %}
+      {% do run_query(inconclusive_update) %}
+    {% elif result.failures is not none and result.failures | int > 0 and not node.relation_name %}
+      {% set relation_error %}
+        update {{ dbt_dqm.relation_name('dqm_test_executions') }}
+        set collection_status = {{ dbt_dqm.sql_string('collection_error') }},
+            collection_message = {{ dbt_dqm.sql_string('The test reported failures but did not expose a stored-failure relation.') }}
+        where invocation_id = {{ dbt_dqm.sql_string(invocation_id) }}
+          and test_unique_id = {{ dbt_dqm.sql_string(node.unique_id) }}
+      {% endset %}
+      {% do run_query(relation_error) %}
+      {% do log('dbt-dqm could not resolve stored failures for ' ~ node.unique_id, info=true) %}
+    {% elif result.failures is not none and result.failures | int > 0 %}
       {# Construct directly: dbt's relation cache can be stale immediately after store_failures. #}
       {% set relation = api.Relation.create(
         database=node.database,
@@ -97,10 +194,6 @@
       ) %}
       {% set columns = adapter.get_columns_in_relation(relation) %}
       {% if columns | length > 0 %}
-        {% set meta = node.config.meta or {} %}
-        {% set dqm_meta = meta.get('dbt_dqm', {}) %}
-        {% set configured_grain = dqm_meta.get('granularity', []) or [] %}
-        {% set grain_lower = configured_grain | map('lower') | list %}
         {% set key_columns = [] %}
         {# Configured order is part of the canonical identity and must remain stable. #}
         {% for grain_name in grain_lower %}
@@ -108,23 +201,28 @@
             {% if column.name | lower == grain_name %}{% do key_columns.append(column) %}{% endif %}
           {% endfor %}
         {% endfor %}
-        {% if grain_lower | length == 0 %}
-          {% set error_update %}
-            update {{ dbt_dqm.relation_name('dqm_test_executions') }}
-            set collection_status = {{ dbt_dqm.sql_string('configuration_error') }},
-                collection_message = {{ dbt_dqm.sql_string('meta.dbt_dqm.granularity is required and cannot be empty.') }}
-            where invocation_id = {{ dbt_dqm.sql_string(invocation_id) }}
-              and test_unique_id = {{ dbt_dqm.sql_string(node.unique_id) }}
-          {% endset %}
-          {% do run_query(error_update) %}
-          {% do log('dbt-dqm skipped ' ~ node.unique_id ~ ': granularity is required', info=true) %}
-        {% elif key_columns | length != grain_lower | length %}
+        {% set missing_context_columns = [] %}
+        {% if capture_mode == 'allowlist' %}
+          {% for context_name in context_lower %}
+            {% set context_found = [] %}
+            {% for column in columns %}
+              {% if column.name | lower == context_name %}{% do context_found.append(column.name) %}{% endif %}
+            {% endfor %}
+            {% if context_found | length == 0 %}{% do missing_context_columns.append(context_name) %}{% endif %}
+          {% endfor %}
+        {% endif %}
+        {% if key_columns | length != grain_lower | length or missing_context_columns | length > 0 %}
+          {% set missing_columns_message = '' %}
+          {% if missing_context_columns | length > 0 %}
+            {% set missing_columns_message = '; missing context: ' ~ (missing_context_columns | join(', ')) %}
+          {% endif %}
           {% set error_update %}
             update {{ dbt_dqm.relation_name('dqm_test_executions') }}
             set collection_status = {{ dbt_dqm.sql_string('configuration_error') }},
                 collection_message = {{ dbt_dqm.sql_string(
-                  'Every meta.dbt_dqm.granularity column must exist in the test output. Configured: '
-                  ~ (configured_grain | join(', '))
+                  'Every configured granularity/context column must exist in the test output. '
+                  ~ 'Granularity: ' ~ (configured_grain | join(', '))
+                  ~ missing_columns_message
                 ) }}
             where invocation_id = {{ dbt_dqm.sql_string(invocation_id) }}
               and test_unique_id = {{ dbt_dqm.sql_string(node.unique_id) }}
@@ -147,17 +245,22 @@
 
           {% set record_pairs = [] %}
           {% for column in columns %}
-            {% set value_sql %}
-              case when {{ adapter.quote(column.name) }} is null then null
-                   else cast({{ adapter.quote(column.name) }} as {{ dbt.type_string() }}) end
-            {% endset %}
-            {% do record_pairs.append((column.name, value_sql)) %}
+            {% set normalized_column_name = column.name | lower %}
+            {% if capture_mode == 'full'
+              or normalized_column_name in grain_lower
+              or (capture_mode == 'allowlist' and normalized_column_name in context_lower) %}
+              {% set value_sql %}
+                case when {{ adapter.quote(column.name) }} is null then null
+                     else cast({{ adapter.quote(column.name) }} as {{ dbt.type_string() }}) end
+              {% endset %}
+              {% do record_pairs.append((column.name, value_sql)) %}
+            {% endif %}
           {% endfor %}
 
           {% set query %}
             with failure_rows as (
               select
-                {{ dbt_dqm.sha256_hex(dbt_dqm.json_object_string(key_pairs)) }} as unique_id,
+                {{ dbt_dqm.sha256_hex(dbt_dqm.canonical_identity_string(key_pairs)) }} as unique_id,
                 {{ dbt_dqm.json_object_string(record_pairs) }} as record_values_json
               from {{ relation }}
             ),

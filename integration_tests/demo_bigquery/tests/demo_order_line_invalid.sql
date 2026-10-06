@@ -8,6 +8,8 @@
     meta={
       'dbt_dqm': {
         'granularity': ['customer_id', 'order_id', 'line_id'],
+        'capture_mode': 'allowlist',
+        'context_columns': ['sku', 'quantity', 'unit_price', 'reason', 'source_system'],
         'poc_responsible': 'order_operations_owner',
         'call_to_action': 'Repair the invalid order-line values'
       }

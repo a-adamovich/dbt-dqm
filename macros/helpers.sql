@@ -14,7 +14,7 @@
   {%- if value is none -%}cast(null as {{ dbt.type_string() }})
   {%- else -%}'{{ (value | string)
     .replace('\\', '\\\\')
-    .replace("'", "''")
+    .replace("'", "\\'" )
     .replace('\r', '\\r')
     .replace('\n', '\\n') }}'
   {%- endif -%}
@@ -50,6 +50,18 @@
   {{ return(tojson(value).replace(', ', ',').replace(': ', ':')) }}
 {%- endmacro %}
 
+{# Validate cost/retention variables at compile time. Accept YAML integers only: silently
+   coercing strings, floats, zero, or negative values makes pruning behavior too easy to
+   misunderstand. #}
+{% macro positive_integer_var(name, default=none) %}
+  {% set value = var(name, default) %}
+  {% if value is none %}{{ return(none) }}{% endif %}
+  {% if value is boolean or value is not number or value | int != value or value | int <= 0 %}
+    {{ exceptions.raise_compiler_error(name ~ ' must be a positive integer when set.') }}
+  {% endif %}
+  {{ return(value | int) }}
+{% endmacro %}
+
 {# Create the hook-owned execution and observation tables when they do not yet exist. On
    BigQuery, partitioned by their event date and clustered by test so reconciliation and any
    future time-scoped query can prune instead of scanning the whole append-only history;
@@ -75,7 +87,11 @@
       failure_relation {{ dbt.type_string() }},
       collection_status {{ dbt.type_string() }},
       collection_message {{ dbt.type_string() }},
-      granularity_signature {{ dbt.type_string() }}
+      granularity_signature {{ dbt.type_string() }},
+      identity_scheme_signature {{ dbt.type_string() }}
+      , source_unique_id {{ dbt.type_string() }}
+      , source_relation {{ dbt.type_string() }}
+      , test_severity {{ dbt.type_string() }}
     );
     create table if not exists {{ dbt_dqm.relation_name('dqm_issue_observations') }} (
       invocation_id {{ dbt.type_string() }} not null,
@@ -88,6 +104,15 @@
       initial_poc_responsible {{ dbt.type_string() }},
       initial_call_to_action {{ dbt.type_string() }},
       test_tags {{ dbt.type_string() }}
+    );
+    create table if not exists {{ dbt_dqm.relation_name('dqm_reconciliation_state') }} (
+      test_unique_id {{ dbt.type_string() }} not null,
+      captured_at {{ dbt.type_timestamp() }} not null,
+      invocation_id {{ dbt.type_string() }} not null
+    );
+    create table if not exists {{ dbt_dqm.relation_name('dqm_schema_migrations') }} (
+      migration_id {{ dbt.type_string() }} not null,
+      applied_at {{ dbt.type_timestamp() }} not null
     );
 {% endmacro %}
 
@@ -107,7 +132,11 @@
       failure_relation {{ dbt.type_string() }},
       collection_status {{ dbt.type_string() }},
       collection_message {{ dbt.type_string() }},
-      granularity_signature {{ dbt.type_string() }}
+      granularity_signature {{ dbt.type_string() }},
+      identity_scheme_signature {{ dbt.type_string() }}
+      , source_unique_id {{ dbt.type_string() }}
+      , source_relation {{ dbt.type_string() }}
+      , test_severity {{ dbt.type_string() }}
     )
     partition by date(captured_at)
     cluster by test_unique_id;
@@ -125,6 +154,16 @@
     )
     partition by date(observed_at)
     cluster by test_unique_id, unique_id;
+    create table if not exists {{ dbt_dqm.relation_name('dqm_reconciliation_state') }} (
+      test_unique_id {{ dbt.type_string() }} not null,
+      captured_at {{ dbt.type_timestamp() }} not null,
+      invocation_id {{ dbt.type_string() }} not null
+    )
+    cluster by test_unique_id;
+    create table if not exists {{ dbt_dqm.relation_name('dqm_schema_migrations') }} (
+      migration_id {{ dbt.type_string() }} not null,
+      applied_at {{ dbt.type_timestamp() }} not null
+    );
 {% endmacro %}
 
 {# Apply the configured retention window, if any, to the hook-owned log tables via BigQuery
@@ -144,7 +183,7 @@
 
 {% macro bigquery__apply_retention_policy() %}
   {% if execute %}
-    {% set retention_days = var('dbt_dqm_retention_days', none) %}
+    {% set retention_days = dbt_dqm.positive_integer_var('dbt_dqm_retention_days', none) %}
     {% if retention_days is not none %}
       {% set custom_schema = var('dbt_dqm_schema', none) %}
       {% set capture_schema = target.schema if custom_schema is none else generate_schema_name(custom_schema, none) %}
@@ -191,7 +230,12 @@
       type='table'
     ) %}
     {% do dbt_dqm.ensure_column(execution_relation, 'granularity_signature', dbt.type_string()) %}
+    {% do dbt_dqm.ensure_column(execution_relation, 'identity_scheme_signature', dbt.type_string()) %}
+    {% do dbt_dqm.ensure_column(execution_relation, 'source_unique_id', dbt.type_string()) %}
+    {% do dbt_dqm.ensure_column(execution_relation, 'source_relation', dbt.type_string()) %}
+    {% do dbt_dqm.ensure_column(execution_relation, 'test_severity', dbt.type_string()) %}
     {% do dbt_dqm.ensure_unique_index(execution_relation, ['invocation_id', 'test_unique_id']) %}
+    {% do dbt_dqm.ensure_index(execution_relation, ['test_unique_id', 'captured_at', 'invocation_id'], 'reconcile') %}
     {% set observation_relation = api.Relation.create(
       database=target.database,
       schema=capture_schema,
@@ -199,6 +243,21 @@
       type='table'
     ) %}
     {% do dbt_dqm.ensure_unique_index(observation_relation, ['invocation_id', 'test_unique_id', 'unique_id']) %}
+    {% do dbt_dqm.ensure_index(observation_relation, ['test_unique_id', 'unique_id', 'invocation_id'], 'identity_join') %}
+    {% set state_relation = api.Relation.create(
+      database=target.database,
+      schema=capture_schema,
+      identifier='dqm_reconciliation_state',
+      type='table'
+    ) %}
+    {% do dbt_dqm.ensure_unique_index(state_relation, ['test_unique_id']) %}
+    {% set migration_relation = api.Relation.create(
+      database=target.database,
+      schema=capture_schema,
+      identifier='dqm_schema_migrations',
+      type='table'
+    ) %}
+    {% do dbt_dqm.ensure_unique_index(migration_relation, ['migration_id']) %}
     {% set column_names = adapter.get_columns_in_relation(observation_relation) | map(attribute='name') | map('lower') | list %}
     {% if 'record_values_json' not in column_names %}
       {% do run_query('alter table ' ~ observation_relation ~ ' add column record_values_json ' ~ dbt.type_string()) %}
@@ -245,6 +304,21 @@
     ) %}
     {% if occurrence_relation is not none %}
       {% do dbt_dqm.ensure_column(occurrence_relation, 'granularity_signature', dbt.type_string()) %}
+      {% do dbt_dqm.ensure_column(occurrence_relation, 'identity_scheme_signature', dbt.type_string()) %}
+      {% do dbt_dqm.ensure_column(occurrence_relation, 'workflow_status', dbt.type_string()) %}
+      {% do dbt_dqm.ensure_column(occurrence_relation, 'annotation_version', dbt.type_int()) %}
+      {% do dbt_dqm.ensure_column(occurrence_relation, 'source_unique_id', dbt.type_string()) %}
+      {% do dbt_dqm.ensure_column(occurrence_relation, 'source_relation', dbt.type_string()) %}
+      {% do dbt_dqm.ensure_column(occurrence_relation, 'test_severity', dbt.type_string()) %}
+      {% do run_query(
+        'update ' ~ occurrence_relation
+        ~ " set workflow_status = coalesce(workflow_status, test_status, 'NEW'), "
+        ~ 'annotation_version = coalesce(annotation_version, 0)'
+        ~ ' where workflow_status is null or annotation_version is null'
+      ) %}
+      {% do dbt_dqm.ensure_unique_index(occurrence_relation, ['occurrence_id']) %}
+      {% do dbt_dqm.ensure_index(occurrence_relation, ['test_unique_id', 'unique_id', 'occurrence_number'], 'identity_history') %}
+      {% do dbt_dqm.ensure_index(occurrence_relation, ['test_unique_id', 'unique_id'], 'active_identity', "record_status = 'Active'") %}
       {% set column_names = adapter.get_columns_in_relation(occurrence_relation) | map(attribute='name') | map('lower') | list %}
       {% if 'record_values_json' not in column_names %}
         {% do run_query('alter table ' ~ occurrence_relation ~ ' add column record_values_json ' ~ dbt.type_string()) %}
@@ -278,6 +352,95 @@
       {% if drop_columns | length > 0 %}
         {% do run_query('alter table ' ~ occurrence_relation ~ ' drop column ' ~ (drop_columns | join(', drop column '))) %}
       {% endif %}
+    {% endif %}
+  {% endif %}
+{% endmacro %}
+
+{# Record a package schema migration only after its idempotent migration body has succeeded. #}
+{% macro record_schema_migration(migration_id) %}
+  {% if execute %}
+    {% set columns = ['migration_id', 'applied_at'] %}
+    {% set source_sql %}
+      select {{ dbt_dqm.sql_string(migration_id) }} as migration_id,
+             {{ dbt.current_timestamp() }} as applied_at
+    {% endset %}
+    {% do run_query(dbt_dqm.insert_new_rows(
+      dbt_dqm.relation_name('dqm_schema_migrations'), source_sql, ['migration_id'], columns
+    )) %}
+  {% endif %}
+{% endmacro %}
+
+{# Portable explicit cleanup for append-only collection logs. The reconciliation state and
+   durable occurrence/audit tables are intentionally retained. #}
+{% macro cleanup_dqm_logs(retention_days=none) %}
+  {% if execute %}
+    {% set days = retention_days %}
+    {% if days is none %}{% set days = dbt_dqm.positive_integer_var('dbt_dqm_retention_days', none) %}{% endif %}
+    {% if days is none %}
+      {{ exceptions.raise_compiler_error(
+        'cleanup_dqm_logs requires retention_days or the dbt_dqm_retention_days variable.'
+      ) }}
+    {% endif %}
+    {% if days is boolean or days is not number or days | int != days or days | int <= 0 %}
+      {{ exceptions.raise_compiler_error('retention_days must be a positive integer.') }}
+    {% endif %}
+    {% do run_query(
+      'delete from ' ~ dbt_dqm.relation_name('dqm_issue_observations')
+      ~ ' where observed_at < ' ~ dbt.dateadd('day', -1 * (days | int), dbt.current_timestamp())
+    ) %}
+    {% do run_query(
+      'delete from ' ~ dbt_dqm.relation_name('dqm_test_executions')
+      ~ ' where captured_at < ' ~ dbt.dateadd('day', -1 * (days | int), dbt.current_timestamp())
+    ) %}
+  {% endif %}
+{% endmacro %}
+
+{% macro ensure_annotation_indexes() %}
+  {% if execute %}
+    {% set relation = api.Relation.create(
+      database=this.database,
+      schema=this.schema,
+      identifier='dqm_annotation_changes',
+      type='table'
+    ) %}
+    {% do dbt_dqm.ensure_index(
+      relation, ['occurrence_id', 'changed_at'], 'occurrence_audit'
+    ) %}
+  {% endif %}
+{% endmacro %}
+
+{# Advance the durable replay checkpoint only after dqm_reconcile has materialized successfully.
+   If this hook fails, the same executions are replayed on the next run; deterministic occurrence
+   IDs make that retry idempotent. #}
+{% macro advance_reconciliation_state() %}
+  {% if execute %}
+    {% set tracked_test_ids = [] %}
+    {% for node in graph.nodes.values() %}
+      {% if node.resource_type == 'test' and dbt_dqm.tracked_test(node) %}
+        {% do tracked_test_ids.append(node.unique_id) %}
+      {% endif %}
+    {% endfor %}
+    {% if tracked_test_ids | length > 0 %}
+      {% set quoted_ids = [] %}
+      {% for test_id in tracked_test_ids %}{% do quoted_ids.append(dbt_dqm.sql_string(test_id)) %}{% endfor %}
+      {% set source_sql %}
+        select test_unique_id, captured_at, invocation_id
+        from (
+          select
+            test_unique_id,
+            captured_at,
+            invocation_id,
+            row_number() over (
+              partition by test_unique_id order by captured_at desc, invocation_id desc
+            ) as replay_rank
+          from {{ dbt_dqm.relation_name('dqm_test_executions') }}
+          where collection_status in ('success', 'not_applicable')
+            and lower(test_status) in ('pass', 'warn', 'fail')
+            and test_unique_id in ({{ quoted_ids | join(', ') }})
+        ) ranked
+        where replay_rank = 1
+      {% endset %}
+      {% do run_query(dbt_dqm.upsert_reconciliation_state(source_sql)) %}
     {% endif %}
   {% endif %}
 {% endmacro %}

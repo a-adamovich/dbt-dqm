@@ -17,6 +17,8 @@
     ('dqm_issue_occurrences', 'table'),
     ('dqm_test_executions', 'table'),
     ('dqm_issue_observations', 'table'),
+    ('dqm_reconciliation_state', 'table'),
+    ('dqm_schema_migrations', 'table'),
     ('dqm_app_change_staging', 'table'),
     ('demo_customer_email_invalid', 'table'),
     ('demo_order_amount_invalid', 'table'),

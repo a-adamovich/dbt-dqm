@@ -1,5 +1,5 @@
 name: dbt_dqm
-version: 0.1.0
+version: 0.1.1
 config-version: 2
 require-dbt-version: [">=1.11.0", "<1.12.0"]
 
@@ -15,5 +15,8 @@ models:
     +schema: "{{ var('dbt_dqm_schema', none) }}"
     dqm_reconcile:
       +pre-hook:
-        - "{{ dbt_dqm.capture_tables_ddl() }}"
+        - "{{ dbt_dqm.ensure_capture_tables() }}"
         - "{{ dbt_dqm.migrate_occurrence_schema() }}"
+      +post-hook:
+        - "{{ dbt_dqm.record_schema_migration('001_identity_scheme_and_ordered_replay') }}"
+        - "{{ dbt_dqm.advance_reconciliation_state() }}"

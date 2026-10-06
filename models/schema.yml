@@ -28,6 +28,12 @@ models:
         description: Number of stored failure rows collapsed into this identity during observation.
       - name: test_tags
         description: Compact JSON text containing ordered test tags in dbt manifest order.
+      - name: source_unique_id
+        description: Manifest unique_id of the first model/source/seed/snapshot tested by this node.
+      - name: source_relation
+        description: Warehouse relation name of that tested resource when dbt exposes one.
+      - name: test_severity
+        description: dbt test severity captured from the test configuration.
       - name: first_seen_at
         description: Timestamp when this lifecycle occurrence was first observed.
       - name: last_seen_at
@@ -53,8 +59,10 @@ models:
         description: Latest dbt invocation in which this identity failed.
       - name: last_evaluated_invocation
         description: Latest conclusive invocation reconciled for the parent test.
-      - name: test_status
+      - name: workflow_status
         description: Reviewer-editable workflow status, initialized to NEW for every occurrence.
+      - name: test_status
+        description: Deprecated 0.x compatibility alias synchronized with workflow_status.
       - name: call_to_action
         description: Reviewer-editable next action, optionally initialized from test meta.
       - name: ticket_url
@@ -65,11 +73,15 @@ models:
         description: Reviewer-editable owner, optionally initialized from test meta.
       - name: annotation_updated_at
         description: Timestamp of the most recent local-app annotation apply.
+      - name: annotation_version
+        description: Monotonic compare-and-set version for concurrent annotation updates.
       - name: granularity_signature
         description: >
           Case-folded, order-preserved JSON array of the test's configured meta.dbt_dqm.granularity
           columns, recorded at the invocation that last touched this occurrence. Used to detect a
           grain/identity-scheme change so it isn't mistaken for a genuine pass.
+      - name: identity_scheme_signature
+        description: Versioned identity algorithm plus ordered grain, used for identity changes.
 
   - name: dqm_current_issues
     description: >
@@ -82,7 +94,7 @@ models:
         description: Always Active in this view.
       - name: unique_id
         description: Case-insensitive identity derived from configured granularity.
-      - name: test_status
+      - name: workflow_status
         description: Reviewer-managed workflow status.
 
   - name: dqm_all_issues
@@ -118,3 +130,7 @@ models:
         description: Timestamp when the local patch version was created.
       - name: changed_by
         description: Local operating-system user that applied the batch.
+      - name: base_annotation_version
+        description: Occurrence annotation version locked and read by the server before applying.
+      - name: resulting_annotation_version
+        description: Occurrence annotation version after the audited batch was applied.
