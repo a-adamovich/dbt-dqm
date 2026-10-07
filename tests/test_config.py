@@ -76,3 +76,23 @@ consumer_profile:
         "custom_governance",
         "renamed_issue_history",
     )
+
+
+def test_postgres_profile_accepts_password_key_alias(tmp_path):
+    project, profiles = _project(tmp_path)
+    (profiles / "profiles.yml").write_text(
+        """
+consumer_profile:
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 5432
+      user: reviewer
+      password: spelled-out
+      dbname: analytics
+      schema: quality
+"""
+    )
+
+    assert load_config(project, profiles, "dev").password == "spelled-out"

@@ -8,8 +8,12 @@
 - Adds known missed-issue reporting and warehouse health views with explicit populations, denominators and local offline snapshots.
 - Retires reconciliation lookback and unconditional BigQuery raw-log expiration. Receipt-aware retention preserves unprocessed evidence; events have separate opt-in retention.
 - Emits native BigQuery table/view grants without revoking unrelated access, and normalizes timestamp arithmetic for portable health and recovery filters.
-- Schema-only runs require initialized current tables and leave tracking data unchanged.
+- Schema-only (`--empty`) runs require initialized current tables, leave tracking data unchanged, and keep the public views serving real data.
 - BigQuery adapter parity remains gated on credentialed lifecycle/concurrency tests.
+- Capture copies each stored-failure table once and rejects it as `collection_error` when its row count differs from dbt's `result.failures`, including passing tests, so an overwritten table never becomes lifecycle evidence.
+- The review app verifies each sync before replacing its cache: setup must be ready, the control generation unchanged across the read, and the issue view's row count must match the tracking table. Inconsistent or unavailable data keeps the cache and pending edits; a verified empty result replaces it.
+- Postgres app connections use a lock timeout (`--lock-timeout`, default 5 seconds). Writes blocked by a running reconciliation, and BigQuery transaction conflicts, report the warehouse as busy without changing data. Sync and setup failures show a short message with technical details on request.
+- The app reads a Postgres profile's password from either `pass` or `password`, as dbt does.
 
 
 ## 0.1.1 - Unreleased

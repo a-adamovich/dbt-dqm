@@ -1,5 +1,8 @@
 # dbt-dqm
 
+> **`main` is 0.2.0-dev and unreleased.** It needs a fresh DQM schema and isn't covered by a
+> release tag yet. For stable use, pin `revision: v0.1.0`.
+
 Version 0.2 requires a **fresh DQM schema**. Set `dbt_dqm_schema` to a new schema; the package preserves existing 0.1 tables and rejects reusing them. See [warehouse interfaces](docs/warehouse-interfaces.md) for installation, migration, grants, recovery, health populations and retention changes, and [verification](docs/implementation-0.2.md) for release checks.
 
 dbt-dqm is an open-source dbt package for persistent, row-level test issue tracking plus a
@@ -106,6 +109,12 @@ dbt-dqm workspace purge --project-dir /path/to/project --target demo
 
 By default SQLite retains Active issues plus 90 days of Archived history. Pass
 `--archive-cache-days 0` to cache Active issues only, or choose another non-negative window.
+
+Each sync is verified before it replaces the cache. If dbt-dqm setup is still in progress, a
+reconciliation finished mid-sync, or the issue view disagrees with the tracking table, the app
+keeps the cached data and your pending edits and asks you to sync again. On Postgres, a write that
+waits on a running reconciliation gives up after `--lock-timeout` seconds (default 5) and reports
+the warehouse as busy; nothing is changed, and you can retry.
 
 ## BigQuery demo
 

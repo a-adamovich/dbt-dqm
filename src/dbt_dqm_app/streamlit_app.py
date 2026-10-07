@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import os
 import time
@@ -27,6 +28,7 @@ from dbt_dqm_app.display import (
     workflow_status_help,
     workflow_status_options,
 )
+from dbt_dqm_app.errors import classify
 from dbt_dqm_app.store import EDITABLE_FIELDS, Workspace
 from dbt_dqm_app.warehouse import (
     MISSED_ROOT_CAUSES,
@@ -37,6 +39,8 @@ from dbt_dqm_app.warehouse import (
 )
 
 PAGE_SIZE_OPTIONS = [25, 50, 100, 200]
+
+logger = logging.getLogger(__name__)
 
 
 @st.cache_resource
@@ -98,21 +102,33 @@ def run_app() -> None:
     if job is not None and job.done():
         try:
             if st.session_state.job_kind == "apply":
-                batch_id, snapshot = job.result()
+                batch_id, snapshot, refresh_error = job.result()
                 workspace.clear_applied(st.session_state.job_patches)
-                workspace.replace_snapshot(snapshot["issues"])
-                workspace.replace_health(snapshot["health"])
-                st.session_state.job_notice = (
-                    "success",
-                    f"Applied batch {batch_id} and synchronized local data.",
-                )
+                if refresh_error is None:
+                    workspace.replace_snapshot(snapshot["issues"])
+                    workspace.replace_health(snapshot["health"])
+                    st.session_state.job_notice = (
+                        "success",
+                        f"Applied batch {batch_id} and synchronized local data.",
+                        "",
+                    )
+                else:
+                    st.session_state.job_notice = (
+                        "warning",
+                        f"Applied batch {batch_id}, but refreshing local data failed. {refresh_error.message}",
+                        refresh_error.details,
+                    )
             else:
                 snapshot = job.result()
                 workspace.replace_snapshot(snapshot["issues"])
                 workspace.replace_health(snapshot["health"])
-                st.session_state.job_notice = ("success", "Local data synchronized.")
+                st.session_state.job_notice = ("success", "Local data synchronized.", "")
         except Exception as error:  # noqa: BLE001 - patches must survive worker failures.
-            st.session_state.job_notice = ("error", f"Background job failed: {error}")
+            failure = classify(error)
+            logger.warning(
+                "Background %s job failed: %s", st.session_state.job_kind, failure.details
+            )
+            st.session_state.job_notice = ("error", failure.message, failure.details)
         finally:
             st.session_state.job = None
             st.session_state.job_kind = None
@@ -121,8 +137,11 @@ def run_app() -> None:
 
     notice = st.session_state.job_notice
     if notice is not None:
-        level, message = notice
+        level, message, details = notice
         getattr(st, level)(message)
+        if details:
+            with st.expander("Technical details"):
+                st.code(details, language=None)
         st.session_state.job_notice = None
 
     busy = st.session_state.job is not None
@@ -616,7 +635,11 @@ def _render_missed_form(config) -> None:
         try:
             insert_missed_issue(config, issue)
         except Exception as error:  # noqa: BLE001 - retain submission ID for safe retry.
-            st.error(f"Report could not be confirmed; retry uses the same ID. {error}")
+            failure = classify(error)
+            logger.warning("Missed-issue submission failed: %s", failure.details)
+            st.error(f"Report could not be confirmed; retry uses the same ID. {failure.message}")
+            with st.expander("Technical details"):
+                st.code(failure.details, language=None)
         else:
             st.success("Missed issue recorded. Synchronize to refresh health reporting.")
             st.session_state.missed_submission_id = str(uuid.uuid4())
