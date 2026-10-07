@@ -7,6 +7,7 @@
 - Adds row owners, conflict warnings, priority/criticality, visible tags, independent review verdicts, recurrence context, timeline and durable payload-change events.
 - Adds known missed-issue reporting and warehouse health views with explicit populations, denominators and local offline snapshots.
 - Retires reconciliation lookback and unconditional BigQuery raw-log expiration. Receipt-aware retention preserves unprocessed evidence; events have separate opt-in retention.
+- Emits native BigQuery table/view grants without revoking unrelated access, and normalizes timestamp arithmetic for portable health and recovery filters.
 - Schema-only runs require initialized current tables and leave tracking data unchanged.
 - BigQuery adapter parity remains gated on credentialed lifecycle/concurrency tests.
 

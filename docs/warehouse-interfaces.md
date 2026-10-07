@@ -60,9 +60,13 @@ Raw-log retention is opt-in, receipt-aware and portable. Observations, execution
 
 `run --empty` and `build --empty` require initialized current tracking tables. They skip capture, reconciliation, migrations, table grants and cleanup, and project zero rows. Ordinary dbt relation DDL still occurs; no DQM tracking-data changes occur.
 
+## Capture concurrency
+
+Serialize dbt test invocations that share a stored-failure schema. dbt overwrites each test's failure table, which the on-run-end capture reads; overlapping invocations could otherwise capture another invocation's rows. The reconciliation generation protocol protects apply concurrency, while this capture-side boundary still requires runner coordination.
+
 ## Grants
 
-Public-view grants use normal dbt model configuration. `dbt_dqm_table_grants` maps each table to native privileges and lists of principals. Setup only grants requested privileges; it never revokes unrelated grants.
+Public-view grants use normal dbt model configuration. On BigQuery, a package post-hook emits native DCL because dbt-bigquery 1.11 does not apply view grants itself. Roles and principals are quoted; empty principal lists emit no grant. `dbt_dqm_table_grants` maps each table to native privileges and lists of principals. Setup only grants requested privileges; it never revokes unrelated grants.
 
 ```yaml
 vars:
