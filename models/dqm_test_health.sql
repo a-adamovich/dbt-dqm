@@ -14,7 +14,7 @@ review as (
 backlog as (
   select test_unique_id,count(*) as active_issues,
     avg({{ dbt.datediff('first_seen_at',dbt.current_timestamp(),'hour') }} / 24.0) as avg_active_age_days,
-    sum(case when workflow_status='NEW' and first_seen_at < {{ dbt.dateadd('day',-stale,dbt.current_timestamp()) }} then 1 else 0 end) as stale_new_issues,
+    sum(case when workflow_status='NEW' and first_seen_at < {{ dbt_dqm.timestamp_add('day',-stale,dbt.current_timestamp()) }} then 1 else 0 end) as stale_new_issues,
     sum(case when workflow_status='ACCEPTED_RISK' then 1 else 0 end) as accepted_risk_count
   from {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} where record_status='Active' group by test_unique_id
 ),

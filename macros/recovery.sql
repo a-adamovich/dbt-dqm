@@ -8,8 +8,11 @@ begin{% if target.type=='bigquery' %} transaction{% endif %};
 {% macro dqm_skip_late_evidence(items,reason) %}
   {% if dbt_dqm.empty_mode() %}{{ return('') }}{% endif %}
   {% if not items or reason is not string or not reason|trim %}{{ exceptions.raise_compiler_error('items and a nonblank reason are required.') }}{% endif %}
-  {% set values=[] %}{% for item in items %}
+  {% set values=[] %}{% set identities=[] %}{% for item in items %}
     {% if not item.get('test_unique_id') or not item.get('invocation_id') %}{{ exceptions.raise_compiler_error('Each item needs test_unique_id and invocation_id.') }}{% endif %}
+    {% set identity=[item.test_unique_id,item.invocation_id] %}
+    {% if identity in identities %}{{ exceptions.raise_compiler_error('Late-evidence items must be distinct.') }}{% endif %}
+    {% do identities.append(identity) %}
     {% do values.append('select ' ~ dbt_dqm.sql_string(item.test_unique_id) ~ ' as test_unique_id, ' ~ dbt_dqm.sql_string(item.invocation_id) ~ ' as invocation_id') %}
   {% endfor %}
   {% set requested=values|join(' union all ') %}
@@ -47,7 +50,7 @@ begin{% if target.type=='bigquery' %} transaction{% endif %};
   {% if older_than_minutes is boolean or older_than_minutes is not number or older_than_minutes|int!=older_than_minutes or older_than_minutes<=0 %}{{ exceptions.raise_compiler_error('older_than_minutes must be a positive integer.') }}{% endif %}
   {% set sql %}{{ dbt_dqm.recovery_begin() }}
     update {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }} set status='abandoned',completed_at={{ dbt.current_timestamp() }}
-    where status='started' and started_at < {{ dbt.dateadd('minute',-older_than_minutes,dbt.current_timestamp()) }};
+    where status='started' and started_at < {{ dbt_dqm.timestamp_add('minute',-older_than_minutes,dbt.current_timestamp()) }};
     update {{ dbt_dqm.dqm_relation('dqm_reconciliation_control') }} set generation=generation+1 where true;
     {{ dbt_dqm.recovery_commit() }}
   {% endset %}
@@ -78,11 +81,11 @@ begin{% if target.type=='bigquery' %} transaction{% endif %};
   {% set events_days=dbt_dqm.positive_integer_var('dbt_dqm_event_retention_days',none) %}
   {% set sql %}{{ dbt_dqm.recovery_begin() }}
     {% if days is not none %}
-      update {{ dbt_dqm.dqm_relation('dqm_reconciliation_control') }} set raw_pruned_before=case when raw_pruned_before > {{ dbt.dateadd('day',-days,dbt.current_timestamp()) }} then raw_pruned_before else {{ dbt.dateadd('day',-days,dbt.current_timestamp()) }} end,generation=generation+1 where true;
+      update {{ dbt_dqm.dqm_relation('dqm_reconciliation_control') }} set raw_pruned_before=case when raw_pruned_before > {{ dbt_dqm.timestamp_add('day',-days,dbt.current_timestamp()) }} then raw_pruned_before else {{ dbt_dqm.timestamp_add('day',-days,dbt.current_timestamp()) }} end,generation=generation+1 where true;
       {% set eligible %}select execution.test_unique_id,execution.invocation_id
       from {{ dbt_dqm.dqm_relation('dqm_test_executions') }} execution
       inner join {{ dbt_dqm.dqm_relation('dqm_reconciliation_receipts') }} receipt using(test_unique_id,invocation_id)
-      where execution.captured_at < {{ dbt.dateadd('day',-days,dbt.current_timestamp()) }}
+      where execution.captured_at < {{ dbt_dqm.timestamp_add('day',-days,dbt.current_timestamp()) }}
       and not exists(select 1 from {{ dbt_dqm.dqm_relation('dqm_reconciliation_inputs') }} input
         inner join {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }} run using(run_id)
         where run.status='started' and input.test_unique_id=execution.test_unique_id and input.invocation_id=execution.invocation_id)
@@ -94,7 +97,7 @@ begin{% if target.type=='bigquery' %} transaction{% endif %};
           where prune.test_unique_id=target.test_unique_id and prune.invocation_id=target.invocation_id);
       {% endfor %}
     {% endif %}
-    {% if events_days is not none %}delete from {{ dbt_dqm.dqm_relation('dqm_issue_events') }} where event_at < {{ dbt.dateadd('day',-events_days,dbt.current_timestamp()) }};{% endif %}
+    {% if events_days is not none %}delete from {{ dbt_dqm.dqm_relation('dqm_issue_events') }} where event_at < {{ dbt_dqm.timestamp_add('day',-events_days,dbt.current_timestamp()) }};{% endif %}
     {{ dbt_dqm.recovery_commit() }}
   {% endset %}
   {{ sql }}
@@ -103,8 +106,8 @@ begin{% if target.type=='bigquery' %} transaction{% endif %};
     {% set prune_runs %}
       {{ dbt_dqm.recovery_begin() }}
       delete from {{ dbt_dqm.dqm_relation('dqm_reconciliation_inputs') }} input where exists(select 1 from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }} run
-        where run.run_id=input.run_id and run.status!='started' and run.completed_at < {{ dbt.dateadd('day',-days,dbt.current_timestamp()) }});
-      delete from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }} where status!='started' and completed_at < {{ dbt.dateadd('day',-days,dbt.current_timestamp()) }};
+        where run.run_id=input.run_id and run.status!='started' and run.completed_at < {{ dbt_dqm.timestamp_add('day',-days,dbt.current_timestamp()) }});
+      delete from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }} where status!='started' and completed_at < {{ dbt_dqm.timestamp_add('day',-days,dbt.current_timestamp()) }};
       {{ dbt_dqm.recovery_commit() }}
     {% endset %}{{ prune_runs }}
   {% endif %}

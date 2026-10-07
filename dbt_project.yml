@@ -16,6 +16,7 @@ on-run-start:
 
 models:
   dbt_dqm:
+    +post-hook: "{{ dbt_dqm.public_view_grants() }}"
     +schema: "{{ var('dbt_dqm_schema', none) }}"
     dqm_reconcile:
       +pre-hook:

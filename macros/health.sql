@@ -44,5 +44,5 @@
   cast({{ numerator }} as {{ dbt.type_float() }}) / nullif({{ denominator }},0)
 {% endmacro %}
 {% macro health_window_start() %}
-  {{ dbt.dateadd('day',-dbt_dqm.positive_integer_var('dbt_dqm_metrics_window_days',30),dbt.current_timestamp()) }}
+  {{ dbt_dqm.timestamp_add('day',-dbt_dqm.positive_integer_var('dbt_dqm_metrics_window_days',30),dbt.current_timestamp()) }}
 {% endmacro %}

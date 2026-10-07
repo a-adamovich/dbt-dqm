@@ -166,13 +166,30 @@
   alter table {{ relation }} add column if not exists {{ adapter.quote(column_name) }} {{ column_type }};
 {% endmacro %}
 
-{% macro table_grants_sql(name,grants) %}
+{% macro native_grants_sql(relation,grants,resource_type='TABLE') %}
   {% if grants is not mapping %}{{ exceptions.raise_compiler_error('Grants must map native privileges to principal lists.') }}{% endif %}
   {% for privilege, grantees in grants.items() %}
     {% if grantees is string or grantees is not sequence %}{{ exceptions.raise_compiler_error('Grant principals must be a list.') }}{% endif %}
-    {{ dbt.get_grant_sql(dbt_dqm.dqm_relation(name),privilege,grantees) }};
+    {% if grantees|length > 0 %}
+      {% if target.type=='bigquery' %}
+        grant {{ adapter.quote(privilege) }} on {{ resource_type }} {{ relation }} to
+        {% for principal in grantees %}{{ dbt_dqm.sql_string(principal) }}{% if not loop.last %}, {% endif %}{% endfor %};
+      {% else %}
+        {{ dbt.get_grant_sql(relation,privilege,grantees) }};
+      {% endif %}
+    {% endif %}
   {% endfor %}
 {% endmacro %}
+{% macro table_grants_sql(name,grants) %}
+  {{ dbt_dqm.native_grants_sql(dbt_dqm.dqm_relation(name),grants) }}
+{% endmacro %}
+
+{% macro public_view_grants() %}
+  {# dbt-bigquery's view materialization does not apply config.grants. #}
+  {% if not execute or dbt_dqm.empty_mode() or target.type!='bigquery' or config.get('materialized')!='view' %}{{ return('') }}{% endif %}
+  {{ dbt_dqm.native_grants_sql(this,config.get('grants',{}),'VIEW') }}
+{% endmacro %}
+
 {% macro app_table_finish(name) %}
   {% if not execute or dbt_dqm.empty_mode() %}{{ return('') }}{% endif %}
   {% if target.type=='postgres' %}

@@ -50,7 +50,7 @@ def protocol_project(tmp_path_factory):
     return project, profiles
 
 
-def render(protocol_project, monkeypatch, macro):
+def render(protocol_project, monkeypatch, macro, arguments=""):
     project, profiles = protocol_project
 
     def closed(cls, connection):
@@ -68,7 +68,7 @@ def render(protocol_project, monkeypatch, macro):
             "compile",
             "--no-introspect",
             "--inline",
-            "{{ dbt_dqm." + macro + "() }}",
+            "{{ dbt_dqm." + macro + "(" + arguments + ") }}",
             "--project-dir",
             str(project),
             "--profiles-dir",
@@ -118,3 +118,47 @@ def test_bigquery_runtime_stages_and_manifest_stay_stable(protocol_project, monk
     assert "interval 60 minute), generation=generation+1 where true;" in first
     assert "Late DQM evidence" in first
     assert "dqm_reconciliation_inputs" in first
+
+
+def test_duplicate_late_skip_is_rejected_before_warehouse_access(
+    protocol_project, monkeypatch, capsys
+):
+    project, profiles = protocol_project
+
+    def closed(cls, connection):
+        connection.state = ConnectionState.CLOSED
+        return connection
+
+    def reject(*args, **kwargs):
+        raise AssertionError("Duplicate skip attempted warehouse access")
+
+    monkeypatch.setattr(BigQueryConnectionManager, "close", classmethod(closed))
+    monkeypatch.setattr(BigQueryConnectionManager, "open", classmethod(reject))
+    item = {"test_unique_id": "test.example.check", "invocation_id": "original-run"}
+    result = dbtRunner().invoke(
+        [
+            "run-operation",
+            "dqm_skip_late_evidence",
+            "--args",
+            json.dumps({"items": [item, item], "reason": "Reviewed delayed evidence"}),
+            "--project-dir",
+            str(project),
+            "--profiles-dir",
+            str(profiles),
+        ]
+    )
+    assert not result.success
+    assert "Late-evidence items must be distinct" in capsys.readouterr().out
+
+
+def test_bigquery_native_grants_quote_roles_and_principals(protocol_project, monkeypatch):
+    sql = render(
+        protocol_project,
+        monkeypatch,
+        "native_grants_sql",
+        "dbt_dqm.dqm_relation('dqm_issue_occurrences'), "
+        "{'roles/bigquery.dataViewer': ['serviceAccount:demo@example.iam.gserviceaccount.com']}",
+    )
+    assert "grant `roles/bigquery.dataViewer` on TABLE" in sql
+    assert "'serviceAccount:demo@example.iam.gserviceaccount.com'" in sql
+    assert "revoke" not in sql.lower()

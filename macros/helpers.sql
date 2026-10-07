@@ -65,3 +65,6 @@
   {% endif %}
   {{ return(value | int) }}
 {% endmacro %}
+{% macro timestamp_add(datepart, interval, expression) %}
+  cast({{ dbt.dateadd(datepart, interval, expression) }} as {{ dbt.type_timestamp() }})
+{% endmacro %}
