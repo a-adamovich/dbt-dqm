@@ -363,3 +363,50 @@ def test_bigquery_app_audit_missed_retry_and_health(demo):
     assert health["tests"] and health["areas"]
     assert sum(item["assessed_count"] for item in health["tests"]) == 1
     assert sum(item["known_missed_issue_count"] for item in health["areas"]) == 1
+
+
+def test_bigquery_retention_keeps_unprocessed_evidence_and_durable_events(demo):
+    demo.capture("initial")
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    before = demo.snapshot()
+    events = demo.sql("select * from @dataset.dqm_issue_events` order by event_id")
+    state = demo.sql("select * from @dataset.dqm_reconciliation_state` order by test_unique_id")
+    unprocessed = demo.sql(
+        "select execution.test_unique_id,execution.invocation_id from @dataset.dqm_test_executions` execution where not exists(select 1 from @dataset.dqm_reconciliation_receipts` receipt where receipt.test_unique_id=execution.test_unique_id and receipt.invocation_id=execution.invocation_id)"
+    )
+    demo.sql(
+        "update @dataset.dqm_test_executions` set captured_at=timestamp_sub(current_timestamp(),interval 45 day) where true"
+    )
+    demo.sql(
+        "insert into @dataset.dqm_test_executions` (invocation_id,captured_at,test_unique_id,test_status,collection_status) values ('unprocessed',timestamp_sub(current_timestamp(),interval 45 day),'untracked-retention-fixture','pass','not_applicable')"
+    )
+    demo.dbt("run-operation", "cleanup_dqm_logs", "--args", '{"retention_days":30}')
+    remaining = demo.sql("select test_unique_id,invocation_id from @dataset.dqm_test_executions`")
+    expected = unprocessed + [
+        {"test_unique_id": "untracked-retention-fixture", "invocation_id": "unprocessed"}
+    ]
+    assert sorted(
+        remaining, key=lambda row: (row["test_unique_id"], row["invocation_id"])
+    ) == sorted(expected, key=lambda row: (row["test_unique_id"], row["invocation_id"]))
+    assert not demo.sql("select * from @dataset.dqm_issue_observations`")
+    assert not demo.sql("select * from @dataset.dqm_reconciliation_receipts`")
+    assert demo.sql("select * from @dataset.dqm_issue_events` order by event_id") == events
+    assert (
+        demo.sql("select * from @dataset.dqm_reconciliation_state` order by test_unique_id")
+        == state
+    )
+    demo.dbt("run", "--select", "dqm_reconcile")
+    assert demo.snapshot() == before
+
+
+def test_bigquery_uninitialized_empty_and_legacy_rejection_have_no_marker(demo):
+    demo.dbt("run", "--empty", "--select", "dqm_reconcile", success=False)
+    assert not demo.sql(
+        "select table_name from @dataset.INFORMATION_SCHEMA.TABLES` where table_name like 'dqm_%'"
+    )
+    demo.sql("create table @dataset.dqm_annotation_changes` (legacy_marker string)")
+    demo.dbt("run-operation", "acceptance_setup", success=False)
+    names = demo.sql(
+        "select table_name from @dataset.INFORMATION_SCHEMA.TABLES` where table_name like 'dqm_%'"
+    )
+    assert names == [{"table_name": "dqm_annotation_changes"}]
