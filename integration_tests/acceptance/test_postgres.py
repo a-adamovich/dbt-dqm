@@ -601,3 +601,153 @@ def test_app_write_fails_fast_while_reconciliation_holds_the_table(demo):
     apply_patches(config, [patch])
     applied = next(r for r in demo.occurrences() if r["occurrence_id"] == row["occurrence_id"])
     assert applied["notes"] == "edited after reconciliation"
+
+
+def test_capture_completing_after_a_later_run_is_late_evidence(demo):
+    """A real capture whose collection commits after a later capture was reconciled.
+
+    Holding the first capture at 'pending' stands in for its transaction committing late; the
+    reconciliation in between must exclude it, and once it becomes visible it is older than the
+    processed high-water and must be rejected before any lifecycle write.
+    """
+    customer = "demo_customer_email_invalid"
+    demo.capture()
+    demo.dbt("run", "--select", "dqm_reconcile")
+    demo.capture("passed")
+    slow = _latest_execution(demo, customer)
+    demo.sql(
+        "update @schema.dqm_test_executions set collection_status='pending' where invocation_id=%s",
+        [slow["invocation_id"]],
+    )
+    demo.capture("recurrence")
+    demo.dbt("run", "--select", "dqm_reconcile")
+    assert not demo.sql(
+        "select 1 from @schema.dqm_reconciliation_receipts where invocation_id=%s",
+        [slow["invocation_id"]],
+    )
+    before = demo.occurrences()
+    receipts = demo.sql("select * from @schema.dqm_reconciliation_receipts order by 1,2")
+
+    demo.sql(
+        "update @schema.dqm_test_executions set collection_status=%s "
+        "where invocation_id=%s and test_unique_id=%s",
+        [slow["collection_status"], slow["invocation_id"], slow["test_unique_id"]],
+    )
+    late = demo.dbt("run", "--select", "dqm_reconcile", success=False)
+    assert "Late DQM evidence" in late.stdout
+    assert slow["invocation_id"] in late.stdout
+    assert demo.occurrences() == before
+    assert demo.sql("select * from @schema.dqm_reconciliation_receipts order by 1,2") == receipts
+
+    items = [{"test_unique_id": slow["test_unique_id"], "invocation_id": slow["invocation_id"]}]
+    demo.dbt(
+        "run-operation",
+        "dqm_skip_late_evidence",
+        "--args",
+        json.dumps({"items": items, "reason": "Capture committed after a later run"}),
+    )
+    demo.dbt("run", "--select", "dqm_reconcile")
+    assert demo.occurrences() == before
+    skipped = demo.sql(
+        "select * from @schema.dqm_issue_events where event_type='EVIDENCE_SKIPPED' "
+        "and invocation_id=%s",
+        [slow["invocation_id"]],
+    )
+    assert len(skipped) == len(items)
+
+
+def test_restricted_runner_and_reviewer_use_only_documented_grants(demo):
+    """A non-superuser runner builds everything; a reviewer with only the documented grants can
+    perform every app operation and nothing else."""
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.store import Patch
+    from dbt_dqm_app.warehouse import apply_patches, fetch_health, fetch_issues, insert_missed_issue
+
+    suffix = demo.schema.removeprefix("dqm_it_")
+    runner, reviewer = f"dqm_runner_{suffix}", f"dqm_reviewer_{suffix}"
+    password = f"restricted-{suffix}"
+    schema = f"{demo.schema}_restricted"
+    dbname = parse_dsn(DSN)["dbname"]
+    for role in (runner, reviewer):
+        demo.sql(f'create role "{role}" login password %s', [password])
+    demo.sql(f'grant create on database "{dbname}" to "{runner}"')
+
+    def profiles_for(user, directory):
+        directory.mkdir()
+        profile = yaml.safe_load((demo.profiles / "profiles.yml").read_text())
+        output = profile["dbt_dqm_demo_postgres"]["outputs"]["dev"]
+        output.update({"user": user, "password": password, "schema": schema})
+        (directory / "profiles.yml").write_text(yaml.safe_dump(profile))
+        return directory
+
+    config_path = demo.project / "dbt_project.yml"
+    project = yaml.safe_load(config_path.read_text())
+    project["models"]["dbt_dqm"]["+grants"] = {"select": [reviewer]}
+    project.setdefault("vars", {})["dbt_dqm_table_grants"] = {
+        "dqm_reconciliation_control": {"select": [reviewer]},
+        "dqm_issue_occurrences": {"select": [reviewer], "update": [reviewer]},
+        "dqm_annotation_changes": {"select": [reviewer], "insert": [reviewer]},
+        "dqm_missed_issues": {"select": [reviewer], "insert": [reviewer]},
+    }
+    config_path.write_text(yaml.safe_dump(project, sort_keys=False))
+    as_runner = Demo(demo.project, profiles_for(runner, demo.project.parent / "runner"), schema)
+    try:
+        as_runner.dbt("seed")
+        as_runner.capture()
+        as_runner.dbt("build", "--select", "package:dbt_dqm")
+        as_runner.capture("passed")
+        as_runner.dbt("run", "--select", "dqm_reconcile")
+        as_runner.sql(f'grant usage on schema "{schema}" to "{reviewer}"')
+
+        reviewer_profiles = profiles_for(reviewer, demo.project.parent / "reviewer")
+        config = load_config(demo.project, reviewer_profiles, "dev")
+        issues = fetch_issues(config)
+        assert len(issues) == len(as_runner.occurrences())
+        assert fetch_health(config)["tests"]
+        row = issues[0]
+        patch = Patch(
+            row["occurrence_id"],
+            "notes",
+            row.get("notes"),
+            "reviewed with restricted grants",
+            1,
+            datetime.now(UTC).isoformat(),
+            row["annotation_version"],
+        )
+        apply_patches(config, [patch])
+        insert_missed_issue(
+            config,
+            {
+                "missed_issue_id": f"restricted-{suffix}",
+                "area_label": "Restricted reviewer check",
+                "description": "Filed by the restricted reviewer",
+                "root_cause": "no_test",
+                "discovered_at": datetime.now(UTC).isoformat(),
+            },
+        )
+
+        reviewer_dsn = " ".join(
+            f"{key}={value}"
+            for key, value in {**parse_dsn(DSN), "user": reviewer, "password": password}.items()
+        )
+        for statement in (
+            f'delete from "{schema}".dqm_issue_occurrences',
+            f'update "{schema}".dqm_reconciliation_control set generation = generation + 1',
+            (
+                f'insert into "{schema}".dqm_reconciliation_receipts '
+                "(test_unique_id, invocation_id) values ('x', 'y')"
+            ),
+            f'select * from "{schema}".dqm_test_executions',
+        ):
+            with (
+                psycopg2.connect(reviewer_dsn) as conn,
+                conn.cursor() as cursor,
+                pytest.raises(psycopg2.errors.InsufficientPrivilege),
+            ):
+                cursor.execute(statement)
+    finally:
+        as_runner.sql(f'drop schema if exists "{schema}" cascade')
+        as_runner.sql(f'drop schema if exists "{schema}_dbt_test__audit" cascade')
+        for role in (runner, reviewer):
+            as_runner.sql(f'drop owned by "{role}" cascade')
+            as_runner.sql(f'drop role "{role}"')

@@ -74,6 +74,8 @@ Public-view grants use normal dbt model configuration. On BigQuery, a package po
 vars:
   dbt_dqm_schema: dqm_v02
   dbt_dqm_table_grants:
+    dqm_reconciliation_control:
+      select: [dqm_reviewer]
     dqm_issue_occurrences:
       select: [dqm_reviewer]
       update: [dqm_reviewer]
@@ -85,7 +87,9 @@ vars:
       insert: [dqm_reviewer]
 ```
 
-On BigQuery use native IAM privilege maps, e.g. `roles/bigquery.dataViewer: ["user:reviewer@example.com"]` and `roles/bigquery.dataEditor` on writable tables. The runner also needs dataset table creation and control/migration permissions. The app needs reads on public issue/health views and direct reads of occurrences/audit, occurrence updates, audit inserts and missed-issue inserts. The BigQuery app's existing annotation staging path additionally needs staging-table create/load/read access and jobs.create; Postgres does not create app staging tables.
+This is the complete reviewer grant set on Postgres, together with `+grants: {select: [dqm_reviewer]}` on the package models (the public views) and `grant usage on schema <dqm schema> to dqm_reviewer`, which dbt doesn't issue. The acceptance suite proves it with separate non-superuser runner and reviewer roles: the reviewer can sync (which reads `dqm_reconciliation_control` to verify the snapshot), read Health, apply annotations and file missed issues, and is denied every other write and raw-log read. The runner needs only `create` on the database (plus `pgcrypto` already installed).
+
+On BigQuery use native IAM privilege maps, e.g. `roles/bigquery.dataViewer: ["user:reviewer@example.com"]` and `roles/bigquery.dataEditor` on writable tables. The runner also needs dataset table creation and control/migration permissions. The app needs reads on public issue/health views and direct reads of the control table and occurrences/audit, occurrence updates, audit inserts and missed-issue inserts. The BigQuery app's existing annotation staging path additionally needs staging-table create/load/read access and jobs.create; Postgres does not create app staging tables.
 
 ## Health populations
 

@@ -14,6 +14,9 @@
 - The review app verifies each sync before replacing its cache: setup must be ready, the control generation unchanged across the read, and the issue view's row count must match the tracking table. Inconsistent or unavailable data keeps the cache and pending edits; a verified empty result replaces it.
 - Postgres app connections use a lock timeout (`--lock-timeout`, default 5 seconds). Writes blocked by a running reconciliation, and BigQuery transaction conflicts, report the warehouse as busy without changing data. Sync and setup failures show a short message with technical details on request.
 - The app reads a Postgres profile's password from either `pass` or `password`, as dbt does.
+- `dqm_reconciliation_control` can be listed in `dbt_dqm_table_grants`; reviewers need `select` on it for verified syncs. The documented Postgres reviewer grant set is proven by an acceptance test with separate non-superuser runner and reviewer roles.
+- Tracking-table grants are applied only by reconciliation and capture, not also by the parallel app-table models, so BigQuery no longer hits IAM "concurrent policy changes" errors during a package build.
+- Reconciliation planning no longer degrades to nested loops on Postgres, and the replay reads only Active rows plus the history of affected identities (see `docs/scale.md`).
 
 
 ## 0.1.1 - Unreleased

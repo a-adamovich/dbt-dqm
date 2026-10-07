@@ -57,8 +57,8 @@ class Demo:
         sql = sql.replace("@dataset", f"`{PROJECT}.{self.dataset}")
         return [dict(row.items()) for row in self.client.query(sql).result()]
 
-    def capture(self, scenario):
-        variables = {"demo_scenario": scenario}
+    def capture(self, scenario, **extra):
+        variables = {"demo_scenario": scenario, **extra}
         self.dbt("run", "--select", "demo_records", variables=variables)
         selection = [] if not self.has_captured else ["--exclude", "tag:guardrail"]
         self.dbt("test", "--select", "tag:dqm", *selection, variables=variables)
@@ -118,6 +118,27 @@ def demo(tmp_path):
             }
         )
     )
+    # Sorts before dbt_dqm, so its on-run-end hook runs first and can change a stored-failure
+    # table after dbt computed result.failures, as a concurrent invocation would.
+    tamper = path / "dbt_packages/aaa_acceptance_tamper"
+    (tamper / "macros").mkdir(parents=True)
+    (tamper / "dbt_project.yml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "aaa_acceptance_tamper",
+                "version": "1.0.0",
+                "config-version": 2,
+                "macro-paths": ["macros"],
+                "on-run-end": ["{{ aaa_acceptance_tamper.tamper_failures() }}"],
+            }
+        )
+    )
+    (tamper / "macros/tamper.sql").write_text("""
+{% macro tamper_failures() %}{% if execute and var('tamper', false) %}
+insert into `{{ target.project }}.{{ target.schema }}.demo_customer_email_invalid` (customer_id, email, reason)
+values ('tamper-row', 'tamper@example.com', 'tampered');
+{% endif %}{% endmacro %}
+""")
     result = Demo(path, profiles, dataset, client)
     try:
         result.dbt("seed")
@@ -433,3 +454,46 @@ def test_bigquery_completed_stage_cleanup_waits_for_retention(demo):
     demo.dbt("run-operation", "dqm_cleanup_stages")
     with pytest.raises(NotFound):
         demo.client.get_table(name)
+
+
+def _latest_execution(demo, test_name):
+    return demo.sql(
+        "select * from @dataset.dqm_test_executions` "
+        f"where test_name='{test_name}' order by captured_at desc limit 1"
+    )[0]
+
+
+def test_bigquery_capture_rejects_failure_tables_changed_before_capture(demo):
+    customer = "demo_customer_email_invalid"
+    demo.capture("initial")
+    demo.dbt("run", "--select", "dqm_reconcile")
+    baseline = [row for row in demo.snapshot() if row["test_name"] == customer]
+    assert baseline and all(row["record_status"] == "Active" for row in baseline)
+
+    demo.capture("initial", tamper=True)
+    tampered = _latest_execution(demo, customer)
+    assert tampered["collection_status"] == "collection_error"
+    assert "Stored failures changed before capture" in tampered["collection_message"]
+    assert not demo.sql(
+        "select 1 from @dataset.dqm_issue_observations` "
+        f"where invocation_id='{tampered['invocation_id']}' "
+        f"and test_unique_id='{tampered['test_unique_id']}'"
+    )
+    assert _latest_execution(demo, "demo_order_amount_invalid")["collection_status"] == "success"
+
+    demo.capture("passed", tamper=True)
+    tampered_pass = _latest_execution(demo, customer)
+    assert tampered_pass["collection_status"] == "collection_error"
+    assert "dbt reported 0 rows, the table had 1" in tampered_pass["collection_message"]
+    assert (
+        _latest_execution(demo, "demo_order_amount_invalid")["collection_status"]
+        == "not_applicable"
+    )
+    demo.dbt("run", "--select", "dqm_reconcile")
+    rows = demo.snapshot()
+    assert all(r["record_status"] == "Active" for r in rows if r["test_name"] == customer)
+    assert all(
+        r["record_status"] == "Archived" and r["close_reason"] == "Passed"
+        for r in rows
+        if r["test_name"] != customer
+    )

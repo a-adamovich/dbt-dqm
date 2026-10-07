@@ -70,7 +70,7 @@
       dbt_dqm.sql_string('DQM setup is incomplete or package versions differ. Retry setup with the current version.')) }}
 {% endmacro %}
 
-{% macro setup_sql() %}
+{% macro setup_sql(grants=true) %}
   {% set migration_dispatch=adapter.dispatch %}
   {% if not execute or dbt_dqm.empty_mode() %}{{ return('') }}{% endif %}
   {% set install=dbt_dqm.dqm_relation('dqm_install') %}
@@ -132,9 +132,14 @@
     end if;
   {% endif %}
   {{ dbt_dqm.ready_sql() }}
-  {% for name, grants in var('dbt_dqm_table_grants', {}).items() %}
-    {% if name not in dbt_dqm.table_schemas() %}{{ exceptions.raise_compiler_error('Unknown DQM grant table: ' ~ name) }}{% endif %}
-    {% if name not in ['dqm_annotation_changes','dqm_missed_issues'] %}{{ dbt_dqm.table_grants_sql(name, grants) }}{% endif %}
+  {#- Only reconciliation and capture grant tracking tables. The app-table models run setup in
+      parallel threads, and concurrent BigQuery GRANTs on one table fail with an IAM ETag
+      conflict ("concurrent policy changes"). Each app table grants itself in app_table_finish. #}
+  {% for name, table_grant in (var('dbt_dqm_table_grants', {}).items() if grants else []) %}
+    {# The control table is created by setup rather than table_schemas(), but the review app reads
+       it to verify syncs, so reviewers need it granted too. #}
+    {% if name not in dbt_dqm.table_schemas() and name != 'dqm_reconciliation_control' %}{{ exceptions.raise_compiler_error('Unknown DQM grant table: ' ~ name) }}{% endif %}
+    {% if name not in ['dqm_annotation_changes','dqm_missed_issues'] %}{{ dbt_dqm.table_grants_sql(name, table_grant) }}{% endif %}
   {% endfor %}
 {% endmacro %}
 
@@ -148,7 +153,7 @@
 
 {% macro app_table_setup() %}
   {% if not execute or dbt_dqm.empty_mode() %}{{ return('') }}{% endif %}
-  {{ dbt_dqm.reconcile_lock() }} {{ dbt_dqm.setup_sql() }}
+  {{ dbt_dqm.reconcile_lock() }} {{ dbt_dqm.setup_sql(grants=false) }}
 {% endmacro %}
 
 {% macro empty_preflight() %}
