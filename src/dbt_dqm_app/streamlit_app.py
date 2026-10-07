@@ -135,15 +135,6 @@ def run_app() -> None:
             st.session_state.job_patches = []
             st.rerun()
 
-    notice = st.session_state.job_notice
-    if notice is not None:
-        level, message, details = notice
-        getattr(st, level)(message)
-        if details:
-            with st.expander("Technical details"):
-                st.code(details, language=None)
-        st.session_state.job_notice = None
-
     busy = st.session_state.job is not None
     pending = workspace.pending()
     drifted = workspace.drifted_patches() if not busy else []
@@ -175,6 +166,17 @@ def run_app() -> None:
                     f"Pending changes: **{len(pending)}** · "
                     f"Last sync: {format_timestamp(workspace.last_sync(), 'Never')}"
                 )
+
+    # Rendered below the action bar so the bar keeps its position in the element tree across
+    # reruns; a notice above it shifted the bar and left a stale copy on screen.
+    notice = st.session_state.job_notice
+    if notice is not None:
+        level, message, details = notice
+        getattr(st, level)(message)
+        if details:
+            with st.expander("Technical details"):
+                st.code(details, language=None)
+        st.session_state.job_notice = None
 
     if not busy:
         if drifted:
@@ -636,7 +638,7 @@ def _render_missed_form(config) -> None:
             insert_missed_issue(config, issue)
         except Exception as error:  # noqa: BLE001 - retain submission ID for safe retry.
             failure = classify(error)
-            logger.warning("Missed-issue submission failed: %s", failure.details)
+            logger.warning("Missed-issue submission failed: %s", failure.details or failure.message)
             st.error(f"Report could not be confirmed; retry uses the same ID. {failure.message}")
             with st.expander("Technical details"):
                 st.code(failure.details, language=None)
