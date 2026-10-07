@@ -18,6 +18,8 @@
 - Tracking-table grants are applied only by reconciliation and capture, not also by the parallel app-table models, so BigQuery no longer hits IAM "concurrent policy changes" errors during a package build.
 - `dbt_dqm_event_payloads` (`full` default, `changed_columns`, `none`) controls payload retention in events, adding `payload_mode`, `changed_columns` and payload digests. Migration `0002_event_payload_mode` upgrades existing 0.2 schemas in place.
 - Migration `0003_app_change_staging` creates the BigQuery app's staging table during setup; the app no longer issues DDL when applying edits, so BigQuery reviewers need no table-create rights on the DQM dataset.
+- BigQuery reconciliation prunes observation partitions older than the run's evidence (−63% bytes at 1M occurrences), and the replay considers only Active issues of tests with new evidence plus untracked tests (Postgres steady reconcile 5.1 s → 2.4 s at 1M occurrences). Method and results: `docs/scale.md`.
+- Event values have their own retention and, with the default `full` payload mode and no `dbt_dqm_event_retention_days`, are kept indefinitely after raw logs are pruned.
 - Reconciliation planning no longer degrades to nested loops on Postgres, and the replay reads only Active rows plus the history of affected identities (see `docs/scale.md`).
 
 

@@ -44,7 +44,7 @@ select customer_id from {{ ref('demo_records') }} where false
 """
 
 EXPLAIN_MACRO = """
-{% macro scale_explain() %}
+{% macro scale_explain(nestloop=false, timeout_seconds=600) %}
   {% set inputs = dbt_dqm.dqm_relation('dqm_reconciliation_inputs') %}
   {% set executions = dbt_dqm.dqm_relation('dqm_test_executions') %}
   {% set receipts = dbt_dqm.dqm_relation('dqm_reconciliation_receipts') %}
@@ -61,7 +61,8 @@ EXPLAIN_MACRO = """
       {% set sql = dbt_dqm.reconcile_change_set_sql('scale-explain') %}
     {% endif %}
     {# Mirror reconcile_pre, which plans the change set without nested loops. #}
-    {% do run_query('set enable_nestloop = ' ~ ('off' if name == 'change_set' else 'on')) %}
+    {% do run_query('set enable_nestloop = ' ~ ('on' if nestloop or name != 'change_set' else 'off')) %}
+    {% do run_query('set statement_timeout = ' ~ (timeout_seconds * 1000)) %}
     {% set plan = run_query('explain (analyze, buffers) ' ~ sql) %}
     {{ log('SCALE-PLAN-BEGIN ' ~ name, info=true) }}
     {% for row in plan %}{{ log(row[0], info=true) }}{% endfor %}
@@ -224,8 +225,22 @@ def load_history(project: Project, args: argparse.Namespace) -> None:
     """)
 
 
-def explain(project: Project, output: Path, scenario: str) -> dict[str, float]:
-    result = project.dbt("run-operation", "scale_explain")
+def explain(
+    project: Project, output: Path, scenario: str, nestloop: bool = False, timeout: int = 600
+) -> dict[str, float | str]:
+    """EXPLAIN ANALYZE the freeze and change set; a timed-out plan reports 'timeout'."""
+    try:
+        result = project.dbt(
+            "run-operation",
+            "scale_explain",
+            "--args",
+            json.dumps({"nestloop": nestloop, "timeout_seconds": timeout}),
+        )
+    except RuntimeError as error:
+        if "statement timeout" in str(error):
+            return {"change_set": f"timeout>{timeout}s"}
+        raise
+    scenario = f"{scenario}-nestloop-{'on' if nestloop else 'off'}"
     plans: dict[str, list[str]] = {}
     current = None
     for line in result.stdout.splitlines():
@@ -271,6 +286,13 @@ def main() -> None:
     parser.add_argument("--executions", type=int, default=50_000)
     parser.add_argument("--observations", type=int, default=5_000_000)
     parser.add_argument(
+        "--compare-planner",
+        action="store_true",
+        help="also EXPLAIN ANALYZE the change sets with nested loops allowed (implies "
+        "--explain-mass-pass); a pathological plan stops at --planner-timeout",
+    )
+    parser.add_argument("--planner-timeout", type=int, default=600)
+    parser.add_argument(
         "--payload-columns",
         type=int,
         default=0,
@@ -284,6 +306,7 @@ def main() -> None:
         help="also EXPLAIN ANALYZE the mass-pass change set (runs it twice; small volumes only)",
     )
     args = parser.parse_args()
+    args.explain_mass_pass = args.explain_mass_pass or args.compare_planner
     dsn = os.environ["DBT_DQM_TEST_DSN"]
     args.output.mkdir(parents=True, exist_ok=True)
     schema = "dqm_scale_" + uuid.uuid4().hex[:8]
@@ -301,6 +324,8 @@ def main() -> None:
             # Steady state: only the three demo tests ran since the last reconciliation.
             project.dbt("test", "--select", *DEMO_TESTS)
             plans = explain(project, args.output, "steady")
+            if args.compare_planner:
+                plans_nestloop = explain(project, args.output, "steady", nestloop=True)
             steady = project.reconcile_seconds()
             sync = app_sync(project)
 
@@ -309,6 +334,10 @@ def main() -> None:
             mass_plans = (
                 explain(project, args.output, "mass_pass") if args.explain_mass_pass else {}
             )
+            if args.compare_planner:
+                mass_plans_nestloop = explain(
+                    project, args.output, "mass_pass", nestloop=True, timeout=args.planner_timeout
+                )
             mass_pass = project.reconcile_seconds()
             archived = project.sql(
                 "select count(*) from @schema.dqm_issue_occurrences "
@@ -334,13 +363,22 @@ def main() -> None:
         "steady_plan_execution_seconds": plans,
         "mass_pass_reconcile_seconds": round(mass_pass, 2),
         "mass_pass_plan_execution_seconds": mass_plans,
+        **(
+            {
+                "planner_comparison_nestloop_on": {
+                    "steady": plans_nestloop,
+                    "mass_pass": mass_plans_nestloop,
+                }
+            }
+            if args.compare_planner
+            else {}
+        ),
         "active_scale_occurrences_after_mass_pass": archived,
         "app_sync": sync,
     }
     report["volumes"]["payload_columns"] = args.payload_columns
-    (args.output / f"postgres-payload{args.payload_columns}.json").write_text(
-        json.dumps(report, indent=2) + "\n"
-    )
+    name = f"postgres-{args.occurrences}-payload{args.payload_columns}"
+    (args.output / f"{name}.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
 
 

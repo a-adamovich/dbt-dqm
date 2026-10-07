@@ -73,6 +73,14 @@ Optional `dbt_dqm_retention_days` values must be positive
 YAML integers. Both adapters apply receipt-aware cleanup after runs; explicit cleanup is
 available with `dbt run-operation cleanup_dqm_logs --vars '{dbt_dqm_retention_days: 90}'`.
 
+> **Event values outlive raw logs by default.** `dbt_dqm_retention_days` prunes raw executions
+> and observations only. The `dqm_issue_events` history keeps captured before/after values
+> (`dbt_dqm_event_payloads: full`, the default) until `dbt_dqm_event_retention_days` removes
+> them, and that is unset, meaning "keep forever", unless you set it. Under `allowlist` or `full`
+> capture these values can contain personal data. Set event retention, or choose
+> `dbt_dqm_event_payloads: changed_columns` (changed column names plus hashes, which are not
+> anonymization) or `none`. See [warehouse interfaces](docs/warehouse-interfaces.md).
+
 ## Supported warehouses
 
 Postgres 14/16 and BigQuery have adapter implementations and an integration demo each.

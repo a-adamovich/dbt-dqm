@@ -1,4 +1,4 @@
-{% macro reconcile_change_set_sql(run_id) %}
+{% macro reconcile_change_set_sql(run_id, observation_floor=none) %}
 {% set occurrences = dbt_dqm.dqm_relation('dqm_issue_occurrences') %}
 {% set occurrence_columns %}{% for col, kind in dbt_dqm.table_schemas()['dqm_issue_occurrences'] %}{{ col }}{% if not loop.last %},{% endif %}{% endfor %}{% endset %}
 {% set tracked_test_ids = [] %}
@@ -23,8 +23,21 @@ with currently_tracked_tests as (
 {#- Only Active rows and the history of identities this run touches are read. Archived history
     of untouched identities never affects the change set, and reading the whole table made every
     run scale with total history. #}
+{#- Active rows that this run can change: those of tests with frozen inputs, plus those of tests
+    no longer tracked (the TEST_REMOVED sweep). Other tests' Active rows can't produce states,
+    because states join each identity to executions of its own test. #}
 active_existing as (
-  select {{ occurrence_columns }} from {{ occurrences }} where record_status = 'Active'
+  select {{ occurrence_columns }} from {{ occurrences }} active
+  where record_status = 'Active'
+    and (
+      exists(
+        select 1 from {{ dbt_dqm.dqm_relation('dqm_reconciliation_inputs') }} frozen
+        where frozen.run_id = {{ dbt_dqm.sql_string(run_id) }}
+          and frozen.test_unique_id = active.test_unique_id)
+      or not exists(
+        select 1 from currently_tracked_tests tracked
+        where tracked.test_unique_id = active.test_unique_id)
+    )
 ),
 
 unprocessed_executions as (
@@ -54,6 +67,9 @@ new_observations as (
   inner join ordered_executions execution
     on observation.invocation_id = execution.invocation_id
    and observation.test_unique_id = execution.test_unique_id
+  {#- A constant lower bound lets BigQuery prune observation partitions; it never excludes
+      evidence, because observations are written after their execution row (see reconcile_pre). #}
+  {% if observation_floor is not none %}where observation.observed_at >= {{ observation_floor }}{% endif %}
 ),
 
 candidate_identities as (

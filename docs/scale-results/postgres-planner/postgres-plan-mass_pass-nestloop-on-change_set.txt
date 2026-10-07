@@ -1,0 +1,269 @@
+Append  (cost=24554.46..40724.70 rows=2531 width=1240) (actual time=26.692..1733.816 rows=4007 loops=1)
+  Buffers: shared hit=8453
+  CTE currently_tracked_tests
+    ->  Append  (cost=0.00..0.48 rows=32 width=32) (actual time=0.003..0.040 rows=32 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.003..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+  CTE active_existing
+    ->  Bitmap Heap Scan on dqm_issue_occurrences active  (cost=150.69..20072.11 rows=1505 width=992) (actual time=0.135..0.593 rows=2007 loops=1)
+          Recheck Cond: (record_status = 'Active'::text)
+          Filter: ((hashed SubPlan 3) OR (NOT (hashed SubPlan 5)))
+          Heap Blocks: exact=185
+          Buffers: shared hit=221
+          ->  Bitmap Index Scan on dqm_occurrence_active_identity  (cost=0.00..150.31 rows=2007 width=0) (actual time=0.111..0.113 rows=2014 loops=1)
+                Buffers: shared hit=34
+          SubPlan 3
+            ->  Bitmap Heap Scan on dqm_reconciliation_inputs frozen  (cost=4.17..11.28 rows=3 width=32) (actual time=0.003..0.005 rows=23 loops=1)
+                  Recheck Cond: (run_id = 'scale-explain'::text)
+                  Heap Blocks: exact=1
+                  Buffers: shared hit=2
+                  ->  Bitmap Index Scan on dqm_reconciliation_inputs_pkey  (cost=0.00..4.17 rows=3 width=0) (actual time=0.002..0.003 rows=23 loops=1)
+                        Index Cond: (run_id = 'scale-explain'::text)
+                        Buffers: shared hit=1
+          SubPlan 5
+            ->  CTE Scan on currently_tracked_tests tracked  (cost=0.00..0.64 rows=32 width=32) (never executed)
+  CTE ordered_executions
+    ->  WindowAgg  (cost=36.20..36.22 rows=1 width=595) (actual time=0.088..0.104 rows=23 loops=1)
+          Buffers: shared hit=109
+          ->  Sort  (cost=36.20..36.20 rows=1 width=587) (actual time=0.083..0.087 rows=23 loops=1)
+                Sort Key: execution.test_unique_id, execution.captured_at, execution.invocation_id
+                Sort Method: quicksort  Memory: 38kB
+                Buffers: shared hit=109
+                ->  Nested Loop  (cost=4.45..36.19 rows=1 width=587) (actual time=0.013..0.064 rows=23 loops=1)
+                      Buffers: shared hit=106
+                      ->  Bitmap Heap Scan on dqm_reconciliation_inputs frozen_1  (cost=4.17..11.28 rows=3 width=64) (actual time=0.006..0.007 rows=23 loops=1)
+                            Recheck Cond: (run_id = 'scale-explain'::text)
+                            Heap Blocks: exact=1
+                            Buffers: shared hit=2
+                            ->  Bitmap Index Scan on dqm_reconciliation_inputs_pkey  (cost=0.00..4.17 rows=3 width=0) (actual time=0.003..0.004 rows=23 loops=1)
+                                  Index Cond: (run_id = 'scale-explain'::text)
+                                  Buffers: shared hit=1
+                      ->  Index Scan using dqm_test_executions_pkey on dqm_test_executions execution  (cost=0.28..8.30 rows=1 width=587) (actual time=0.002..0.002 rows=1 loops=23)
+                            Index Cond: ((test_unique_id = frozen_1.test_unique_id) AND (invocation_id = frozen_1.invocation_id))
+                            Buffers: shared hit=87
+  CTE new_observations
+    ->  Nested Loop  (cost=0.41..2614.39 rows=1667 width=663) (actual time=0.107..0.183 rows=7 loops=1)
+          Buffers: shared hit=181
+          ->  CTE Scan on ordered_executions execution_1  (cost=0.00..0.02 rows=1 width=136) (actual time=0.089..0.112 rows=23 loops=1)
+                Buffers: shared hit=109
+          ->  Index Scan using dqm_issue_observations_pkey on dqm_issue_observations observation  (cost=0.41..2597.70 rows=1667 width=591) (actual time=0.003..0.003 rows=0 loops=23)
+                Index Cond: ((test_unique_id = execution_1.test_unique_id) AND (invocation_id = execution_1.invocation_id))
+                Buffers: shared hit=72
+  CTE candidate_identities
+    ->  HashAggregate  (cost=100.23..104.23 rows=400 width=96) (actual time=2.266..2.390 rows=2007 loops=1)
+          Group Key: new_observations.test_unique_id, new_observations.unique_id, new_observations.execution_identity_scheme_signature
+          Batches: 1  Memory Usage: 881kB
+          Buffers: shared hit=402
+          ->  Append  (cost=45.84..97.23 rows=400 width=96) (actual time=0.189..1.872 rows=2014 loops=1)
+                Buffers: shared hit=402
+                ->  HashAggregate  (cost=45.84..47.84 rows=200 width=96) (actual time=0.189..0.190 rows=7 loops=1)
+                      Group Key: new_observations.test_unique_id, new_observations.unique_id, new_observations.execution_identity_scheme_signature
+                      Batches: 1  Memory Usage: 40kB
+                      Buffers: shared hit=181
+                      ->  CTE Scan on new_observations  (cost=0.00..33.34 rows=1667 width=96) (actual time=0.107..0.184 rows=7 loops=1)
+                            Buffers: shared hit=181
+                ->  HashAggregate  (cost=41.39..43.39 rows=200 width=96) (actual time=1.489..1.608 rows=2007 loops=1)
+                      Group Key: active_existing.test_unique_id, active_existing.unique_id, active_existing.identity_scheme_signature
+                      Batches: 1  Memory Usage: 897kB
+                      Buffers: shared hit=221
+                      ->  CTE Scan on active_existing  (cost=0.00..30.10 rows=1505 width=96) (actual time=0.135..0.901 rows=2007 loops=1)
+                            Buffers: shared hit=221
+  CTE affected_history
+    ->  Nested Loop  (cost=10.41..1482.50 rows=1 width=992) (actual time=0.473..4.166 rows=2007 loops=1)
+          Buffers: shared hit=8042
+          ->  HashAggregate  (cost=10.00..12.00 rows=200 width=64) (actual time=0.450..0.573 rows=2007 loops=1)
+                Group Key: candidate_identities.test_unique_id, candidate_identities.unique_id
+                Batches: 1  Memory Usage: 641kB
+                ->  CTE Scan on candidate_identities  (cost=0.00..8.00 rows=400 width=64) (actual time=0.001..0.093 rows=2007 loops=1)
+          ->  Index Scan using dqm_occurrence_identity_history on dqm_issue_occurrences history  (cost=0.41..7.33 rows=1 width=992) (actual time=0.001..0.001 rows=1 loops=2007)
+                Index Cond: ((test_unique_id = candidate_identities.test_unique_id) AND (unique_id = candidate_identities.unique_id))
+                Buffers: shared hit=8042
+  CTE states_grouped
+    ->  WindowAgg  (cost=103.13..103.28 rows=2 width=688) (actual time=6.517..8.847 rows=2007 loops=1)
+          Buffers: shared hit=402
+          ->  WindowAgg  (cost=103.13..103.20 rows=2 width=680) (actual time=6.502..7.444 rows=2007 loops=1)
+                Buffers: shared hit=402
+                ->  Sort  (cost=103.13..103.14 rows=2 width=700) (actual time=6.495..6.568 rows=2007 loops=1)
+                      Sort Key: execution_2.test_unique_id, candidate.unique_id, candidate.identity_scheme_signature, execution_2.execution_sequence
+                      Sort Method: quicksort  Memory: 2091kB
+                      Buffers: shared hit=402
+                      ->  Hash Right Join  (cost=51.02..103.12 rows=2 width=700) (actual time=4.943..5.194 rows=2007 loops=1)
+                            Hash Cond: ((observation_1.invocation_id = execution_2.invocation_id) AND (observation_1.test_unique_id = candidate.test_unique_id) AND (observation_1.unique_id = candidate.unique_id))
+                            Join Filter: (NOT (candidate.identity_scheme_signature IS DISTINCT FROM observation_1.execution_identity_scheme_signature))
+                            Buffers: shared hit=402
+                            ->  CTE Scan on new_observations observation_1  (cost=0.00..33.34 rows=1667 width=300) (actual time=0.000..0.002 rows=7 loops=1)
+                            ->  Hash  (cost=50.98..50.98 rows=2 width=528) (actual time=4.934..4.937 rows=2007 loops=1)
+                                  Buckets: 2048 (originally 1024)  Batches: 1 (originally 1)  Memory Usage: 1773kB
+                                  Buffers: shared hit=402
+                                  ->  Hash Right Join  (cost=9.58..50.98 rows=2 width=528) (actual time=3.553..4.273 rows=2007 loops=1)
+                                        Hash Cond: ((active_1.test_unique_id = candidate.test_unique_id) AND (active_1.unique_id = candidate.unique_id))
+                                        Join Filter: (NOT (candidate.identity_scheme_signature IS DISTINCT FROM active_1.identity_scheme_signature))
+                                        Buffers: shared hit=402
+                                        ->  CTE Scan on active_existing active_1  (cost=0.00..30.10 rows=1505 width=160) (actual time=0.001..0.113 rows=2007 loops=1)
+                                        ->  Hash  (cost=9.55..9.55 rows=2 width=464) (actual time=3.547..3.548 rows=2007 loops=1)
+                                              Buckets: 2048 (originally 1024)  Batches: 1 (originally 1)  Memory Usage: 899kB
+                                              Buffers: shared hit=402
+                                              ->  Hash Join  (cost=0.03..9.55 rows=2 width=464) (actual time=2.284..3.038 rows=2007 loops=1)
+                                                    Hash Cond: (candidate.test_unique_id = execution_2.test_unique_id)
+                                                    Buffers: shared hit=402
+                                                    ->  CTE Scan on candidate_identities candidate  (cost=0.00..8.00 rows=400 width=96) (actual time=2.267..2.705 rows=2007 loops=1)
+                                                          Buffers: shared hit=402
+                                                    ->  Hash  (cost=0.02..0.02 rows=1 width=368) (actual time=0.011..0.011 rows=23 loops=1)
+                                                          Buckets: 1024  Batches: 1  Memory Usage: 16kB
+                                                          ->  CTE Scan on ordered_executions execution_2  (cost=0.00..0.02 rows=1 width=368) (actual time=0.002..0.005 rows=23 loops=1)
+  CTE episode_occurrences
+    ->  Nested Loop Left Join  (cost=1.07..42.62 rows=2 width=888) (actual time=26.664..144.356 rows=2007 loops=1)
+          Join Filter: ((episode_1.test_unique_id = counts.test_unique_id) AND (episode_1.unique_id = counts.unique_id))
+          Rows Removed by Join Filter: 2013021
+          Buffers: shared hit=8453
+          ->  Hash Right Join  (cost=1.04..42.44 rows=2 width=1192) (actual time=20.378..21.733 rows=2007 loops=1)
+                Hash Cond: ((active_2.test_unique_id = episode_1.test_unique_id) AND (active_2.unique_id = episode_1.unique_id))
+                Join Filter: ((NOT (episode_1.identity_scheme_signature IS DISTINCT FROM active_2.identity_scheme_signature)) AND (episode_1.episode_group = 0))
+                Buffers: shared hit=411
+                ->  CTE Scan on active_existing active_2  (cost=0.00..30.10 rows=1505 width=644) (actual time=0.002..0.358 rows=2007 loops=1)
+                ->  Hash  (cost=1.01..1.01 rows=2 width=644) (actual time=20.366..20.371 rows=2007 loops=1)
+                      Buckets: 2048 (originally 1024)  Batches: 1 (originally 1)  Memory Usage: 643kB
+                      Buffers: shared hit=411
+                      ->  Subquery Scan on episode_1  (cost=0.54..1.01 rows=2 width=644) (actual time=11.348..19.861 rows=2007 loops=1)
+                            Buffers: shared hit=411
+                            ->  GroupAggregate  (cost=0.54..0.99 rows=2 width=680) (actual time=11.347..19.724 rows=2007 loops=1)
+                                  Group Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group
+                                  Buffers: shared hit=411
+                                  ->  WindowAgg  (cost=0.54..0.65 rows=2 width=736) (actual time=11.328..17.645 rows=2007 loops=1)
+                                        Buffers: shared hit=411
+                                        ->  Incremental Sort  (cost=0.54..0.58 rows=2 width=584) (actual time=11.320..16.785 rows=2007 loops=1)
+                                              Sort Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group, (CASE WHEN (state_1.is_failing = 1) THEN 0 ELSE 1 END), state_1.execution_sequence
+                                              Presorted Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group, (CASE WHEN (state_1.is_failing = 1) THEN 0 ELSE 1 END)
+                                              Full-sort Groups: 63  Sort Method: quicksort  Average Memory: 45kB  Peak Memory: 45kB
+                                              Buffers: shared hit=411
+                                              ->  WindowAgg  (cost=0.40..0.51 rows=2 width=584) (actual time=11.207..16.131 rows=2007 loops=1)
+                                                    Buffers: shared hit=402
+                                                    ->  Incremental Sort  (cost=0.40..0.45 rows=2 width=576) (actual time=11.201..15.386 rows=2007 loops=1)
+                                                          Sort Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group, (CASE WHEN (state_1.is_failing = 1) THEN 0 ELSE 1 END), state_1.execution_sequence DESC
+                                                          Presorted Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group
+                                                          Full-sort Groups: 63  Sort Method: quicksort  Average Memory: 45kB  Peak Memory: 45kB
+                                                          Buffers: shared hit=402
+                                                          ->  WindowAgg  (cost=0.27..0.38 rows=2 width=576) (actual time=11.123..14.757 rows=2007 loops=1)
+                                                                Buffers: shared hit=402
+                                                                ->  Incremental Sort  (cost=0.27..0.32 rows=2 width=568) (actual time=11.115..14.030 rows=2007 loops=1)
+                                                                      Sort Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group, state_1.execution_sequence DESC
+                                                                      Presorted Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group
+                                                                      Full-sort Groups: 63  Sort Method: quicksort  Average Memory: 45kB  Peak Memory: 45kB
+                                                                      Buffers: shared hit=402
+                                                                      ->  WindowAgg  (cost=0.13..0.24 rows=2 width=568) (actual time=11.053..13.412 rows=2007 loops=1)
+                                                                            Buffers: shared hit=402
+                                                                            ->  Incremental Sort  (cost=0.13..0.18 rows=2 width=560) (actual time=11.049..12.694 rows=2007 loops=1)
+                                                                                  Sort Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group, (CASE WHEN (state_1.is_failing = 0) THEN 0 ELSE 1 END), state_1.execution_sequence
+                                                                                  Presorted Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group
+                                                                                  Full-sort Groups: 63  Sort Method: quicksort  Average Memory: 45kB  Peak Memory: 45kB
+                                                                                  Buffers: shared hit=402
+                                                                                  ->  Subquery Scan on state_1  (cost=0.06..0.11 rows=1 width=560) (actual time=11.007..12.086 rows=2007 loops=1)
+                                                                                        Filter: ((state_1.first_absence_sequence IS NULL) OR (state_1.execution_sequence <= state_1.first_absence_sequence))
+                                                                                        Buffers: shared hit=402
+                                                                                        ->  WindowAgg  (cost=0.06..0.09 rows=1 width=696) (actual time=11.005..11.906 rows=2007 loops=1)
+                                                                                              Buffers: shared hit=402
+                                                                                              ->  Sort  (cost=0.06..0.07 rows=1 width=552) (actual time=10.998..11.044 rows=2007 loops=1)
+                                                                                                    Sort Key: state_2.test_unique_id, state_2.unique_id, state_2.identity_scheme_signature, state_2.episode_group
+                                                                                                    Sort Method: quicksort  Memory: 1087kB
+                                                                                                    Buffers: shared hit=402
+                                                                                                    ->  CTE Scan on states_grouped state_2  (cost=0.00..0.05 rows=1 width=552) (actual time=6.521..10.463 rows=2007 loops=1)
+                                                                                                          Filter: ((episode_group > 0) OR (prior_active = 1))
+                                                                                                          Buffers: shared hit=402
+          ->  Materialize  (cost=0.03..0.05 rows=1 width=68) (actual time=0.003..0.022 rows=1004 loops=2007)
+                Buffers: shared hit=8042
+                ->  Subquery Scan on counts  (cost=0.03..0.05 rows=1 width=68) (actual time=5.788..5.981 rows=2007 loops=1)
+                      Buffers: shared hit=8042
+                      ->  HashAggregate  (cost=0.03..0.04 rows=1 width=68) (actual time=5.787..5.899 rows=2007 loops=1)
+                            Group Key: affected_history_1.test_unique_id, affected_history_1.unique_id
+                            Batches: 1  Memory Usage: 649kB
+                            Buffers: shared hit=8042
+                            ->  CTE Scan on affected_history affected_history_1  (cost=0.00..0.02 rows=1 width=68) (actual time=0.477..5.371 rows=2007 loops=1)
+                                  Buffers: shared hit=8042
+  CTE orphaned_occurrences
+    ->  Hash Anti Join  (cost=1.04..51.16 rows=1264 width=876) (actual time=0.303..0.304 rows=0 loops=1)
+          Hash Cond: (existing.test_unique_id = tracked_1.test_unique_id)
+          ->  CTE Scan on active_existing existing  (cost=0.00..30.10 rows=1505 width=740) (actual time=0.001..0.100 rows=2007 loops=1)
+          ->  Hash  (cost=0.64..0.64 rows=32 width=32) (actual time=0.045..0.045 rows=32 loops=1)
+                Buckets: 1024  Batches: 1  Memory Usage: 11kB
+                ->  CTE Scan on currently_tracked_tests tracked_1  (cost=0.00..0.64 rows=32 width=32) (actual time=0.008..0.040 rows=32 loops=1)
+  CTE occurrence_changes
+    ->  Append  (cost=0.00..47.47 rows=1266 width=880) (actual time=26.681..146.735 rows=2007 loops=1)
+          Buffers: shared hit=8453
+          ->  Subquery Scan on "*SELECT* 1_5"  (cost=0.00..0.07 rows=2 width=880) (actual time=26.679..146.355 rows=2007 loops=1)
+                Buffers: shared hit=8453
+                ->  CTE Scan on episode_occurrences  (cost=0.00..0.04 rows=2 width=880) (actual time=26.668..145.957 rows=2007 loops=1)
+                      Buffers: shared hit=8453
+          ->  Subquery Scan on "*SELECT* 2_4"  (cost=0.00..41.08 rows=1264 width=880) (actual time=0.304..0.304 rows=0 loops=1)
+                ->  CTE Scan on orphaned_occurrences orphaned_occurrences_1  (cost=0.00..25.28 rows=1264 width=876) (actual time=0.304..0.304 rows=0 loops=1)
+  ->  Subquery Scan on "*SELECT* 1"  (cost=0.00..41.15 rows=1266 width=1240) (actual time=26.690..148.666 rows=2007 loops=1)
+        Buffers: shared hit=8453
+        ->  CTE Scan on occurrence_changes changes  (cost=0.00..25.32 rows=1266 width=1240) (actual time=26.687..148.369 rows=2007 loops=1)
+              Buffers: shared hit=8453
+  ->  Subquery Scan on "*SELECT* 2"  (cost=0.08..16116.44 rows=1265 width=1240) (actual time=1.568..1584.911 rows=2000 loops=1)
+        ->  Subquery Scan on event_changes_full  (cost=0.08..16097.47 rows=1265 width=1236) (actual time=1.566..1584.534 rows=2000 loops=1)
+              ->  Append  (cost=0.08..117.36 rows=1265 width=296) (actual time=1.534..1573.294 rows=2000 loops=1)
+                    ->  Subquery Scan on "*SELECT* 1_1"  (cost=0.08..73.11 rows=1 width=296) (actual time=1.534..1573.215 rows=2000 loops=1)
+                          ->  Nested Loop  (cost=0.08..73.10 rows=1 width=296) (actual time=1.531..1572.795 rows=2000 loops=1)
+                                Join Filter: ((NOT (state.identity_scheme_signature IS DISTINCT FROM episode.identity_scheme_signature)) AND (episode.test_unique_id = state.test_unique_id) AND (episode.unique_id = state.unique_id) AND (episode.episode_group = state.episode_group))
+                                Rows Removed by Join Filter: 4012000
+                                ->  CTE Scan on states_grouped state  (cost=0.00..0.08 rows=1 width=280) (actual time=0.009..1.581 rows=2000 loops=1)
+                                      Filter: (((is_failing = 1) AND (previous_failing = 0)) OR ((is_failing = 0) AND (previous_failing = 1)) OR ((is_failing = 1) AND (previous_failing = 1) AND (capture_mode = ANY ('{full,allowlist}'::text[])) AND (record_values_json IS DISTINCT FROM previous_payload)))
+                                      Rows Removed by Filter: 7
+                                ->  Hash Right Join  (cost=0.08..72.95 rows=2 width=200) (actual time=0.574..0.696 rows=2007 loops=2000)
+                                      Hash Cond: (("*SELECT* 1_2".test_unique_id = episode.test_unique_id) AND ("*SELECT* 1_2".unique_id = episode.unique_id) AND ((("*SELECT* 1_2".occurrence_number)::bigint) = (episode.occurrence_number - 1)))
+                                      Join Filter: (NOT (episode.identity_scheme_signature IS DISTINCT FROM "*SELECT* 1_2".identity_scheme_signature))
+                                      ->  Append  (cost=0.00..44.35 rows=1267 width=880) (actual time=0.179..0.392 rows=2007 loops=2000)
+                                            ->  Subquery Scan on "*SELECT* 1_2"  (cost=0.00..0.04 rows=1 width=880) (actual time=0.179..0.179 rows=0 loops=2000)
+                                                  ->  CTE Scan on affected_history  (cost=0.00..0.02 rows=1 width=876) (actual time=0.179..0.179 rows=0 loops=2000)
+                                                        Filter: (record_status = 'Archived'::text)
+                                                        Rows Removed by Filter: 2007
+                                            ->  CTE Scan on occurrence_changes  (cost=0.00..25.32 rows=1266 width=880) (actual time=0.000..0.141 rows=2007 loops=2000)
+                                      ->  Hash  (cost=0.04..0.04 rows=2 width=176) (actual time=0.714..0.714 rows=2007 loops=1)
+                                            Buckets: 2048 (originally 1024)  Batches: 1 (originally 1)  Memory Usage: 456kB
+                                            ->  CTE Scan on episode_occurrences episode  (cost=0.00..0.04 rows=2 width=176) (actual time=0.002..0.363 rows=2007 loops=1)
+                    ->  CTE Scan on orphaned_occurrences  (cost=0.00..25.28 rows=1264 width=296) (actual time=0.001..0.001 rows=0 loops=1)
+              SubPlan 15
+                ->  Aggregate  (cost=12.55..12.56 rows=1 width=32) (never executed)
+                      ->  Subquery Scan on changed  (cost=4.54..12.05 rows=199 width=32) (never executed)
+                            Filter: (((event_changes_full.previous_record_values_json)::jsonb -> changed.key) IS DISTINCT FROM ((event_changes_full.record_values_json)::jsonb -> changed.key))
+                            ->  HashAggregate  (cost=4.54..6.54 rows=200 width=32) (never executed)
+                                  Group Key: (jsonb_object_keys(COALESCE((event_changes_full.previous_record_values_json)::jsonb, '{}'::jsonb)))
+                                  ->  Append  (cost=0.00..4.04 rows=200 width=32) (never executed)
+                                        ->  ProjectSet  (cost=0.00..0.52 rows=100 width=32) (never executed)
+                                              ->  Result  (cost=0.00..0.01 rows=1 width=0) (never executed)
+                                        ->  ProjectSet  (cost=0.00..0.52 rows=100 width=32) (never executed)
+                                              ->  Result  (cost=0.00..0.01 rows=1 width=0) (never executed)
+Planning:
+  Buffers: shared hit=411
+Planning Time: 2.389 ms
+Execution Time: 1735.259 ms

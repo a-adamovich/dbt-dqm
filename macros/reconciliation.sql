@@ -39,6 +39,13 @@
     commit transaction;
     exception when error then rollback transaction; raise; end;
     begin
+    {#- Capture writes a test's observations after its execution row, in the same on-run-end
+        script, so observed_at >= captured_at. A day of margin covers clock differences between
+        statements. The bound is a script variable so BigQuery treats it as a constant and prunes
+        the observation partitions older than this run's evidence. #}
+    declare dqm_observation_floor timestamp default (
+      select timestamp_sub(min(captured_at), interval 1 day) from {{ inputs }}
+      where run_id={{ dbt_dqm.sql_string(invocation_id) }});
   {% endif %}
   {{ dbt_dqm.assert_sql('not exists(' ~ dbt_dqm.late_inputs_sql() ~ ')',
       "concat('Late DQM evidence: ', (select " ~ ("string_agg(concat(test_unique_id, '/', invocation_id), ', ')" if target.type=='postgres' else "string_agg(concat(test_unique_id, '/', invocation_id), ', ')") ~ ' from (' ~ dbt_dqm.late_inputs_sql() ~ ") late), '. Review and use dqm_skip_late_evidence with an explicit reason.')") }}
@@ -49,7 +56,7 @@
   {% if target.type=='postgres' %}set local enable_nestloop = off;
     create temporary table dqm_stage on commit drop as
   {% else %}create table {{ dbt_dqm.stage_relation() }} options(expiration_timestamp=timestamp_add(current_timestamp(), interval 24 hour)) as{% endif %}
-    {{ dbt_dqm.reconcile_change_set_sql(invocation_id) }};
+    {{ dbt_dqm.reconcile_change_set_sql(invocation_id, 'dqm_observation_floor' if target.type == 'bigquery' else none) }};
   {% if target.type=='postgres' %}reset enable_nestloop;{% endif %}
   {% if target.type=='bigquery' %}
     exception when error then {{ dbt_dqm.abandon_failed_run_sql() }} raise; end;
