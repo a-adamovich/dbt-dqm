@@ -12,6 +12,7 @@ import subprocess
 import sys
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,7 @@ pytestmark = pytest.mark.skipif(not PROJECT, reason="Credentialed BigQuery relea
 class Demo:
     def __init__(self, path, profiles, dataset, client):
         self.path, self.profiles, self.dataset, self.client = path, profiles, dataset, client
+        self.has_captured = False
 
     def dbt(self, *args, variables=None, success=True, target="target"):
         command = [
@@ -58,7 +60,9 @@ class Demo:
     def capture(self, scenario):
         variables = {"demo_scenario": scenario}
         self.dbt("run", "--select", "demo_records", variables=variables)
-        self.dbt("test", "--select", "tag:dqm", variables=variables)
+        selection = [] if not self.has_captured else ["--exclude", "tag:guardrail"]
+        self.dbt("test", "--select", "tag:dqm", *selection, variables=variables)
+        self.has_captured = True
 
     def snapshot(self):
         return self.sql("select * from @dataset.dqm_issue_occurrences` order by occurrence_id")
@@ -107,7 +111,7 @@ def demo(tmp_path):
                             "project": PROJECT,
                             "dataset": dataset,
                             "location": location,
-                            "threads": 1,
+                            "threads": 4,
                         }
                     },
                 }
@@ -292,3 +296,70 @@ def test_bigquery_skip_invalidates_frozen_inputs(demo):
     assert len(gaps) == 2 and len({r["event_id"] for r in gaps}) == 2
     demo.dbt("run", "--select", "dqm_reconcile")
     assert demo.snapshot() == before
+
+
+def test_bigquery_app_audit_missed_retry_and_health(demo):
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.store import Patch
+    from dbt_dqm_app.warehouse import apply_patches, fetch_health, insert_missed_issue
+
+    principal = "serviceAccount:" + demo.client._credentials.service_account_email
+    project_file = demo.path / "dbt_project.yml"
+    project = yaml.safe_load(project_file.read_text())
+    grants = {"roles/bigquery.dataViewer": [principal]}
+    project.setdefault("vars", {})["dbt_dqm_table_grants"] = {
+        "dqm_issue_occurrences": grants,
+        "dqm_annotation_changes": grants,
+        "dqm_missed_issues": grants,
+    }
+    project.setdefault("models", {}).setdefault("dbt_dqm", {}).update(
+        {"+grants": grants, "+persist_docs": {"relation": True, "columns": True}}
+    )
+    project_file.write_text(yaml.safe_dump(project))
+    demo.capture("initial")
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    for name in [
+        "dqm_issue_occurrences",
+        "dqm_annotation_changes",
+        "dqm_missed_issues",
+        "dqm_reconcile",
+        "dqm_all_issues",
+        "dqm_test_health",
+    ]:
+        policy = demo.client.get_iam_policy(f"{PROJECT}.{demo.dataset}.{name}")
+        assert any(
+            binding["role"] == "roles/bigquery.dataViewer" and principal in binding["members"]
+            for binding in policy.bindings
+        ), name
+    config = load_config(demo.path, demo.profiles, "dev")
+    row = demo.snapshot()[0]
+    patch = Patch(
+        row["occurrence_id"],
+        "review_verdict",
+        "UNREVIEWED",
+        "TRUE_POSITIVE",
+        1,
+        datetime.now(UTC).isoformat(),
+        row["annotation_version"],
+    )
+    batch = apply_patches(config, [patch])
+    assert apply_patches(config, [patch]) == batch
+    audit = demo.sql(
+        "select * from @dataset.dqm_annotation_changes` where field_name='review_verdict'"
+    )
+    assert len(audit) == 1
+    assert audit[0]["resulting_annotation_version"] == row["annotation_version"] + 1
+    report = {
+        "missed_issue_id": str(uuid.uuid4()),
+        "area_label": "Unmapped acceptance area",
+        "description": "Synthetic confirmed escape",
+        "root_cause": "no_test",
+        "discovered_at": datetime.now(UTC).isoformat(),
+    }
+    insert_missed_issue(config, report)
+    insert_missed_issue(config, report)
+    assert demo.sql("select count(*) n from @dataset.dqm_missed_issues`")[0]["n"] == 1
+    health = fetch_health(config)
+    assert health["tests"] and health["areas"]
+    assert sum(item["assessed_count"] for item in health["tests"]) == 1
+    assert sum(item["known_missed_issue_count"] for item in health["areas"]) == 1

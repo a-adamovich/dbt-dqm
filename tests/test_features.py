@@ -146,3 +146,4 @@ def test_bigquery_missed_retry_reuses_completed_job(tmp_path, monkeypatch):
         insert_missed_issue(replace(config(tmp_path), adapter_type="bigquery"), issue)
     assert client.query.call_count == 1
     assert client.query.call_args.kwargs["job_id"] == client.get_job.call_args.args[0]
+    assert client.query.call_args.kwargs["job_retry"] is None

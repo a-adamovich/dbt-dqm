@@ -503,7 +503,7 @@ def _insert_missed_bigquery(config, table, submission_id, query, job_config) -> 
             job = client.get_job(job_id, location=config.location)
         except NotFound:
             try:
-                job = client.query(query, job_config=job_config, job_id=job_id)
+                job = client.query(query, job_config=job_config, job_id=job_id, job_retry=None)
             except Conflict:
                 job = client.get_job(job_id, location=config.location)
         if job.state == "DONE" and job.error_result:
