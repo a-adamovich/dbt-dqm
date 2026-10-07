@@ -1,4 +1,6 @@
 {% macro reconcile_change_set_sql(run_id) %}
+{% set occurrences = dbt_dqm.dqm_relation('dqm_issue_occurrences') %}
+{% set occurrence_columns %}{% for col, kind in dbt_dqm.table_schemas()['dqm_issue_occurrences'] %}{{ col }}{% if not loop.last %},{% endif %}{% endfor %}{% endset %}
 {% set tracked_test_ids = [] %}
 {% for node in graph.nodes.values() %}
   {% if node.resource_type == 'test' and dbt_dqm.tracked_test(node) %}
@@ -18,16 +20,11 @@ with currently_tracked_tests as (
   {% endif %}
 ),
 
-existing as (select {% for col,kind in dbt_dqm.table_schemas()['dqm_issue_occurrences'] %}{{ col }}{% if not loop.last %},{% endif %}{% endfor %} from {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }}),
-
+{#- Only Active rows and the history of identities this run touches are read. Archived history
+    of untouched identities never affects the change set, and reading the whole table made every
+    run scale with total history. #}
 active_existing as (
-  select * from existing where record_status = 'Active'
-),
-
-occurrence_counts as (
-  select test_unique_id, unique_id, max(occurrence_number) as max_occurrence_number
-  from existing
-  group by test_unique_id, unique_id
+  select {{ occurrence_columns }} from {{ occurrences }} where record_status = 'Active'
 ),
 
 unprocessed_executions as (
@@ -65,6 +62,23 @@ candidate_identities as (
   union distinct
   select distinct test_unique_id, unique_id, identity_scheme_signature
   from active_existing
+),
+
+affected_identities as (
+  select distinct test_unique_id, unique_id from candidate_identities
+),
+
+affected_history as (
+  select {% for col, kind in dbt_dqm.table_schemas()['dqm_issue_occurrences'] %}history.{{ col }}{% if not loop.last %},{% endif %}{% endfor %}
+  from {{ occurrences }} history
+  inner join affected_identities affected
+    on history.test_unique_id = affected.test_unique_id and history.unique_id = affected.unique_id
+),
+
+occurrence_counts as (
+  select test_unique_id, unique_id, max(occurrence_number) as max_occurrence_number
+  from affected_history
+  group by test_unique_id, unique_id
 ),
 
 execution_identity_states as (
@@ -304,7 +318,7 @@ occurrence_changes as (
   union all select * from orphaned_occurrences
 ),
 all_history as (
-  select * from existing where record_status='Archived'
+  select * from affected_history where record_status='Archived'
   union all select * from occurrence_changes
 ),
 transition_events as (

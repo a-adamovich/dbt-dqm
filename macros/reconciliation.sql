@@ -42,9 +42,15 @@
   {% endif %}
   {{ dbt_dqm.assert_sql('not exists(' ~ dbt_dqm.late_inputs_sql() ~ ')',
       "concat('Late DQM evidence: ', (select " ~ ("string_agg(concat(test_unique_id, '/', invocation_id), ', ')" if target.type=='postgres' else "string_agg(concat(test_unique_id, '/', invocation_id), ', ')") ~ ' from (' ~ dbt_dqm.late_inputs_sql() ~ ") late), '. Review and use dqm_skip_late_evidence with an explicit reason.')") }}
-  {% if target.type=='postgres' %}create temporary table dqm_stage on commit drop as
+  {# Postgres has no statistics for the change set's CTEs and estimates them at one row, so it
+     picks nested loops that scale with (affected identities x history). Every join there has
+     equality keys, so hash joins are always available; disable nested loops for this one
+     statement only. #}
+  {% if target.type=='postgres' %}set local enable_nestloop = off;
+    create temporary table dqm_stage on commit drop as
   {% else %}create table {{ dbt_dqm.stage_relation() }} options(expiration_timestamp=timestamp_add(current_timestamp(), interval 24 hour)) as{% endif %}
     {{ dbt_dqm.reconcile_change_set_sql(invocation_id) }};
+  {% if target.type=='postgres' %}reset enable_nestloop;{% endif %}
   {% if target.type=='bigquery' %}
     exception when error then {{ dbt_dqm.abandon_failed_run_sql() }} raise; end;
   {% endif %}
