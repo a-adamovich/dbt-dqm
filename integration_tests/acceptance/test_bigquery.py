@@ -410,3 +410,24 @@ def test_bigquery_uninitialized_empty_and_legacy_rejection_have_no_marker(demo):
         "select table_name from @dataset.INFORMATION_SCHEMA.TABLES` where table_name like 'dqm_%'"
     )
     assert names == [{"table_name": "dqm_annotation_changes"}]
+
+
+def test_bigquery_completed_stage_cleanup_waits_for_retention(demo):
+    from google.api_core.exceptions import NotFound
+
+    run = demo.freeze()
+    demo.apply(run)
+    stage = demo.sql(
+        f"select stage_relation,completed_at from @dataset.dqm_reconciliation_runs` where run_id='{run}'"
+    )[0]
+    name = stage["stage_relation"].replace("`", "")
+    table = demo.client.get_table(name)
+    assert (table.expires - stage["completed_at"]).total_seconds() >= 24 * 60 * 60
+    demo.dbt("run-operation", "dqm_cleanup_stages")
+    assert demo.client.get_table(name)
+    demo.sql(
+        f"update @dataset.dqm_reconciliation_runs` set completed_at=timestamp_sub(current_timestamp(),interval 25 hour) where run_id='{run}'"
+    )
+    demo.dbt("run-operation", "dqm_cleanup_stages")
+    with pytest.raises(NotFound):
+        demo.client.get_table(name)
