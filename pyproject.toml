@@ -21,7 +21,7 @@ dependencies = [
   "dbt-bigquery==1.11.3",
   "dbt-postgres>=1.11,<1.12",
   "google-cloud-bigquery>=3.25,<4",
-  "pandas>=2.2,<3",
+  "pandas>=2.2,<4",
   "platformdirs>=4,<5",
   "pyarrow>=17,<20",
   "pyyaml>=6,<7",
