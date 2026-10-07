@@ -36,4 +36,4 @@ select *,{{ dbt_dqm.safe_rate('tp_count','tp_count+fp_count') }} as reviewed_pre
  case when collection_problem_count>0 then 'collection_problems,' else '' end,
  case when processing_lag_count>0 then 'lag,' else '' end,
  case when skipped_evidence_count>0 then 'skipped_evidence,' else '' end) as attention_flags
-from counts {% if dbt_dqm.empty_mode() %}where false{% endif %}
+from counts

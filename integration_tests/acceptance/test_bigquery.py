@@ -155,6 +155,8 @@ def test_bigquery_batch_rollback_lost_response_and_empty(demo):
         )
         assert demo.snapshot() == before
         assert demo.sql("select generation from @dataset.dqm_reconciliation_control`") == generation
+        # --empty disables tracking writes only; the public views keep serving real data.
+        assert demo.sql("select count(*) n from @dataset.dqm_all_issues`")[0]["n"] == len(before)
 
 
 def test_bigquery_stale_generation_annotations_and_abandoned_runner(demo):

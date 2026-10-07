@@ -58,11 +58,13 @@ Skip validates conclusive, late, unreceipted inputs and atomically writes receip
 
 Raw-log retention is opt-in, receipt-aware and portable. Observations, executions and receipts are pruned together only after processing and outside unfinished runs. High-water state is never pruned. Unconditional BigQuery partition expiration is removed. `dbt_dqm_reconcile_lookback_days` is deprecated, warns and is ignored. Events persist indefinitely unless `dbt_dqm_event_retention_days` is configured. Health exposes the raw retention boundary separately from zero observed activity.
 
-`run --empty` and `build --empty` require initialized current tracking tables. They skip capture, reconciliation, migrations, table grants and cleanup, and project zero rows. Ordinary dbt relation DDL still occurs; no DQM tracking-data changes occur.
+`run --empty` and `build --empty` require initialized current tracking tables. They skip capture, reconciliation, migrations, table grants and cleanup, so no DQM tracking data changes. The public views keep their normal definitions and keep returning real data; ordinary dbt relation DDL (recreating those views) still occurs.
 
 ## Capture concurrency
 
 Serialize dbt test invocations that share a stored-failure schema. dbt overwrites each test's failure table, which the on-run-end capture reads; overlapping invocations could otherwise capture another invocation's rows. The reconciliation generation protocol protects apply concurrency, while this capture-side boundary still requires runner coordination.
+
+Capture detects some of these races. Each test's stored failures are copied once into a capture stage inside the capture transaction, and the stage's row count must equal the `result.failures` that dbt reported (0 for a passing test). A mismatch records `collection_status = 'collection_error'` with the message "Stored failures changed before capture", writes no observations, and produces no lifecycle evidence; a mismatched pass is never treated as a pass. Matching counts don't prove the rows came from this invocation (two runs can fail the same number of rows differently), so the serialization requirement above still applies.
 
 ## Grants
 

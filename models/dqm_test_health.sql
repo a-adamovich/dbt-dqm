@@ -100,4 +100,4 @@ select *,concat(
   case when skipped_evidence_count>0 then 'skipped_evidence,' else '' end,
   case when known_missed_issue_count>0 then 'known_misses,' else '' end
 ) as attention_flags
-from rates {% if dbt_dqm.empty_mode() %}where false{% endif %}
+from rates
