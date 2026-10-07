@@ -798,9 +798,7 @@ def test_event_payload_migration_upgrades_an_existing_02_schema(demo):
     columns = ("payload_mode", "changed_columns", "previous_payload_digest", "payload_digest")
     for column in columns:
         demo.sql(f"alter table @schema.dqm_issue_events drop column {column}")
-    demo.sql(
-        "delete from @schema.dqm_schema_migrations where migration_id='0002_event_payload_mode'"
-    )
+    demo.sql("delete from @schema.dqm_schema_migrations where migration_id <> '0001_initial'")
     demo.sql("update @schema.dqm_reconciliation_control set schema_version='0001_initial'")
     before = demo.occurrences()
     history = demo.sql("select * from @schema.dqm_issue_events order by event_id")
@@ -831,9 +829,10 @@ def test_event_payload_migration_upgrades_an_existing_02_schema(demo):
     } == {
         "0001_initial",
         "0002_event_payload_mode",
+        "0003_app_change_staging",
     }
     control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
     assert (
-        control["schema_version"] == "0002_event_payload_mode"
+        control["schema_version"] == "0003_app_change_staging"
         and control["setup_status"] == "ready"
     )

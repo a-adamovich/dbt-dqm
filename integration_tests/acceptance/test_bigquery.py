@@ -657,9 +657,8 @@ def test_bigquery_0002_upgrades_populated_schema_after_interruption(demo):
         "alter table @dataset.dqm_issue_events` "
         + ", ".join(f"drop column {column}" for column in columns)
     )
-    demo.sql(
-        "delete from @dataset.dqm_schema_migrations` where migration_id='0002_event_payload_mode'"
-    )
+    demo.sql("delete from @dataset.dqm_schema_migrations` where migration_id <> '0001_initial'")
+    demo.sql("drop table @dataset.dqm_app_change_staging`")
     demo.sql(
         "update @dataset.dqm_reconciliation_control` set schema_version='0001_initial' where true"
     )
@@ -673,7 +672,7 @@ def test_bigquery_0002_upgrades_populated_schema_after_interruption(demo):
     control = demo.sql("select * from @dataset.dqm_reconciliation_control`")[0]
     assert control["setup_status"] == "migrating" and control["schema_version"] == "0001_initial"
     assert not demo.sql(
-        "select 1 from @dataset.dqm_schema_migrations` where migration_id='0002_event_payload_mode'"
+        "select 1 from @dataset.dqm_schema_migrations` where migration_id <> '0001_initial'"
     )
     # A retry while the lease is live is refused; after it expires, the retry takes over.
     demo.dbt("run", "--select", "dqm_reconcile", success=False)
@@ -687,6 +686,7 @@ def test_bigquery_0002_upgrades_populated_schema_after_interruption(demo):
     migrated = demo.sql("select * from @dataset.dqm_issue_events` order by event_id")
     assert [{k: v for k, v in row.items() if k not in columns} for row in migrated] == history
     assert {row["payload_mode"] for row in migrated} == {"full"}
+    assert demo.sql("select 1 from @dataset.dqm_app_change_staging` limit 0") == []
     control = demo.sql("select * from @dataset.dqm_reconciliation_control`")[0]
     assert control["setup_status"] == "ready" and control["migration_owner"] is None
-    assert control["schema_version"] == "0002_event_payload_mode"
+    assert control["schema_version"] == "0003_app_change_staging"

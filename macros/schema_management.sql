@@ -19,7 +19,8 @@
 {% macro default__migrations() %}
   {{ return([
     {'id': '0001_initial', 'description': 'Fresh 0.2 schema', 'apply': 'initial_schema_apply', 'verify': 'initial_schema_verify'},
-    {'id': '0002_event_payload_mode', 'description': 'Event payload mode, changed columns and digests', 'apply': 'event_payload_mode_apply', 'backfill': 'event_payload_mode_backfill', 'verify': 'event_payload_mode_verify'}
+    {'id': '0002_event_payload_mode', 'description': 'Event payload mode, changed columns and digests', 'apply': 'event_payload_mode_apply', 'backfill': 'event_payload_mode_backfill', 'verify': 'event_payload_mode_verify'},
+    {'id': '0003_app_change_staging', 'description': 'Package-owned staging table for BigQuery app edits', 'apply': 'app_change_staging_apply', 'verify': 'app_change_staging_verify'}
   ]) }}
 {% endmacro %}
 
@@ -62,6 +63,24 @@
   {% set names = [] %}{% for column in dbt_dqm.event_payload_columns() %}{% do names.append(dbt_dqm.sql_string(column)) %}{% endfor %}
   {{ dbt_dqm.assert_sql('(select count(*) from ' ~ dbt_dqm.columns_catalog() ~ ' where table_schema=' ~ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_issue_events').schema) ~ " and table_name='dqm_issue_events' and lower(column_name) in (" ~ names|join(',') ~ ')) = ' ~ names|length,
       dbt_dqm.sql_string('Event payload columns are missing. Rerun setup with the current package.')) }}
+{% endmacro %}
+
+{#- 0003: the BigQuery review app stages annotation batches in this table before its
+    transactional apply. Setup creates it so reviewers only need row access to it, not
+    table-create rights on the whole DQM dataset. Postgres applies edits directly. #}
+{% macro default__app_change_staging_apply() %}
+  {% if target.type == 'bigquery' %}
+    create table if not exists {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} (
+      batch_id string, occurrence_id string, field_name string, old_value string,
+      new_value string, changed_at timestamp, changed_by string, base_annotation_version int64
+    );
+    alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} add column if not exists base_annotation_version int64;
+  {% endif %}
+{% endmacro %}
+{% macro default__app_change_staging_verify() %}
+  {% if target.type == 'bigquery' %}
+    {{ dbt_dqm.assert_sql(dbt_dqm.table_exists_sql('dqm_app_change_staging'), dbt_dqm.sql_string('dqm_app_change_staging is missing. Rerun setup with the current package.')) }}
+  {% endif %}
 {% endmacro %}
 
 {#- Event payload retention: full before/after values (default), only changed column names plus
@@ -156,9 +175,9 @@
       parallel threads, and concurrent BigQuery GRANTs on one table fail with an IAM ETag
       conflict ("concurrent policy changes"). Each app table grants itself in app_table_finish. #}
   {% for name, table_grant in (var('dbt_dqm_table_grants', {}).items() if grants else []) %}
-    {# The control table is created by setup rather than table_schemas(), but the review app reads
-       it to verify syncs, so reviewers need it granted too. #}
-    {% if name not in dbt_dqm.table_schemas() and name != 'dqm_reconciliation_control' %}{{ exceptions.raise_compiler_error('Unknown DQM grant table: ' ~ name) }}{% endif %}
+    {# The control and app staging tables are created by setup rather than table_schemas(), but
+       the review app reads control to verify syncs and writes staging rows, so they're grantable. #}
+    {% if name not in dbt_dqm.table_schemas() and name not in ['dqm_reconciliation_control', 'dqm_app_change_staging'] %}{{ exceptions.raise_compiler_error('Unknown DQM grant table: ' ~ name) }}{% endif %}
     {% if name not in ['dqm_annotation_changes','dqm_missed_issues'] %}{{ dbt_dqm.table_grants_sql(name, table_grant) }}{% endif %}
   {% endfor %}
 {% endmacro %}

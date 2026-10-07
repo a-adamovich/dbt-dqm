@@ -28,7 +28,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import tracemalloc
 import uuid
 from pathlib import Path
 
@@ -140,6 +139,15 @@ def build_project(workdir: Path, dsn: str, schema: str, tests: int) -> Project:
     return Project(path, profiles, dsn, schema)
 
 
+def payload_sql(columns: int, key: str = "g") -> str:
+    """A captured-row JSON object: the grain plus `columns` context fields of ~40 characters,
+    roughly an allowlist capture of names, emails, amounts and reasons."""
+    parts = ['\'"customer_id":"c-\' || ' + key + " || '\"'"]
+    for index in range(columns):
+        parts.append(f"'\"context_{index:02d}\":\"' || md5({key}::text || '{index}') || '\"'")
+    return "('{' || " + " || ',' || ".join(parts) + " || '}')"
+
+
 def load_history(project: Project, args: argparse.Namespace) -> None:
     """Bulk-insert processed synthetic history for the scale tests, older than any real run."""
     scale_ids = [
@@ -186,7 +194,7 @@ def load_history(project: Project, args: argparse.Namespace) -> None:
           (select anchor from scale_base) - (g * interval '1 minute'),
           ({ids})[1 + (1 + (g / {args.occurrences}) % {args.executions}) % {args.tests}],
           'scale_synthetic',
-          md5('identity-' || (g % {args.occurrences})), '{{"customer_id":"c-' || g || '"}}', 1,
+          md5('identity-' || (g % {args.occurrences})), {payload_sql(args.payload_columns)}, 1,
           '["dqm"]', 0
         from generate_series(0, {args.observations} - 1) g;
 
@@ -197,7 +205,7 @@ def load_history(project: Project, args: argparse.Namespace) -> None:
            last_evaluated_invocation, workflow_status, test_status, annotation_version,
            granularity_signature, identity_scheme_signature, review_verdict)
         select md5('occurrence-' || g), ({ids})[1 + g % {args.tests}], 'scale_synthetic',
-          md5('identity-' || g), 1, '{{"customer_id":"c-' || g || '"}}', 1, '["dqm"]',
+          md5('identity-' || g), 1, {payload_sql(args.payload_columns)}, 1, '["dqm"]',
           (select anchor from scale_base) - (g * {step} * interval '1 second'),
           (select anchor from scale_base) - (g * {step} * interval '1 second' - interval '1 hour'),
           case when g <= {active} then null
@@ -238,18 +246,21 @@ def explain(project: Project, output: Path, scenario: str) -> dict[str, float]:
 
 
 def app_sync(project: Project) -> dict[str, float | int]:
-    from dbt_dqm_app.config import load_config
-    from dbt_dqm_app.warehouse import fetch_health, fetch_issues
-
-    config = load_config(project.path, project.profiles, "dev")
-    tracemalloc.start()
-    started = time.perf_counter()
-    issues = fetch_issues(config)
-    fetch_health(config)
-    seconds = time.perf_counter() - started
-    peak = tracemalloc.get_traced_memory()[1]
-    tracemalloc.stop()
-    return {"seconds": round(seconds, 3), "issues": len(issues), "peak_mb": round(peak / 2**20, 1)}
+    """Run the app's sync path in a fresh process and report its wall time and peak RSS."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).with_name("app_memory.py")),
+            "--project-dir",
+            str(project.path),
+            "--profiles-dir",
+            str(project.profiles),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(result.stdout.strip().splitlines()[-1])
 
 
 def main() -> None:
@@ -259,6 +270,12 @@ def main() -> None:
     parser.add_argument("--active-fraction", type=float, default=0.1)
     parser.add_argument("--executions", type=int, default=50_000)
     parser.add_argument("--observations", type=int, default=5_000_000)
+    parser.add_argument(
+        "--payload-columns",
+        type=int,
+        default=0,
+        help="context fields per captured row (0 = grain only; 8 is ~a 450-byte allowlist row)",
+    )
     parser.add_argument("--output", type=Path, default=Path("scale-results"))
     parser.add_argument("--keep", action="store_true", help="keep the schema for inspection")
     parser.add_argument(
@@ -289,7 +306,9 @@ def main() -> None:
 
             # Mass pass: every scale test passes, archiving all of their Active occurrences.
             project.dbt("test", "--select", "tag:dqm")
-            mass_plans = explain(project, args.output, "mass_pass") if args.explain_mass_pass else {}
+            mass_plans = (
+                explain(project, args.output, "mass_pass") if args.explain_mass_pass else {}
+            )
             mass_pass = project.reconcile_seconds()
             archived = project.sql(
                 "select count(*) from @schema.dqm_issue_occurrences "
@@ -318,7 +337,10 @@ def main() -> None:
         "active_scale_occurrences_after_mass_pass": archived,
         "app_sync": sync,
     }
-    (args.output / "postgres.json").write_text(json.dumps(report, indent=2) + "\n")
+    report["volumes"]["payload_columns"] = args.payload_columns
+    (args.output / f"postgres-payload{args.payload_columns}.json").write_text(
+        json.dumps(report, indent=2) + "\n"
+    )
     print(json.dumps(report, indent=2))
 
 

@@ -99,7 +99,14 @@ vars:
 
 This is the complete reviewer grant set on Postgres, together with `+grants: {select: [dqm_reviewer]}` on the package models (the public views) and `grant usage on schema <dqm schema> to dqm_reviewer`, which dbt doesn't issue. The acceptance suite proves it with separate non-superuser runner and reviewer roles: the reviewer can sync (which reads `dqm_reconciliation_control` to verify the snapshot), read Health, apply annotations and file missed issues, and is denied every other write and raw-log read. The runner needs only `create` on the database (plus `pgcrypto` already installed).
 
-On BigQuery use native IAM privilege maps, e.g. `roles/bigquery.dataViewer: ["user:reviewer@example.com"]` and `roles/bigquery.dataEditor` on writable tables. The runner also needs dataset table creation and control/migration permissions. The app needs reads on public issue/health views and direct reads of the control table and occurrences/audit, occurrence updates, audit inserts and missed-issue inserts. The BigQuery app's existing annotation staging path additionally needs staging-table create/load/read access and jobs.create; Postgres does not create app staging tables.
+On BigQuery use native IAM privilege maps, e.g. `roles/bigquery.dataViewer: ["user:reviewer@example.com"]`. The least-privilege identities are:
+
+| Identity | Project | DQM dataset | Tables |
+| --- | --- | --- | --- |
+| Runner (dbt test/build) | `roles/bigquery.jobUser` | `roles/bigquery.dataEditor`; `roles/bigquery.dataOwner` instead if `dbt_dqm_table_grants` or view `+grants` are configured, because issuing GRANT needs `setIamPolicy`. Plus `dataViewer` on the datasets the tests read. | — |
+| Reviewer (review app) | `roles/bigquery.jobUser` | `roles/bigquery.dataViewer`: BigQuery views run with the caller's access to their source tables, and the Health views read executions, receipts and events | `roles/bigquery.dataEditor` on `dqm_issue_occurrences`, `dqm_annotation_changes`, `dqm_missed_issues` and `dqm_app_change_staging` |
+
+Setup creates `dqm_app_change_staging` (migration `0003_app_change_staging`), so reviewers never need table-create rights on the dataset; the app only loads rows into it. The Postgres reviewer grant set above is proven by an acceptance test with separate restricted roles. The BigQuery matrix has not yet been proven with separate restricted service accounts (the BigQuery suite runs as one elevated identity); see the verification record.
 
 ## Health populations
 

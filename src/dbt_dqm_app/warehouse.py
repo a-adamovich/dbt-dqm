@@ -241,18 +241,15 @@ def _apply_bigquery_patches(config: AppConfig, patches: Iterable[Patch]) -> str:
         raise RuntimeError("Incomplete prior annotation batch; synchronize before retrying.")
     staging_database, staging_schema, _ = _relation_parts(config, "dqm_issue_occurrences")
     staging_id = f"{staging_database}.{staging_schema}.dqm_app_change_staging"
-    client.query(
-        f"""
-        create table if not exists `{staging_id}` (
-          batch_id string, occurrence_id string, field_name string,
-          old_value string, new_value string, changed_at timestamp, changed_by string,
-          base_annotation_version int64
-        )
-        """
-    ).result()
-    client.query(
-        f"alter table `{staging_id}` add column if not exists base_annotation_version int64"
-    ).result()
+    # dbt-dqm setup creates the staging table, so reviewers need only row access to it, not
+    # table-create rights on the DQM dataset.
+    try:
+        client.get_table(staging_id)
+    except NotFound as error:
+        raise AppError(
+            "The DQM schema has no dqm_app_change_staging table. Run dbt build for "
+            "package:dbt_dqm with the current package, then apply again."
+        ) from error
     payload = [
         {
             "batch_id": batch_id,
