@@ -1,0 +1,67 @@
+{
+  "adapter": "bigquery",
+  "label": "baseline",
+  "volumes": {
+    "tests": 200,
+    "first_occurrences": 100000,
+    "occurrences": 1000000,
+    "active_fraction": 0.1,
+    "executions": 50000,
+    "observations": 5000000,
+    "payload_columns": 8,
+    "label": "baseline",
+    "output": "docs/scale-results",
+    "keep": false
+  },
+  "load_first": {
+    "seconds": 15.0,
+    "jobs": 5,
+    "gb_processed": 0.0,
+    "gb_billed": 0.031,
+    "slot_seconds": 58.4
+  },
+  "steady_first": {
+    "seconds": 36.3,
+    "jobs": 27,
+    "gb_processed": 0.414,
+    "gb_billed": 0.667,
+    "slot_seconds": 426.6
+  },
+  "load_rest": {
+    "seconds": 58.0,
+    "jobs": 5,
+    "gb_processed": 0.003,
+    "gb_billed": 0.031,
+    "slot_seconds": 407.6
+  },
+  "steady_full": {
+    "seconds": 47.7,
+    "jobs": 27,
+    "gb_processed": 4.09,
+    "gb_billed": 4.337,
+    "slot_seconds": 1131.2
+  },
+  "app_sync": {
+    "seconds": 72.3,
+    "jobs": 5,
+    "gb_processed": 1.115,
+    "gb_billed": 1.121,
+    "slot_seconds": 206.8,
+    "process": {
+      "issues": 100007,
+      "mean_payload_bytes": 408,
+      "warehouse_read_seconds": 65.52,
+      "total_seconds": 70.7,
+      "baseline_rss_mb": 153.4,
+      "peak_rss_mb": 910.5
+    }
+  },
+  "mass_pass": {
+    "seconds": 55.1,
+    "jobs": 27,
+    "gb_processed": 4.394,
+    "gb_billed": 4.62,
+    "slot_seconds": 1238.7
+  },
+  "active_scale_after_mass_pass": 0
+}

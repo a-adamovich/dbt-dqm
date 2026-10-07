@@ -10,3 +10,7 @@ __pycache__/
 *.json
 !integration_tests/demo_bigquery/seeds/*.csv
 
+
+# Benchmark results referenced by docs/scale.md (synthetic data only).
+!docs/scale-results/**/*.json
+!docs/scale-results/*.json

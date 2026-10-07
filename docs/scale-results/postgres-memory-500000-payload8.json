@@ -1,0 +1,29 @@
+{
+  "adapter": "postgres",
+  "server_version": "16.11",
+  "volumes": {
+    "tests": 200,
+    "occurrences": 500000,
+    "active_occurrences": 50000,
+    "executions": 25000,
+    "observations": 2500000,
+    "payload_columns": 8
+  },
+  "synthetic_load_seconds": 82.3,
+  "steady_reconcile_seconds": 2.04,
+  "steady_plan_execution_seconds": {
+    "freeze": 0.020574000000000002,
+    "change_set": 3.694571
+  },
+  "mass_pass_reconcile_seconds": 14.76,
+  "mass_pass_plan_execution_seconds": {},
+  "active_scale_occurrences_after_mass_pass": 0,
+  "app_sync": {
+    "issues": 61022,
+    "mean_payload_bytes": 408,
+    "warehouse_read_seconds": 3.26,
+    "total_seconds": 5.9,
+    "baseline_rss_mb": 153.5,
+    "peak_rss_mb": 774.5
+  }
+}
