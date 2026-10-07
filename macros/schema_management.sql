@@ -144,22 +144,11 @@
       commit transaction;
       {% for spec in dbt_dqm.migrations() %}
         if not exists(select 1 from {{ ledger }} where migration_id={{ dbt_dqm.sql_string(spec.id) }}) then
-          {{ dbt_dqm.assert_sql('(select migration_owner from ' ~ control ~ ')=dqm_migration_token and (select migration_lease_until from ' ~ control ~ ') > current_timestamp()', dbt_dqm.sql_string('Stale DQM migration owner; retry.')) }}
-          {{ migration_dispatch(spec.apply, 'dbt_dqm')() }}
-          begin transaction;
-          {{ dbt_dqm.assert_sql('(select migration_owner from ' ~ control ~ ')=dqm_migration_token and (select migration_lease_until from ' ~ control ~ ') > current_timestamp()', dbt_dqm.sql_string('Stale DQM migration owner; retry.')) }}
-          {% if spec.get('backfill') %}{{ migration_dispatch(spec.backfill,'dbt_dqm')() }}{% endif %}
-          {{ migration_dispatch(spec.verify, 'dbt_dqm')() }}
-          insert into {{ ledger }} values ({{ dbt_dqm.sql_string(spec.id) }}, current_timestamp());
-          update {{ control }} set migration_lease_until=timestamp_add(current_timestamp(), interval {{ lease }} minute) where true;
-          commit transaction;
+          {{ dbt_dqm.bigquery_migration_apply(spec, 'dqm_migration_token') }}
+          {{ dbt_dqm.bigquery_migration_commit(spec, 'dqm_migration_token') }}
         end if;
       {% endfor %}
-      begin transaction;
-      {{ dbt_dqm.assert_sql('(select migration_owner from ' ~ control ~ ')=dqm_migration_token and (select migration_lease_until from ' ~ control ~ ') > current_timestamp()', dbt_dqm.sql_string('Stale DQM migration owner; retry.')) }}
-      update {{ control }} set setup_status='ready', schema_version={{ dbt_dqm.sql_string(dbt_dqm.latest_migration()) }},
-        migration_owner=null, migration_lease_until=null, generation=generation+1 where true;
-      commit transaction;
+      {{ dbt_dqm.bigquery_migration_release('dqm_migration_token') }}
     end if;
   {% endif %}
   {{ dbt_dqm.ready_sql() }}
@@ -233,4 +222,43 @@
     {% if name=='dqm_annotation_changes' %}create index if not exists dqm_annotation_history on {{ dbt_dqm.dqm_relation(name) }} (occurrence_id,changed_at);{% endif %}
   {% endif %}
   {{ dbt_dqm.table_grants_sql(name,var('dbt_dqm_table_grants',{}).get(name,{})) }}
+{% endmacro %}
+
+{#- BigQuery migration steps, each fenced by the owner token. Permanent DDL can't run inside a
+    transaction, so a migration owner can stall between steps and lose its lease to another
+    owner. Every write after the DDL re-checks ownership inside a transaction, so a resumed stale
+    owner can't backfill, record completion or release the new owner's lease. `token` is a SQL
+    expression (the script variable in setup_sql, or a literal in tests). #}
+{% macro bigquery_migration_guard(token) %}
+  {% set control = dbt_dqm.dqm_relation('dqm_reconciliation_control') %}
+  {{ dbt_dqm.assert_sql('(select migration_owner from ' ~ control ~ ')=' ~ token ~ ' and (select migration_lease_until from ' ~ control ~ ') > current_timestamp()', dbt_dqm.sql_string('Stale DQM migration owner; retry.')) }}
+{% endmacro %}
+
+{% macro bigquery_migration_apply(spec, token) %}
+  {#- Aliased: dbt's static parser rejects adapter.dispatch with a non-literal macro name. #}
+  {% set migration_dispatch = adapter.dispatch %}
+  {{ dbt_dqm.bigquery_migration_guard(token) }}
+  {{ migration_dispatch(spec.apply, 'dbt_dqm')() }}
+{% endmacro %}
+
+{% macro bigquery_migration_commit(spec, token) %}
+  {% set control = dbt_dqm.dqm_relation('dqm_reconciliation_control') %}
+  {% set lease = dbt_dqm.positive_integer_var('dbt_dqm_reconcile_timeout_minutes', 60) %}
+  {% set migration_dispatch = adapter.dispatch %}
+  begin transaction;
+  {{ dbt_dqm.bigquery_migration_guard(token) }}
+  {% if spec.get('backfill') %}{{ migration_dispatch(spec.backfill, 'dbt_dqm')() }}{% endif %}
+  {{ migration_dispatch(spec.verify, 'dbt_dqm')() }}
+  insert into {{ dbt_dqm.dqm_relation('dqm_schema_migrations') }} values ({{ dbt_dqm.sql_string(spec.id) }}, current_timestamp());
+  update {{ control }} set migration_lease_until=timestamp_add(current_timestamp(), interval {{ lease }} minute) where true;
+  commit transaction;
+{% endmacro %}
+
+{% macro bigquery_migration_release(token) %}
+  {% set control = dbt_dqm.dqm_relation('dqm_reconciliation_control') %}
+  begin transaction;
+  {{ dbt_dqm.bigquery_migration_guard(token) }}
+  update {{ control }} set setup_status='ready', schema_version={{ dbt_dqm.sql_string(dbt_dqm.latest_migration()) }},
+    migration_owner=null, migration_lease_until=null, generation=generation+1 where true;
+  commit transaction;
 {% endmacro %}

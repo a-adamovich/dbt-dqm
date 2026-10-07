@@ -27,3 +27,26 @@
 {% macro default__acceptance_verify() %}
   {{ dbt_dqm.assert_sql('not exists(select 1 from ' ~ dbt_dqm.dqm_relation('dqm_issue_occurrences') ~ ' where acceptance_future_field is null)',"'incomplete backfill'") }}
 {% endmacro %}
+
+{# Lease takeover: an owner that claimed setup and applied DDL, then stalled. #}
+{% macro acceptance_future_spec() %}
+  {% for spec in dbt_dqm.migrations() if spec.id == '9999_acceptance' %}{{ return(spec) }}{% endfor %}
+  {{ exceptions.raise_compiler_error('Run with acceptance_future: true') }}
+{% endmacro %}
+{% macro acceptance_stalled_owner(token) %}
+  {% set control = dbt_dqm.dqm_relation('dqm_reconciliation_control') %}
+  {% set sql %}
+    begin transaction;
+    update {{ control }} set setup_status='migrating', migration_owner={{ dbt_dqm.sql_string(token) }},
+      migration_lease_until=timestamp_add(current_timestamp(), interval 60 minute), generation=generation+1 where true;
+    commit transaction;
+    {{ dbt_dqm.bigquery_migration_apply(acceptance_future_spec(), dbt_dqm.sql_string(token)) }}
+  {% endset %}
+  {% if execute %}{% do run_query(sql) %}{% endif %}
+{% endmacro %}
+{% macro acceptance_resume_commit(token) %}
+  {% if execute %}{% do run_query(dbt_dqm.bigquery_migration_commit(acceptance_future_spec(), dbt_dqm.sql_string(token))) %}{% endif %}
+{% endmacro %}
+{% macro acceptance_resume_release(token) %}
+  {% if execute %}{% do run_query(dbt_dqm.bigquery_migration_release(dbt_dqm.sql_string(token))) %}{% endif %}
+{% endmacro %}

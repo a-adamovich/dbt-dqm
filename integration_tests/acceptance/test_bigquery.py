@@ -45,6 +45,7 @@ class Demo:
         if variables:
             command += ["--vars", json.dumps(variables)]
         result = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        self.last_output = result.stdout + result.stderr
         if success:
             assert result.returncode == 0, result.stdout + result.stderr
         else:
@@ -517,3 +518,126 @@ def test_bigquery_event_payload_changed_columns_and_digests(demo):
         assert row["payload_mode"] == "full"
         assert row["changed_columns"] == ",".join(expected)
         assert row["previous_payload_digest"] != row["payload_digest"]
+
+
+def test_bigquery_stale_migration_owner_cannot_finish_after_takeover(demo):
+    future = {"acceptance_future": True}
+    demo.capture("initial")
+    demo.dbt("run", "--select", "dqm_reconcile")
+    # Owner A claims setup, applies the DDL, then stalls past its lease.
+    demo.dbt(
+        "run-operation",
+        "acceptance_stalled_owner",
+        "--args",
+        '{"token": "owner-a"}',
+        variables=future,
+    )
+    demo.sql(
+        "update @dataset.dqm_reconciliation_control` "
+        "set migration_lease_until=timestamp_sub(current_timestamp(), interval 1 minute) where true"
+    )
+    # Owner B takes over and completes the migration.
+    demo.dbt("run-operation", "acceptance_setup", variables=future)
+    control = demo.sql("select * from @dataset.dqm_reconciliation_control`")[0]
+    assert control["setup_status"] == "ready" and control["migration_owner"] is None
+    assert control["schema_version"] == "9999_acceptance"
+    # Reviewer work after B finished, plus a row A's backfill would touch if it ran.
+    demo.sql(
+        "update @dataset.dqm_issue_occurrences` set notes='after takeover', "
+        "annotation_version=annotation_version+1 where true"
+    )
+    target = demo.snapshot()[0]["occurrence_id"]
+    demo.sql(
+        "update @dataset.dqm_issue_occurrences` set acceptance_future_field=null "
+        f"where occurrence_id='{target}'"
+    )
+    before = demo.snapshot()
+    ledger = demo.sql("select * from @dataset.dqm_schema_migrations` order by migration_id")
+
+    # A resumes: it can neither backfill and record completion nor release B's setup.
+    for operation in ("acceptance_resume_commit", "acceptance_resume_release"):
+        demo.dbt(
+            "run-operation",
+            operation,
+            "--args",
+            '{"token": "owner-a"}',
+            variables=future,
+            success=False,
+        )
+        assert "Stale DQM migration owner" in demo.last_output
+    assert demo.snapshot() == before
+    assert demo.sql("select * from @dataset.dqm_schema_migrations` order by migration_id") == ledger
+    assert demo.sql("select * from @dataset.dqm_reconciliation_control`")[0] == control
+
+
+def _tracking_fingerprints(demo):
+    """Row count and an order-independent content fingerprint of every base table in the dataset."""
+    tables = [
+        row["table_name"]
+        for row in demo.sql(
+            f"select table_name from `{PROJECT}.{demo.dataset}.INFORMATION_SCHEMA.TABLES` "
+            "where table_type='BASE TABLE' and table_name like 'dqm_%' order by table_name"
+        )
+    ]
+    return {
+        name: demo.sql(
+            f"select count(*) as n, bit_xor(farm_fingerprint(to_json_string(t))) as fp "
+            f"from @dataset.{name}` t"
+        )[0]
+        for name in tables
+    }
+
+
+def test_bigquery_empty_changes_no_tracking_table(demo):
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.store import Patch
+    from dbt_dqm_app.warehouse import apply_patches, insert_missed_issue
+
+    demo.capture("initial")
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    demo.capture("passed")
+    demo.dbt("run", "--select", "dqm_reconcile")
+    # Reviewer annotations, audit history and a missed report, written through the app.
+    config = load_config(demo.path, demo.profiles, "dev")
+    row = demo.snapshot()[0]
+    apply_patches(
+        config,
+        [
+            Patch(
+                row["occurrence_id"],
+                "notes",
+                row.get("notes"),
+                "reviewed before --empty",
+                1,
+                datetime.now(UTC).isoformat(),
+                row["annotation_version"],
+            )
+        ],
+    )
+    insert_missed_issue(
+        config,
+        {
+            "missed_issue_id": str(uuid.uuid4()),
+            "area_label": "Empty-mode check",
+            "description": "Recorded before --empty",
+            "root_cause": "no_test",
+            "discovered_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    baseline = _tracking_fingerprints(demo)
+    for required in (
+        "dqm_issue_occurrences",
+        "dqm_issue_events",
+        "dqm_annotation_changes",
+        "dqm_missed_issues",
+        "dqm_reconciliation_receipts",
+        "dqm_reconciliation_control",
+        "dqm_test_executions",
+        "dqm_issue_observations",
+    ):
+        assert baseline[required]["n"] > 0, required
+    issues = demo.sql("select count(*) n from @dataset.dqm_all_issues`")[0]["n"]
+    for command in ("run", "build"):
+        demo.dbt(command, "--empty", "--select", "package:dbt_dqm")
+        assert _tracking_fingerprints(demo) == baseline, command
+        assert demo.sql("select count(*) n from @dataset.dqm_all_issues`")[0]["n"] == issues
