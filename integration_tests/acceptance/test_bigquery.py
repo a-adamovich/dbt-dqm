@@ -641,3 +641,52 @@ def test_bigquery_empty_changes_no_tracking_table(demo):
         demo.dbt(command, "--empty", "--select", "package:dbt_dqm")
         assert _tracking_fingerprints(demo) == baseline, command
         assert demo.sql("select count(*) n from @dataset.dqm_all_issues`")[0]["n"] == issues
+
+
+def test_bigquery_0002_upgrades_populated_schema_after_interruption(demo):
+    demo.capture("initial")
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    demo.capture("passed")
+    demo.dbt("run", "--select", "dqm_reconcile")
+    demo.sql(
+        "update @dataset.dqm_issue_occurrences` set notes='kept through 0002', "
+        "review_verdict='TRUE_POSITIVE', annotation_version=annotation_version+1 where true"
+    )
+    columns = ("payload_mode", "changed_columns", "previous_payload_digest", "payload_digest")
+    demo.sql(
+        "alter table @dataset.dqm_issue_events` "
+        + ", ".join(f"drop column {column}" for column in columns)
+    )
+    demo.sql(
+        "delete from @dataset.dqm_schema_migrations` where migration_id='0002_event_payload_mode'"
+    )
+    demo.sql(
+        "update @dataset.dqm_reconciliation_control` set schema_version='0001_initial' where true"
+    )
+    before = demo.snapshot()
+    history = demo.sql("select * from @dataset.dqm_issue_events` order by event_id")
+    assert history
+
+    # Interrupted after the DDL: the dead owner keeps its lease and nothing is recorded.
+    demo.dbt("run", "--select", "dqm_reconcile", variables={"interrupt_0002": True}, success=False)
+    assert "injected 0002 interruption" in demo.last_output
+    control = demo.sql("select * from @dataset.dqm_reconciliation_control`")[0]
+    assert control["setup_status"] == "migrating" and control["schema_version"] == "0001_initial"
+    assert not demo.sql(
+        "select 1 from @dataset.dqm_schema_migrations` where migration_id='0002_event_payload_mode'"
+    )
+    # A retry while the lease is live is refused; after it expires, the retry takes over.
+    demo.dbt("run", "--select", "dqm_reconcile", success=False)
+    assert "already running" in demo.last_output
+    demo.sql(
+        "update @dataset.dqm_reconciliation_control` "
+        "set migration_lease_until=timestamp_sub(current_timestamp(), interval 1 minute) where true"
+    )
+    demo.dbt("run", "--select", "dqm_reconcile")
+    assert demo.snapshot() == before
+    migrated = demo.sql("select * from @dataset.dqm_issue_events` order by event_id")
+    assert [{k: v for k, v in row.items() if k not in columns} for row in migrated] == history
+    assert {row["payload_mode"] for row in migrated} == {"full"}
+    control = demo.sql("select * from @dataset.dqm_reconciliation_control`")[0]
+    assert control["setup_status"] == "ready" and control["migration_owner"] is None
+    assert control["schema_version"] == "0002_event_payload_mode"

@@ -129,6 +129,7 @@ def demo(tmp_path):
 {{ return(registry) }}{% endmacro %}
 {% macro default__acceptance_add() %}alter table {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} add column if not exists future_field text;{% endmacro %}
 {% macro default__acceptance_backfill() %}update {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} set future_field='preserved' where future_field is null;{% endmacro %}
+{% macro postgres__event_payload_mode_backfill() %}{{ dbt_dqm.default__event_payload_mode_backfill() }}{% if var('interrupt_0002',false) %} raise exception 'injected 0002 interruption';{% endif %}{% endmacro %}
 {% macro default__acceptance_verify() %}{{ dbt_dqm.assert_sql('not exists(select 1 from ' ~ dbt_dqm.dqm_relation('dqm_issue_occurrences') ~ ' where future_field is null)',"'backfill incomplete'") }}{% endmacro %}
 """)
     # dbt runs package on-run-end hooks before the root project's, ordered by package name. This
@@ -787,22 +788,52 @@ def test_event_payload_modes(demo, mode):
 def test_event_payload_migration_upgrades_an_existing_02_schema(demo):
     demo.capture()
     demo.dbt("build", "--select", "package:dbt_dqm")
-    # Turn the schema back into a 0001-only 0.2 install that already holds events.
-    for column in ("payload_mode", "changed_columns", "previous_payload_digest", "payload_digest"):
+    demo.capture("passed")
+    demo.dbt("run", "--select", "dqm_reconcile")
+    demo.sql(
+        "update @schema.dqm_issue_occurrences set notes='kept through 0002', "
+        "review_verdict='TRUE_POSITIVE', annotation_version=annotation_version+1"
+    )
+    # Turn the schema back into a populated 0001-only 0.2 install.
+    columns = ("payload_mode", "changed_columns", "previous_payload_digest", "payload_digest")
+    for column in columns:
         demo.sql(f"alter table @schema.dqm_issue_events drop column {column}")
     demo.sql(
         "delete from @schema.dqm_schema_migrations where migration_id='0002_event_payload_mode'"
     )
     demo.sql("update @schema.dqm_reconciliation_control set schema_version='0001_initial'")
     before = demo.occurrences()
-    events = len(demo.sql("select * from @schema.dqm_issue_events"))
+    history = demo.sql("select * from @schema.dqm_issue_events order by event_id")
+    assert history
+
+    # Interrupted: the migration runs inside the reconcile transaction, so nothing persists.
+    demo.dbt("run", "--select", "dqm_reconcile", variables={"interrupt_0002": True}, success=False)
+    assert demo.occurrences() == before
+    assert not demo.sql(
+        "select 1 from information_schema.columns where table_schema=%s "
+        "and table_name='dqm_issue_events' and column_name='payload_mode'",
+        [demo.schema],
+    )
+    assert (
+        demo.sql("select schema_version from @schema.dqm_reconciliation_control")[0][
+            "schema_version"
+        ]
+        == "0001_initial"
+    )
+
     demo.dbt("run", "--select", "dqm_reconcile")
     assert demo.occurrences() == before
-    migrated = demo.sql("select * from @schema.dqm_issue_events")
-    assert len(migrated) == events and {row["payload_mode"] for row in migrated} == {"full"}
+    migrated = demo.sql("select * from @schema.dqm_issue_events order by event_id")
+    assert [{k: v for k, v in row.items() if k not in columns} for row in migrated] == history
+    assert {row["payload_mode"] for row in migrated} == {"full"}
     assert {
         row["migration_id"] for row in demo.sql("select * from @schema.dqm_schema_migrations")
     } == {
         "0001_initial",
         "0002_event_payload_mode",
     }
+    control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
+    assert (
+        control["schema_version"] == "0002_event_payload_mode"
+        and control["setup_status"] == "ready"
+    )

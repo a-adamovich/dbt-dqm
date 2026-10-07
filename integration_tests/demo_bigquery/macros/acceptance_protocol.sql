@@ -50,3 +50,7 @@
 {% macro acceptance_resume_release(token) %}
   {% if execute %}{% do run_query(dbt_dqm.bigquery_migration_release(dbt_dqm.sql_string(token))) %}{% endif %}
 {% endmacro %}
+{% macro bigquery__event_payload_mode_backfill() %}
+  {{ dbt_dqm.default__event_payload_mode_backfill() }}
+  {% if var('interrupt_0002', false) %}select error('injected 0002 interruption');{% endif %}
+{% endmacro %}
