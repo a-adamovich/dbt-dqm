@@ -14,7 +14,7 @@
 {% macro acceptance_setup() %}{% if execute %}{% do run_query(dbt_dqm.setup_sql()) %}{% endif %}{% endmacro %}
 {% macro bigquery__migrations() %}
   {% set registry=dbt_dqm.default__migrations() %}
-  {% if var('acceptance_future',false) %}{% do registry.append({'id':'0002_acceptance','apply':'acceptance_add','backfill':'acceptance_backfill','verify':'acceptance_verify'}) %}{% endif %}
+  {% if var('acceptance_future',false) %}{% do registry.append({'id':'9999_acceptance','apply':'acceptance_add','backfill':'acceptance_backfill','verify':'acceptance_verify'}) %}{% endif %}
   {{ return(registry) }}
 {% endmacro %}
 {% macro default__acceptance_add() %}

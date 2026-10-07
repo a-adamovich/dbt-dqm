@@ -16,6 +16,7 @@
 - The app reads a Postgres profile's password from either `pass` or `password`, as dbt does.
 - `dqm_reconciliation_control` can be listed in `dbt_dqm_table_grants`; reviewers need `select` on it for verified syncs. The documented Postgres reviewer grant set is proven by an acceptance test with separate non-superuser runner and reviewer roles.
 - Tracking-table grants are applied only by reconciliation and capture, not also by the parallel app-table models, so BigQuery no longer hits IAM "concurrent policy changes" errors during a package build.
+- `dbt_dqm_event_payloads` (`full` default, `changed_columns`, `none`) controls payload retention in events, adding `payload_mode`, `changed_columns` and payload digests. Migration `0002_event_payload_mode` upgrades existing 0.2 schemas in place.
 - Reconciliation planning no longer degrades to nested loops on Postgres, and the replay reads only Active rows plus the history of affected identities (see `docs/scale.md`).
 
 

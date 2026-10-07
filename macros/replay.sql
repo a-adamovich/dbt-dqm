@@ -350,12 +350,30 @@ transition_events as (
           (state.capture_mode in ('full','allowlist') and state.record_values_json is distinct from state.previous_payload)
           {% if var('dbt_dqm_emit_still_failing_events',false) %}or true{% endif %}))
 ),
-event_changes as (
+event_changes_full as (
   select *, cast(null as {{ dbt.type_string() }}) as actor from transition_events
   union all
   select test_unique_id, occurrence_id, unique_id, {{ dbt_dqm.sql_string(run_id) }}, archived_at,
     'CLOSED_STRUCTURAL', record_values_json, record_values_json, close_reason,
     cast(null as {{ dbt.type_string() }}) from orphaned_occurrences
+),
+{#- Lifecycle is computed from full payloads; only what the event ledger keeps depends on
+    dbt_dqm_event_payloads. #}
+{% set payload_mode = dbt_dqm.event_payload_mode() %}
+event_changes as (
+  select test_unique_id, occurrence_id, unique_id, invocation_id, event_at, event_type,
+    {% if payload_mode == 'full' %}previous_record_values_json{% else %}cast(null as {{ dbt.type_string() }}){% endif %} as previous_record_values_json,
+    {% if payload_mode == 'full' %}record_values_json{% else %}cast(null as {{ dbt.type_string() }}){% endif %} as record_values_json,
+    reason, actor,
+    {{ dbt_dqm.sql_string(payload_mode) }} as payload_mode,
+    {% if payload_mode == 'none' %}cast(null as {{ dbt.type_string() }})
+    {% else %}case when event_type = 'VALUES_CHANGED'
+      then {{ dbt_dqm.json_changed_keys('previous_record_values_json', 'record_values_json') }} end{% endif %} as changed_columns,
+    {% if payload_mode == 'none' %}cast(null as {{ dbt.type_string() }})
+    {% else %}case when previous_record_values_json is not null then {{ dbt_dqm.sha256_hex('previous_record_values_json') }} end{% endif %} as previous_payload_digest,
+    {% if payload_mode == 'none' %}cast(null as {{ dbt.type_string() }})
+    {% else %}case when record_values_json is not null then {{ dbt_dqm.sha256_hex('record_values_json') }} end{% endif %} as payload_digest
+  from event_changes_full
 )
 select 'occurrence' as row_kind, changes.*,
  {% for col,kind in dbt_dqm.table_schemas()['dqm_issue_events'] if col not in ['test_unique_id','occurrence_id','unique_id','record_values_json'] %}

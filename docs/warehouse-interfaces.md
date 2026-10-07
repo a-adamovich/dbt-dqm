@@ -41,7 +41,17 @@ Row ownership uses explicit case-insensitive `meta.dbt_dqm.owner_column`, otherw
 
 ## History events
 
-Events include `APPEARED`, `REAPPEARED`, `VALUES_CHANGED`, `DISAPPEARED`, `CLOSED_STRUCTURAL`, and `EVIDENCE_SKIPPED`. `dbt_dqm_emit_still_failing_events: true` also emits `STILL_FAILING`. Value changes retain before/after payloads and require `allowlist` or `full` capture. IDs use SHA-256 over the canonical length-prefixed, null-safe `dqm-event-v1` encoding of test, occurrence, original invocation and event type. Skipped evidence has a null occurrence ID and includes the test ID, so skipping two tests from one invocation creates two distinct events.
+Events include `APPEARED`, `REAPPEARED`, `VALUES_CHANGED`, `DISAPPEARED`, `CLOSED_STRUCTURAL`, and `EVIDENCE_SKIPPED`. `dbt_dqm_emit_still_failing_events: true` also emits `STILL_FAILING`. Value changes require `allowlist` or `full` capture.
+
+`dbt_dqm_event_payloads` controls what the event ledger keeps; lifecycle processing always uses the full captured payloads. Each event records the mode it was written with in `payload_mode`.
+
+| Mode | `previous_record_values_json`, `record_values_json` | `changed_columns` (`VALUES_CHANGED` only) | `previous_payload_digest`, `payload_digest` |
+| --- | --- | --- | --- |
+| `full` (default) | before/after captured values | sorted, comma-separated changed keys | SHA-256 of each payload |
+| `changed_columns` | null | sorted, comma-separated changed keys | SHA-256 of each payload |
+| `none` | null | null | null |
+
+With the default `full` mode, captured values in events are kept until event retention (`dbt_dqm_event_retention_days`, separate from raw-log retention) removes them. Under `allowlist` or `full` capture those values can include personal data: set event retention or choose a smaller mode. Digests are not anonymization; predictable values can be recovered by hashing guesses. A key missing on one side counts as changed, distinct from an explicit JSON null. Changing the mode affects new events only; migration `0002_event_payload_mode` marks events written before it as `full`. IDs use SHA-256 over the canonical length-prefixed, null-safe `dqm-event-v1` encoding of test, occurrence, original invocation and event type. Skipped evidence has a null occurrence ID and includes the test ID, so skipping two tests from one invocation creates two distinct events.
 
 ## Recovery and retention
 

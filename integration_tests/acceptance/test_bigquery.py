@@ -286,7 +286,7 @@ def test_bigquery_concurrent_install_and_interrupted_migration(demo):
     ] == before
     assert all(row["acceptance_future_field"] == "preserved" for row in after)
     control = demo.sql("select * from @dataset.dqm_reconciliation_control`")[0]
-    assert control["schema_version"] == "0002_acceptance" and control["migration_owner"] is None
+    assert control["schema_version"] == "9999_acceptance" and control["migration_owner"] is None
 
 
 def test_bigquery_skip_invalidates_frozen_inputs(demo):
@@ -497,3 +497,23 @@ def test_bigquery_capture_rejects_failure_tables_changed_before_capture(demo):
         for r in rows
         if r["test_name"] != customer
     )
+
+
+def test_bigquery_event_payload_changed_columns_and_digests(demo):
+    demo.capture("initial")
+    demo.dbt("run", "--select", "dqm_reconcile")
+    demo.capture("recurrence")  # Continuing failures with changed payloads.
+    demo.dbt("run", "--select", "dqm_reconcile")
+    changed = demo.sql("select * from @dataset.dqm_issue_events` where event_type='VALUES_CHANGED'")
+    assert changed
+    for row in changed:
+        before = json.loads(row["previous_record_values_json"])
+        after = json.loads(row["record_values_json"])
+        expected = sorted(
+            k
+            for k in before.keys() | after.keys()
+            if before.get(k, object()) != after.get(k, object())
+        )
+        assert row["payload_mode"] == "full"
+        assert row["changed_columns"] == ",".join(expected)
+        assert row["previous_payload_digest"] != row["payload_digest"]

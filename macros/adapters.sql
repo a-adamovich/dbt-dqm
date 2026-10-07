@@ -221,3 +221,29 @@
     captured_at = excluded.captured_at,
     invocation_id = excluded.invocation_id
 {% endmacro %}
+
+{#- Sorted, comma-separated names of the top-level keys whose values differ between two JSON
+    object strings. A key missing on one side differs from an explicit JSON null. #}
+{% macro json_changed_keys(before, after) %}
+  {{ return(adapter.dispatch('json_changed_keys', 'dbt_dqm')(before, after)) }}
+{% endmacro %}
+
+{% macro default__json_changed_keys(before, after) %}
+  {{ dbt_dqm.unsupported_adapter_error('JSON key comparison') }}
+{% endmacro %}
+
+{% macro postgres__json_changed_keys(before, after) -%}
+  (select string_agg(changed.key, ',' order by changed.key)
+   from (select jsonb_object_keys(coalesce(cast({{ before }} as jsonb), '{}'::jsonb)) as key
+         union select jsonb_object_keys(coalesce(cast({{ after }} as jsonb), '{}'::jsonb))) changed
+   where (cast({{ before }} as jsonb) -> changed.key) is distinct from (cast({{ after }} as jsonb) -> changed.key))
+{%- endmacro %}
+
+{% macro bigquery__json_changed_keys(before, after) -%}
+  (select string_agg(distinct changed_key, ',' order by changed_key)
+   from unnest(array_concat(
+     json_keys(parse_json(coalesce({{ before }}, '{}')), 1),
+     json_keys(parse_json(coalesce({{ after }}, '{}')), 1))) changed_key
+   where to_json_string(parse_json(coalesce({{ before }}, '{}'))[changed_key])
+     is distinct from to_json_string(parse_json(coalesce({{ after }}, '{}'))[changed_key]))
+{%- endmacro %}

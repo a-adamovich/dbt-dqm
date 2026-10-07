@@ -125,7 +125,7 @@ def demo(tmp_path):
 {% macro acceptance_fault() %}{% if execute and var('fault',false) and not dbt_dqm.empty_mode() %}do $$ begin raise exception 'injected apply failure'; end $$;{% endif %}{% if execute and var('hold',false) and not dbt_dqm.empty_mode() %}select pg_sleep(6);{% endif %}{% endmacro %}
 {% macro postgres__migrations() %}
 {% set registry=dbt_dqm.default__migrations() %}
-{% if var('future',false) %}{% do registry.append({'id':'0002_acceptance','apply':'acceptance_add','backfill':'acceptance_backfill','verify':'acceptance_verify'}) %}{% endif %}
+{% if var('future',false) %}{% do registry.append({'id':'9999_acceptance','apply':'acceptance_add','backfill':'acceptance_backfill','verify':'acceptance_verify'}) %}{% endif %}
 {{ return(registry) }}{% endmacro %}
 {% macro default__acceptance_add() %}alter table {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} add column if not exists future_field text;{% endmacro %}
 {% macro default__acceptance_backfill() %}update {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} set future_field='preserved' where future_field is null;{% endmacro %}
@@ -751,3 +751,58 @@ def test_restricted_runner_and_reviewer_use_only_documented_grants(demo):
         for role in (runner, reviewer):
             as_runner.sql(f'drop owned by "{role}" cascade')
             as_runner.sql(f'drop role "{role}"')
+
+
+@pytest.mark.parametrize("mode", ["full", "changed_columns", "none"])
+def test_event_payload_modes(demo, mode):
+    variables = {"dbt_dqm_event_payloads": mode}
+    demo.capture()
+    demo.dbt("build", "--select", "package:dbt_dqm", variables=variables)
+    demo.capture("recurrence")  # Continuing failures with changed payloads.
+    demo.dbt("run", "--select", "dqm_reconcile", variables=variables)
+    changed = demo.sql("select * from @schema.dqm_issue_events where event_type='VALUES_CHANGED'")
+    appeared = demo.sql("select * from @schema.dqm_issue_events where event_type='APPEARED'")
+    assert changed and appeared
+    assert {row["payload_mode"] for row in changed + appeared} == {mode}
+    for row in changed:
+        if mode == "full":
+            before = json.loads(row["previous_record_values_json"])
+            after = json.loads(row["record_values_json"])
+            expected = sorted(
+                k
+                for k in before.keys() | after.keys()
+                if before.get(k, object()) != after.get(k, object())
+            )
+            assert row["changed_columns"] == ",".join(expected)
+        else:
+            assert row["previous_record_values_json"] is None and row["record_values_json"] is None
+        if mode == "none":
+            assert row["changed_columns"] is None and row["payload_digest"] is None
+        else:
+            assert row["changed_columns"]
+            assert row["previous_payload_digest"] and row["payload_digest"]
+            assert row["previous_payload_digest"] != row["payload_digest"]
+
+
+def test_event_payload_migration_upgrades_an_existing_02_schema(demo):
+    demo.capture()
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    # Turn the schema back into a 0001-only 0.2 install that already holds events.
+    for column in ("payload_mode", "changed_columns", "previous_payload_digest", "payload_digest"):
+        demo.sql(f"alter table @schema.dqm_issue_events drop column {column}")
+    demo.sql(
+        "delete from @schema.dqm_schema_migrations where migration_id='0002_event_payload_mode'"
+    )
+    demo.sql("update @schema.dqm_reconciliation_control set schema_version='0001_initial'")
+    before = demo.occurrences()
+    events = len(demo.sql("select * from @schema.dqm_issue_events"))
+    demo.dbt("run", "--select", "dqm_reconcile")
+    assert demo.occurrences() == before
+    migrated = demo.sql("select * from @schema.dqm_issue_events")
+    assert len(migrated) == events and {row["payload_mode"] for row in migrated} == {"full"}
+    assert {
+        row["migration_id"] for row in demo.sql("select * from @schema.dqm_schema_migrations")
+    } == {
+        "0001_initial",
+        "0002_event_payload_mode",
+    }

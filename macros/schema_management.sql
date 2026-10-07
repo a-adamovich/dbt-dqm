@@ -17,7 +17,10 @@
 
 {% macro migrations() %}{{ return(adapter.dispatch('migrations', 'dbt_dqm')()) }}{% endmacro %}
 {% macro default__migrations() %}
-  {{ return([{'id': '0001_initial', 'description': 'Fresh 0.2 schema', 'apply': 'initial_schema_apply', 'verify': 'initial_schema_verify'}]) }}
+  {{ return([
+    {'id': '0001_initial', 'description': 'Fresh 0.2 schema', 'apply': 'initial_schema_apply', 'verify': 'initial_schema_verify'},
+    {'id': '0002_event_payload_mode', 'description': 'Event payload mode, changed columns and digests', 'apply': 'event_payload_mode_apply', 'backfill': 'event_payload_mode_backfill', 'verify': 'event_payload_mode_verify'}
+  ]) }}
 {% endmacro %}
 
 {% macro capture_tables_ddl() %}
@@ -42,6 +45,34 @@
   {% endif %}
 {% endmacro %}
 {% macro default__initial_schema_apply() %}{{ dbt_dqm.capture_tables_ddl() }}{% endmacro %}
+
+{#- 0002: additive event columns. Fresh installs already have them from 0001, so every step is
+    idempotent. Existing events were written with full payloads. #}
+{% macro event_payload_columns() %}{{ return(['payload_mode', 'changed_columns', 'previous_payload_digest', 'payload_digest']) }}{% endmacro %}
+{% macro default__event_payload_mode_apply() %}
+  {% for column in dbt_dqm.event_payload_columns() %}
+    alter table {{ dbt_dqm.dqm_relation('dqm_issue_events') }} add column if not exists {{ column }} {{ dbt.type_string() }};
+  {% endfor %}
+{% endmacro %}
+{% macro default__event_payload_mode_backfill() %}
+  update {{ dbt_dqm.dqm_relation('dqm_issue_events') }} set payload_mode = 'full'
+  where payload_mode is null and event_type != 'EVIDENCE_SKIPPED';
+{% endmacro %}
+{% macro default__event_payload_mode_verify() %}
+  {% set names = [] %}{% for column in dbt_dqm.event_payload_columns() %}{% do names.append(dbt_dqm.sql_string(column)) %}{% endfor %}
+  {{ dbt_dqm.assert_sql('(select count(*) from ' ~ dbt_dqm.columns_catalog() ~ ' where table_schema=' ~ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_issue_events').schema) ~ " and table_name='dqm_issue_events' and lower(column_name) in (" ~ names|join(',') ~ ')) = ' ~ names|length,
+      dbt_dqm.sql_string('Event payload columns are missing. Rerun setup with the current package.')) }}
+{% endmacro %}
+
+{#- Event payload retention: full before/after values (default), only changed column names plus
+    digests, or none. Digests are not anonymization: predictable values can be guessed. #}
+{% macro event_payload_mode() %}
+  {% set mode = var('dbt_dqm_event_payloads', 'full') %}
+  {% if mode not in ['full', 'changed_columns', 'none'] %}
+    {{ exceptions.raise_compiler_error('dbt_dqm_event_payloads must be full, changed_columns or none.') }}
+  {% endif %}
+  {{ return(mode) }}
+{% endmacro %}
 
 {% macro columns_catalog() %}
   {% set r = dbt_dqm.dqm_relation('dqm_install') %}
