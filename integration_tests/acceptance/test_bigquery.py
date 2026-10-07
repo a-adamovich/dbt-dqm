@@ -44,7 +44,9 @@ class Demo:
         ]
         if variables:
             command += ["--vars", json.dumps(variables)]
-        result = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        # A reconcile is two BigQuery scripts of ~40 statements; each script took 85-126 s in
+        # the 2026-10-07 runs, so one dbt command can approach 300 s without anything hanging.
+        result = subprocess.run(command, capture_output=True, text=True, timeout=600, check=False)
         self.last_output = result.stdout + result.stderr
         if success:
             assert result.returncode == 0, result.stdout + result.stderr
