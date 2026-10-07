@@ -17,8 +17,8 @@ classifiers = [
   "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = [
-  "dbt-core==1.11.11",
-  "dbt-bigquery==1.11.3",
+  "dbt-core==1.12.5",
+  "dbt-bigquery==1.12.1",
   "dbt-postgres>=1.11,<1.12",
   "google-cloud-bigquery>=3.25,<4",
   "pandas>=2.2,<3",
