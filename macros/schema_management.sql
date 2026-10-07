@@ -120,44 +120,73 @@
       dbt_dqm.sql_string('DQM setup is incomplete or package versions differ. Retry setup with the current version.')) }}
 {% endmacro %}
 
+{#
+  Installation and migrations, run before capture and reconciliation:
+
+    1. refuse a recognizable 0.1 schema (before writing anything)
+    2. create the 0.2 install marker, the singleton control row and the migration ledger
+    3. apply pending migrations in registry order (apply -> backfill -> verify -> record)
+    4. require setup to be ready at the latest migration
+    5. grant tracking tables (only from reconciliation and capture; see below)
+
+  Postgres runs this under the transaction-scoped advisory lock, so migrations are serialized
+  and an interrupted one rolls back. BigQuery can't run DDL in transactions, so a migration owner
+  claims a lease in the control row and every later step re-checks it (bigquery_migration_*).
+#}
 {% macro setup_sql(grants=true) %}
-  {% set migration_dispatch=adapter.dispatch %}
+  {#- Aliased: dbt's static parser rejects adapter.dispatch with a non-literal macro name. #}
+  {% set migration_dispatch = adapter.dispatch %}
   {% if not execute or dbt_dqm.empty_mode() %}{{ return('') }}{% endif %}
-  {% set install=dbt_dqm.dqm_relation('dqm_install') %}
-  {% set control=dbt_dqm.dqm_relation('dqm_reconciliation_control') %}
-  {% set ledger=dbt_dqm.dqm_relation('dqm_schema_migrations') %}
-  {% set lease=dbt_dqm.positive_integer_var('dbt_dqm_reconcile_timeout_minutes',60) %}
-  {% set legacy=['dqm_test_executions','dqm_issue_observations','dqm_issue_occurrences','dqm_reconciliation_state','dqm_schema_migrations','dqm_annotation_changes'] %}
-  {% set legacy_checks=[] %}{% for name in legacy %}{% do legacy_checks.append(dbt_dqm.table_exists_sql(name)) %}{% endfor %}
+  {% set install = dbt_dqm.dqm_relation('dqm_install') %}
+  {% set control = dbt_dqm.dqm_relation('dqm_reconciliation_control') %}
+  {% set ledger = dbt_dqm.dqm_relation('dqm_schema_migrations') %}
+  {% set lease = dbt_dqm.positive_integer_var('dbt_dqm_reconcile_timeout_minutes', 60) %}
+  {% set legacy = ['dqm_test_executions','dqm_issue_observations','dqm_issue_occurrences','dqm_reconciliation_state','dqm_schema_migrations','dqm_annotation_changes'] %}
+  {% set legacy_checks = [] %}
+  {% for name in legacy %}{% do legacy_checks.append(dbt_dqm.table_exists_sql(name)) %}{% endfor %}
   {% if target.type == 'bigquery' %}
     declare dqm_migration_token string default generate_uuid();
     declare dqm_needs_setup bool;
   {% endif %}
-  {{ dbt_dqm.assert_sql('(' ~ dbt_dqm.table_exists_sql('dqm_install') ~ ') or not (' ~ legacy_checks|join(' or ') ~ ')',
+
+  {#- 1-2. A 0.1 schema has tracking tables but no install marker. #}
+  {{ dbt_dqm.assert_sql(
+    '(' ~ dbt_dqm.table_exists_sql('dqm_install') ~ ') or not (' ~ legacy_checks | join(' or ') ~ ')',
     dbt_dqm.sql_string('dbt-dqm 0.2 requires a fresh DQM schema. Set dbt_dqm_schema to a new schema; existing 0.1 history is not migrated.')) }}
   create table if not exists {{ install }} as select 'dqm-0.2' as marker, {{ dbt.current_timestamp() }} as created_at;
   create table if not exists {{ control }} as select cast(0 as {{ dbt.type_bigint() }}) as generation,
     'ready' as setup_status, cast(null as {{ dbt.type_string() }}) as migration_owner,
     cast(null as {{ dbt.type_timestamp() }}) as migration_lease_until, cast(null as {{ dbt.type_string() }}) as schema_version, cast(null as {{ dbt.type_timestamp() }}) as raw_pruned_before;
-  create table if not exists {{ ledger }} (migration_id {{ dbt.type_string() }} not null {% if target.type=='postgres' %}primary key{% endif %}, applied_at {{ dbt.type_timestamp() }});
-  {{ dbt_dqm.assert_sql('(select count(*) from ' ~ install ~ ")=1 and (select marker from " ~ install ~ ")='dqm-0.2' and (select count(*) from " ~ control ~ ')=1', dbt_dqm.sql_string('Invalid DQM install marker or singleton control table.')) }}
-  {{ dbt_dqm.assert_sql('not exists(select 1 from ' ~ control ~ ' where schema_version > ' ~ dbt_dqm.sql_string(dbt_dqm.latest_migration()) ~ ')', dbt_dqm.sql_string('DQM schema is newer than this package. Upgrade the package.')) }}
-  {% if target.type=='postgres' %}
+  create table if not exists {{ ledger }} (migration_id {{ dbt.type_string() }} not null {% if target.type == 'postgres' %}primary key{% endif %}, applied_at {{ dbt.type_timestamp() }});
+  {{ dbt_dqm.assert_sql(
+    '(select count(*) from ' ~ install ~ ")=1 and (select marker from " ~ install ~ ")='dqm-0.2' and (select count(*) from " ~ control ~ ')=1',
+    dbt_dqm.sql_string('Invalid DQM install marker or singleton control table.')) }}
+  {{ dbt_dqm.assert_sql(
+    'not exists(select 1 from ' ~ control ~ ' where schema_version > ' ~ dbt_dqm.sql_string(dbt_dqm.latest_migration()) ~ ')',
+    dbt_dqm.sql_string('DQM schema is newer than this package. Upgrade the package.')) }}
+
+  {#- 3. Migrations. Each bumps the generation, which fences reconciliations frozen before it. #}
+  {% if target.type == 'postgres' %}
     {% for spec in dbt_dqm.migrations() %}
       do $dqm_migration$ begin if not exists(select 1 from {{ ledger }} where migration_id={{ dbt_dqm.sql_string(spec.id) }}) then
         update {{ control }} set setup_status='migrating', generation=generation+1 where true;
         {{ migration_dispatch(spec.apply, 'dbt_dqm')() }}
-        {% if spec.get('backfill') %}{{ migration_dispatch(spec.backfill,'dbt_dqm')() }}{% endif %}
+        {% if spec.get('backfill') %}{{ migration_dispatch(spec.backfill, 'dbt_dqm')() }}{% endif %}
         {{ migration_dispatch(spec.verify, 'dbt_dqm')() }}
         insert into {{ ledger }} values ({{ dbt_dqm.sql_string(spec.id) }}, {{ dbt.current_timestamp() }});
         update {{ control }} set setup_status='ready', schema_version={{ dbt_dqm.sql_string(spec.id) }}, generation=generation+1 where true;
       end if; end $dqm_migration$;
     {% endfor %}
-  {% elif target.type=='bigquery' %}
-    set dqm_needs_setup = (select count(*) from {{ ledger }} where migration_id in ({% for spec in dbt_dqm.migrations() %}{{ dbt_dqm.sql_string(spec.id) }}{% if not loop.last %},{% endif %}{% endfor %})) < {{ dbt_dqm.migrations()|length }};
+  {% elif target.type == 'bigquery' %}
+    {% set migration_ids = [] %}
+    {% for spec in dbt_dqm.migrations() %}{% do migration_ids.append(dbt_dqm.sql_string(spec.id)) %}{% endfor %}
+    set dqm_needs_setup = (select count(*) from {{ ledger }} where migration_id in ({{ migration_ids | join(',') }})) < {{ migration_ids | length }};
     if dqm_needs_setup then
+      {#- Claim the migration lease; refuse while another owner's lease is live. #}
       begin transaction;
-      {{ dbt_dqm.assert_sql('not exists(select 1 from ' ~ control ~ " where setup_status='migrating' and migration_lease_until > current_timestamp())", dbt_dqm.sql_string('DQM migration is already running. Retry after it completes or its lease expires.')) }}
+      {{ dbt_dqm.assert_sql(
+        'not exists(select 1 from ' ~ control ~ " where setup_status='migrating' and migration_lease_until > current_timestamp())",
+        dbt_dqm.sql_string('DQM migration is already running. Retry after it completes or its lease expires.')) }}
       update {{ control }} set setup_status='migrating', migration_owner=dqm_migration_token,
         migration_lease_until=timestamp_add(current_timestamp(), interval {{ lease }} minute), generation=generation+1 where true;
       commit transaction;
@@ -170,14 +199,19 @@
       {{ dbt_dqm.bigquery_migration_release('dqm_migration_token') }}
     end if;
   {% endif %}
+
+  {#- 4. #}
   {{ dbt_dqm.ready_sql() }}
-  {#- Only reconciliation and capture grant tracking tables. The app-table models run setup in
+
+  {#- 5. Only reconciliation and capture grant tracking tables. The app-table models run setup in
       parallel threads, and concurrent BigQuery GRANTs on one table fail with an IAM ETag
-      conflict ("concurrent policy changes"). Each app table grants itself in app_table_finish. #}
+      conflict ("concurrent policy changes"). Each app table grants itself in app_table_finish.
+      The control and app staging tables are created by setup rather than table_schemas(), but
+      the review app reads control to verify syncs and writes staging rows, so they're grantable. #}
   {% for name, table_grant in (var('dbt_dqm_table_grants', {}).items() if grants else []) %}
-    {# The control and app staging tables are created by setup rather than table_schemas(), but
-       the review app reads control to verify syncs and writes staging rows, so they're grantable. #}
-    {% if name not in dbt_dqm.table_schemas() and name not in ['dqm_reconciliation_control', 'dqm_app_change_staging'] %}{{ exceptions.raise_compiler_error('Unknown DQM grant table: ' ~ name) }}{% endif %}
+    {% if name not in dbt_dqm.table_schemas() and name not in ['dqm_reconciliation_control', 'dqm_app_change_staging'] %}
+      {{ exceptions.raise_compiler_error('Unknown DQM grant table: ' ~ name) }}
+    {% endif %}
     {% if name not in ['dqm_annotation_changes','dqm_missed_issues'] %}{{ dbt_dqm.table_grants_sql(name, table_grant) }}{% endif %}
   {% endfor %}
 {% endmacro %}
