@@ -36,7 +36,7 @@ begin{% if target.type=='bigquery' %} transaction{% endif %};
       (test_unique_id,invocation_id,captured_at,run_id,outcome,reason,actor,recorded_at)
       select test_unique_id,invocation_id,captured_at,{{ dbt_dqm.sql_string(invocation_id) }},'skipped_late',{{ dbt_dqm.sql_string(reason) }},
         {% if target.type=='bigquery' %}session_user(){% else %}current_user{% endif %},{{ dbt.current_timestamp() }} from ({{ eligible }}) eligible;
-    update {{ dbt_dqm.dqm_relation('dqm_reconciliation_control') }} set generation=generation+1;
+    update {{ dbt_dqm.dqm_relation('dqm_reconciliation_control') }} set generation=generation+1 where true;
     {{ dbt_dqm.recovery_commit() }}
   {% endset %}
   {% if execute %}{% do run_query(sql) %}{% endif %}
@@ -48,7 +48,7 @@ begin{% if target.type=='bigquery' %} transaction{% endif %};
   {% set sql %}{{ dbt_dqm.recovery_begin() }}
     update {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }} set status='abandoned',completed_at={{ dbt.current_timestamp() }}
     where status='started' and started_at < {{ dbt.dateadd('minute',-older_than_minutes,dbt.current_timestamp()) }};
-    update {{ dbt_dqm.dqm_relation('dqm_reconciliation_control') }} set generation=generation+1;
+    update {{ dbt_dqm.dqm_relation('dqm_reconciliation_control') }} set generation=generation+1 where true;
     {{ dbt_dqm.recovery_commit() }}
   {% endset %}
   {% if execute %}{% do run_query(sql) %}{% do dbt_dqm.dqm_cleanup_stages() %}{% endif %}
@@ -78,7 +78,7 @@ begin{% if target.type=='bigquery' %} transaction{% endif %};
   {% set events_days=dbt_dqm.positive_integer_var('dbt_dqm_event_retention_days',none) %}
   {% set sql %}{{ dbt_dqm.recovery_begin() }}
     {% if days is not none %}
-      update {{ dbt_dqm.dqm_relation('dqm_reconciliation_control') }} set raw_pruned_before=case when raw_pruned_before > {{ dbt.dateadd('day',-days,dbt.current_timestamp()) }} then raw_pruned_before else {{ dbt.dateadd('day',-days,dbt.current_timestamp()) }} end,generation=generation+1;
+      update {{ dbt_dqm.dqm_relation('dqm_reconciliation_control') }} set raw_pruned_before=case when raw_pruned_before > {{ dbt.dateadd('day',-days,dbt.current_timestamp()) }} then raw_pruned_before else {{ dbt.dateadd('day',-days,dbt.current_timestamp()) }} end,generation=generation+1 where true;
       {% set eligible %}select execution.test_unique_id,execution.invocation_id
       from {{ dbt_dqm.dqm_relation('dqm_test_executions') }} execution
       inner join {{ dbt_dqm.dqm_relation('dqm_reconciliation_receipts') }} receipt using(test_unique_id,invocation_id)

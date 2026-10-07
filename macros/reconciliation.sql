@@ -92,7 +92,7 @@
     ) frozen where rank=1
   {% endset %}
   {{ dbt_dqm.upsert_reconciliation_state(state_source) }};
-  update {{ control }} set generation=generation+1;
+  update {{ control }} set generation=generation+1 where true;
   update {{ runs }} set status='completed',completed_at={{ dbt.current_timestamp() }} where run_id={{ dbt_dqm.sql_string(invocation_id) }};
   {% if target.type=='bigquery' %}
     commit transaction;
@@ -116,7 +116,7 @@
   if exists(select 1 from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }} where run_id={{ dbt_dqm.sql_string(invocation_id) }} and status='started') then
     update {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }} set status='abandoned',completed_at=current_timestamp()
       where run_id={{ dbt_dqm.sql_string(invocation_id) }} and status='started';
-    update {{ dbt_dqm.dqm_relation('dqm_reconciliation_control') }} set generation=generation+1;
+    update {{ dbt_dqm.dqm_relation('dqm_reconciliation_control') }} set generation=generation+1 where true;
   end if;
   commit transaction;
 {% endmacro %}

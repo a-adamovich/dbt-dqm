@@ -97,6 +97,7 @@ def test_bigquery_apply_fences_and_protects_annotations(protocol_project, monkey
     assert "begin transaction" in sql and "commit transaction" in sql
     assert "dqm_reconciliation_receipts" in sql and "dqm_issue_events" in sql
     assert "drop table" not in sql
+    assert "set generation=generation+1 where true;" in sql
 
 
 def test_bigquery_runtime_stages_and_manifest_stay_stable(protocol_project, monkeypatch):
@@ -114,5 +115,6 @@ def test_bigquery_runtime_stages_and_manifest_stay_stable(protocol_project, monk
         assert stage1 not in json.dumps(node["config"]) and stage2 not in json.dumps(node["config"])
     assert "create table if not exists `compile-only`.`dqm`.`dqm_install` as select" in first
     assert "dqm_migration_token" in first and "migration_lease_until" in first
+    assert "interval 60 minute), generation=generation+1 where true;" in first
     assert "Late DQM evidence" in first
     assert "dqm_reconciliation_inputs" in first

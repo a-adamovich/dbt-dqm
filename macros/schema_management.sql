@@ -95,12 +95,12 @@
   {% if target.type=='postgres' %}
     {% for spec in dbt_dqm.migrations() %}
       do $dqm_migration$ begin if not exists(select 1 from {{ ledger }} where migration_id={{ dbt_dqm.sql_string(spec.id) }}) then
-        update {{ control }} set setup_status='migrating', generation=generation+1;
+        update {{ control }} set setup_status='migrating', generation=generation+1 where true;
         {{ migration_dispatch(spec.apply, 'dbt_dqm')() }}
         {% if spec.get('backfill') %}{{ migration_dispatch(spec.backfill,'dbt_dqm')() }}{% endif %}
         {{ migration_dispatch(spec.verify, 'dbt_dqm')() }}
         insert into {{ ledger }} values ({{ dbt_dqm.sql_string(spec.id) }}, {{ dbt.current_timestamp() }});
-        update {{ control }} set setup_status='ready', schema_version={{ dbt_dqm.sql_string(spec.id) }}, generation=generation+1;
+        update {{ control }} set setup_status='ready', schema_version={{ dbt_dqm.sql_string(spec.id) }}, generation=generation+1 where true;
       end if; end $dqm_migration$;
     {% endfor %}
   {% elif target.type=='bigquery' %}
@@ -109,7 +109,7 @@
       begin transaction;
       {{ dbt_dqm.assert_sql('not exists(select 1 from ' ~ control ~ " where setup_status='migrating' and migration_lease_until > current_timestamp())", dbt_dqm.sql_string('DQM migration is already running. Retry after it completes or its lease expires.')) }}
       update {{ control }} set setup_status='migrating', migration_owner=dqm_migration_token,
-        migration_lease_until=timestamp_add(current_timestamp(), interval {{ lease }} minute), generation=generation+1;
+        migration_lease_until=timestamp_add(current_timestamp(), interval {{ lease }} minute), generation=generation+1 where true;
       commit transaction;
       {% for spec in dbt_dqm.migrations() %}
         if not exists(select 1 from {{ ledger }} where migration_id={{ dbt_dqm.sql_string(spec.id) }}) then
@@ -120,14 +120,14 @@
           {% if spec.get('backfill') %}{{ migration_dispatch(spec.backfill,'dbt_dqm')() }}{% endif %}
           {{ migration_dispatch(spec.verify, 'dbt_dqm')() }}
           insert into {{ ledger }} values ({{ dbt_dqm.sql_string(spec.id) }}, current_timestamp());
-          update {{ control }} set migration_lease_until=timestamp_add(current_timestamp(), interval {{ lease }} minute);
+          update {{ control }} set migration_lease_until=timestamp_add(current_timestamp(), interval {{ lease }} minute) where true;
           commit transaction;
         end if;
       {% endfor %}
       begin transaction;
       {{ dbt_dqm.assert_sql('(select migration_owner from ' ~ control ~ ')=dqm_migration_token and (select migration_lease_until from ' ~ control ~ ') > current_timestamp()', dbt_dqm.sql_string('Stale DQM migration owner; retry.')) }}
       update {{ control }} set setup_status='ready', schema_version={{ dbt_dqm.sql_string(dbt_dqm.latest_migration()) }},
-        migration_owner=null, migration_lease_until=null, generation=generation+1;
+        migration_owner=null, migration_lease_until=null, generation=generation+1 where true;
       commit transaction;
     end if;
   {% endif %}
