@@ -101,6 +101,20 @@ def test_snapshot_and_health_replacement_roll_back_together(tmp_path):
     assert (workspace.rows(), workspace.health_rows(), workspace.last_sync()) == before
 
 
+def test_pending_overlay_text_is_bounded_before_decoding(tmp_path, monkeypatch):
+    workspace = Workspace(tmp_path / "cache.sqlite")
+    workspace.replace_synced_data([issue("one")], {"tests": ["old"]})
+    workspace.set_change("one", "notes", "x" * 1000)
+    before = workspace.last_sync(), workspace.health_rows()
+    with monkeypatch.context() as context:
+        context.setattr("dbt_dqm_app.store.json.loads", MagicMock(side_effect=AssertionError("decoded")))
+        with pytest.raises(CacheLimitExceeded):
+            workspace.rows(max_bytes=1000)
+        with pytest.raises(CacheLimitExceeded):
+            workspace.replace_synced_data([issue("one")], {"tests": ["new"]}, max_bytes=1000)
+    assert (workspace.last_sync(), workspace.health_rows()) == before
+
+
 def test_oversized_old_cache_is_not_decoded_and_pending_pages_remain_accessible(tmp_path, monkeypatch):
     workspace = Workspace(tmp_path / "cache.sqlite")
     workspace.replace_snapshot([issue(str(i)) for i in range(201)])

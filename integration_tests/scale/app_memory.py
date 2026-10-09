@@ -49,8 +49,8 @@ def main() -> None:
     fetched = time.perf_counter()
     with tempfile.TemporaryDirectory() as directory:
         workspace = Workspace(Path(directory) / "workspace.sqlite")
-        workspace.replace_snapshot(issues)
-        workspace.replace_health(health)
+        workspace.replace_synced_data(issues, health, max_issues=config.max_cache_issues,
+                                      max_bytes=config.max_cache_bytes)
         del issues
         rows = workspace.rows()
         frame = pd.DataFrame(rows)

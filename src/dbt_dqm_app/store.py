@@ -125,6 +125,13 @@ class Workspace:
         count, size = connection.execute(
             "select count(*), coalesce(sum(length(cast(payload_json as blob))),0) from incoming"
         ).fetchone()
+        # Pending text will be overlaid when rendering; account for it before materializing
+        # either the incoming or historical snapshot. Conservatively charge the new text even
+        # when it replaces a similarly sized old value.
+        size += connection.execute(
+            "select coalesce(sum(length(cast(coalesce(p.new_value,'') as blob))),0) "
+            "from pending_changes p join incoming i using(occurrence_id)"
+        ).fetchone()[0]
         check_cache_size(count, size, max_issues, max_bytes)
         connection.execute("delete from snapshot")
         connection.execute("insert into snapshot select * from incoming")
@@ -175,16 +182,23 @@ class Workspace:
 
     def cache_size(self) -> tuple[int, int]:
         with self.connect() as connection:
-            return tuple(connection.execute(
-                "select count(*), coalesce(sum(length(cast(payload_json as blob))),0) from snapshot"
-            ).fetchone())
+            return self._cache_size(connection)
+
+    @staticmethod
+    def _cache_size(connection) -> tuple[int, int]:
+        count, size = connection.execute(
+            "select count(*), coalesce(sum(length(cast(payload_json as blob))),0) from snapshot"
+        ).fetchone()
+        size += connection.execute(
+            "select coalesce(sum(length(cast(coalesce(p.new_value,'') as blob))),0) "
+            "from pending_changes p join snapshot s using(occurrence_id)"
+        ).fetchone()[0]
+        return count, size
 
     def rows(self, *, max_issues=MAX_CACHE_ISSUES,
              max_bytes=MAX_CACHE_MIB * 2**20) -> list[dict[str, Any]]:
         with self.connect() as connection:
-            count, size = connection.execute(
-                "select count(*), coalesce(sum(length(cast(payload_json as blob))),0) from snapshot"
-            ).fetchone()
+            count, size = self._cache_size(connection)
             check_cache_size(count, size, max_issues, max_bytes)
             snapshots = {
                 row["occurrence_id"]: json.loads(row["payload_json"])

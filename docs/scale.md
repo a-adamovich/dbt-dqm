@@ -118,6 +118,23 @@ of 500, and refuses an oversized result without replacing issues, Health, or the
 Pending edits remain available in 100-issue local pages even for an oversized historical cache.
 The byte limit measures compact UTF-8 JSON, not resident memory: Python, pandas, client buffers
 and Streamlit add overhead, and one fetched row may temporarily exceed the budget before rejection.
+Pending replacement text is charged conservatively in addition to the cached JSON before overlay.
+
+### Safeguard boundary rerun (2026-10-09)
+
+The reproducible `integration_tests/scale/cache_boundary.py` harness measured the new real sync
+path on PostgreSQL 16.11 at exactly 50,000 Active issues, with synthetic processed history and
+408-byte captured payloads. It includes verified warehouse reads, atomic SQLite issue/Health
+replacement and the issue DataFrame. A fresh process measured **148.8 MiB baseline / 420.8 MiB
+peak RSS**, **2.17 s warehouse read / 5.90 s total**. Other acceptance suites were running on
+the same machine, so timings are indicative rather than a regression threshold. A running
+Streamlit server adds framework overhead; this is not an end-to-end server-memory guarantee.
+Raw results: [`cache-boundary-safeguards.json`](scale-results/cache-boundary-safeguards.json).
+
+```bash
+DBT_DQM_TEST_DSN='host=... port=... dbname=... user=... password=...' \
+uv run python integration_tests/scale/cache_boundary.py --output /tmp/cache-boundary.json
+```
 
 ## BigQuery
 
