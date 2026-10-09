@@ -100,6 +100,16 @@ def test_bigquery_apply_fences_and_protects_annotations(protocol_project, monkey
     assert "set generation=generation+1 where true;" in sql
 
 
+def test_app_staging_migration_and_cleanup_render_without_raw_retention(protocol_project, monkeypatch):
+    sql = render(protocol_project, monkeypatch, "setup_sql")
+    assert "0004_app_staging_safety" in sql
+    assert "alter column staged_at set default current_timestamp()" in sql
+    assert "set staged_at=current_timestamp() where staged_at is null" in sql
+    cleanup = render(protocol_project, monkeypatch, "cleanup_dqm_logs_sql")
+    assert "dqm_app_change_staging" in cleanup and "interval 24 hour" in cleanup
+    assert "delete from `compile-only`.`dqm`.`dqm_test_executions`" not in cleanup
+
+
 def test_bigquery_runtime_stages_and_manifest_stay_stable(protocol_project, monkeypatch):
     first = render(protocol_project, monkeypatch, "reconcile_pre")
     project, _ = protocol_project

@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .limits import MAX_CACHE_ISSUES, MAX_CACHE_MIB, check_cache_size, issue_json
+
 EDITABLE_FIELDS = (
     "workflow_status",
     "review_verdict",
@@ -102,29 +104,65 @@ class Workspace:
                 "where field_name='test_status'"
             )
 
-    def replace_snapshot(self, rows: Iterable[dict[str, Any]]) -> None:
+    def _replace_snapshot(self, connection, rows, now, max_issues, max_bytes) -> None:
+        # Stage in SQLite instead of duplicating the entire incoming Python snapshot. The
+        # transaction also fences pending edits while deciding which older issues to retain.
+        connection.execute("create temp table incoming as select * from snapshot where false")
+        connection.execute("create unique index incoming_id on incoming(occurrence_id)")
+        size = 0
+        for count, row in enumerate(rows, start=1):
+            payload = issue_json(row)
+            size += len(payload.encode("utf-8"))
+            check_cache_size(count, size, max_issues, max_bytes)
+            connection.execute("insert into incoming values (?,?,?)",
+                               (str(row["occurrence_id"]), payload, now))
+        connection.execute(
+            "insert into incoming select s.occurrence_id, "
+            "json_set(s.payload_json, '$._outside_cache', json('true')), ? from snapshot s "
+            "where exists(select 1 from pending_changes p where p.occurrence_id=s.occurrence_id) "
+            "and not exists(select 1 from incoming i where i.occurrence_id=s.occurrence_id)", (now,)
+        )
+        count, size = connection.execute(
+            "select count(*), coalesce(sum(length(cast(payload_json as blob))),0) from incoming"
+        ).fetchone()
+        # Pending text will be overlaid when rendering; account for it before materializing
+        # either the incoming or historical snapshot. Conservatively charge the new text even
+        # when it replaces a similarly sized old value.
+        size += connection.execute(
+            "select coalesce(sum(length(cast(coalesce(p.new_value,'') as blob))),0) "
+            "from pending_changes p join incoming i using(occurrence_id)"
+        ).fetchone()[0]
+        check_cache_size(count, size, max_issues, max_bytes)
+        connection.execute("delete from snapshot")
+        connection.execute("insert into snapshot select * from incoming")
+        connection.execute(
+            "insert into metadata(key,value) values ('last_sync',?) "
+            "on conflict(key) do update set value=excluded.value", (now,)
+        )
+
+    def replace_snapshot(self, rows: Iterable[dict[str, Any]], *,
+                         max_issues=MAX_CACHE_ISSUES, max_bytes=MAX_CACHE_MIB * 2**20) -> None:
+        self.replace_synced_data(rows, None, max_issues=max_issues, max_bytes=max_bytes)
+
+    def replace_synced_data(self, rows, health, *,
+                            max_issues=MAX_CACHE_ISSUES, max_bytes=MAX_CACHE_MIB * 2**20) -> None:
         now = datetime.now(UTC).isoformat()
-        records = [(str(row["occurrence_id"]), json.dumps(row, default=str), now) for row in rows]
-        with self.connect() as connection:
-            incoming = {record[0] for record in records}
-            retained = connection.execute(
-                "select distinct snapshot.* from snapshot join pending_changes using(occurrence_id)"
-            ).fetchall()
-            for row in retained:
-                if row["occurrence_id"] not in incoming:
-                    payload = json.loads(row["payload_json"])
-                    payload["_outside_cache"] = True
-                    records.append((row["occurrence_id"], json.dumps(payload), now))
-            connection.execute("delete from snapshot")
-            connection.executemany(
-                "insert into snapshot(occurrence_id, payload_json, synced_at) values (?, ?, ?)",
-                records,
-            )
-            connection.execute(
-                "insert into metadata(key, value) values ('last_sync', ?) "
-                "on conflict(key) do update set value=excluded.value",
-                (now,),
-            )
+        connection = self._connect_immediate()
+        try:
+            connection.execute("begin immediate")
+            self._replace_snapshot(connection, rows, now, max_issues, max_bytes)
+            if health is not None:
+                connection.execute("delete from health_snapshot")
+                connection.executemany(
+                    "insert into health_snapshot(kind,payload_json,synced_at) values (?,?,?)",
+                    ((kind, json.dumps(value, default=str), now) for kind, value in health.items()),
+                )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def replace_health(self, health: dict[str, Any]) -> None:
         now = datetime.now(UTC).isoformat()
@@ -142,8 +180,26 @@ class Workspace:
                 for row in connection.execute("select * from health_snapshot")
             }
 
-    def rows(self) -> list[dict[str, Any]]:
+    def cache_size(self) -> tuple[int, int]:
         with self.connect() as connection:
+            return self._cache_size(connection)
+
+    @staticmethod
+    def _cache_size(connection) -> tuple[int, int]:
+        count, size = connection.execute(
+            "select count(*), coalesce(sum(length(cast(payload_json as blob))),0) from snapshot"
+        ).fetchone()
+        size += connection.execute(
+            "select coalesce(sum(length(cast(coalesce(p.new_value,'') as blob))),0) "
+            "from pending_changes p join snapshot s using(occurrence_id)"
+        ).fetchone()[0]
+        return count, size
+
+    def rows(self, *, max_issues=MAX_CACHE_ISSUES,
+             max_bytes=MAX_CACHE_MIB * 2**20) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            count, size = self._cache_size(connection)
+            check_cache_size(count, size, max_issues, max_bytes)
             snapshots = {
                 row["occurrence_id"]: json.loads(row["payload_json"])
                 for row in connection.execute("select * from snapshot")
@@ -169,14 +225,15 @@ class Workspace:
         try:
             connection.execute("begin immediate")
             row = connection.execute(
-                "select payload_json from snapshot where occurrence_id=?", (occurrence_id,)
+                "select json_extract(payload_json, ?) as value, "
+                "json_extract(payload_json, '$.annotation_version') as annotation_version "
+                "from snapshot where occurrence_id=?", ("$." + field_name, occurrence_id)
             ).fetchone()
             if row is None:
                 raise KeyError(occurrence_id)
-            snapshot = json.loads(row["payload_json"])
-            base = snapshot.get(field_name)
+            base = row["value"]
             base = None if base is None else str(base)
-            base_annotation_version = int(snapshot.get("annotation_version") or 0)
+            base_annotation_version = int(row["annotation_version"] or 0)
             if normalized == base:
                 connection.execute(
                     "delete from pending_changes where occurrence_id=? and field_name=?",
@@ -223,25 +280,64 @@ class Workspace:
         was staged. Applying now would use local-wins semantics and silently overwrite that
         newer remote value; callers should surface this instead of applying quietly."""
         with self.connect() as connection:
-            snapshots = {
-                row["occurrence_id"]: json.loads(row["payload_json"])
-                for row in connection.execute("select * from snapshot")
-            }
             drifted = []
-            for patch_row in connection.execute("select * from pending_changes"):
-                patch = Patch(**dict(patch_row))
-                snapshot = snapshots.get(patch.occurrence_id)
-                if snapshot is None:
-                    continue
-                current = snapshot.get(patch.field_name)
+            for patch_row in connection.execute(
+                "select p.*, json_extract(s.payload_json, '$.' || p.field_name) as current_value, "
+                "json_extract(s.payload_json, '$.annotation_version') as current_version "
+                "from pending_changes p join snapshot s using(occurrence_id)"
+            ):
+                values = dict(patch_row)
+                current = values.pop("current_value")
+                current_annotation_version = int(values.pop("current_version") or 0)
+                patch = Patch(**values)
                 current = None if current is None else str(current)
-                current_annotation_version = int(snapshot.get("annotation_version") or 0)
                 if (
                     current != patch.old_value
                     or current_annotation_version != patch.base_annotation_version
                 ):
                     drifted.append(patch)
         return drifted
+
+    def pending_count(self) -> int:
+        with self.connect() as connection:
+            return connection.execute("select count(*) from pending_changes").fetchone()[0]
+
+    def pending_issue_count(self) -> int:
+        with self.connect() as connection:
+            return connection.execute(
+                "select count(distinct occurrence_id) from pending_changes"
+            ).fetchone()[0]
+
+    def pending_page(self, page=1, max_bytes=MAX_CACHE_MIB * 2**20) -> list[Patch]:
+        if page < 1:
+            raise ValueError("Pending page must be positive")
+        with self.connect() as connection:
+            selection = (
+                "select occurrence_id from pending_changes group by occurrence_id "
+                "order by occurrence_id limit 100 offset ?"
+            )
+            offset = (page - 1) * 100
+            size = connection.execute(
+                "select coalesce(sum(length(cast(coalesce(old_value,'') as blob)) + "
+                "length(cast(coalesce(new_value,'') as blob))),0) from pending_changes "
+                f"where occurrence_id in ({selection})", (offset,)
+            ).fetchone()[0]
+            check_cache_size(0, size, MAX_CACHE_ISSUES, max_bytes)
+            return [Patch(**dict(row)) for row in connection.execute(
+                f"select * from pending_changes where occurrence_id in ({selection}) "
+                "order by occurrence_id, field_name", (offset,)
+            )]
+
+    def pending_previews(self, page=1) -> list[Patch]:
+        """Truncated display/discard tokens; never pass these previews to Apply."""
+        with self.connect() as connection:
+            return [Patch(**dict(row)) for row in connection.execute(
+                "select occurrence_id,field_name,substr(old_value,1,4000) as old_value, "
+                "substr(new_value,1,4000) as new_value,version,changed_at,base_annotation_version "
+                "from pending_changes where occurrence_id in (select occurrence_id "
+                "from pending_changes group by occurrence_id order by occurrence_id "
+                "limit 100 offset ?) order by occurrence_id,field_name", ((page - 1) * 100,)
+            )]
 
     def pending(self) -> list[Patch]:
         with self.connect() as connection:

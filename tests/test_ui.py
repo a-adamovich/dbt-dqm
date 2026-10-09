@@ -90,3 +90,46 @@ def test_review_health_and_missed_retry_ui(tmp_path, monkeypatch):
         submission,
     ]
     assert app.session_state["missed_submission_id"] != submission
+
+
+def test_oversized_cache_ui_keeps_pending_and_reports_committed_apply(tmp_path, monkeypatch):
+    import dbt_dqm_app.streamlit_app as ui
+    from dbt_dqm_app.limits import CacheLimitExceeded
+
+    config = AppConfig(tmp_path, tmp_path, "dev", "demo", "postgres", "db", "schema", "US",
+                       "oauth", None, max_cache_issues=1)
+    path = tmp_path / "workspace.sqlite"
+    monkeypatch.setattr(AppConfig, "workspace_path", property(lambda self: path))
+    monkeypatch.setattr(ui, "load_config", lambda *args: config)
+    monkeypatch.setattr(ui, "manifest_nodes", lambda _: {})
+    for name in ("PROJECT_DIR", "PROFILES_DIR", "TARGET"):
+        monkeypatch.setenv("DBT_DQM_" + name, "dev" if name == "TARGET" else str(tmp_path))
+    workspace = Workspace(path)
+    workspace.replace_synced_data([
+        {"occurrence_id": str(i), "notes": None, "annotation_version": 0} for i in range(2)
+    ], {"tests": [], "areas": [], "synced_at": "old"})
+    workspace.set_change("0", "notes", "keep this edit")
+    failed = Future()
+    failed.set_exception(CacheLimitExceeded("Too many issues; cached data is kept"))
+    committed = Future()
+    committed.set_result(("confirmed-batch", {"issues": [{"occurrence_id": "new"}],
+                                              "health": {"tests": ["new"]}}, None))
+    executor = MagicMock()
+    executor.submit.side_effect = [failed, committed]
+    monkeypatch.setattr(ui, "_get_executor", lambda: executor)
+    app = AppTest.from_string("from dbt_dqm_app.streamlit_app import run_app\nrun_app()").run()
+    assert not app.exception
+    assert not app.dataframe  # No oversized issue DataFrame was built.
+    assert workspace.pending()[0].new_value == "keep this edit"
+    assert any("keep this edit" in block.value for block in app.code)
+    # Recreate a retained edit outside the incoming window after the apply was frozen.
+    frozen = workspace.pending()
+    workspace.set_change("0", "notes", "newer local edit")
+    app.session_state["job"] = committed
+    app.session_state["job_kind"] = "apply"
+    app.session_state["job_patches"] = frozen
+    app.run()
+    assert not app.exception
+    assert any("Applied batch confirmed-batch" in warning.value for warning in app.warning)
+    assert workspace.pending()[0].new_value == "newer local edit"
+    assert workspace.health_rows()["synced_at"] == "old"

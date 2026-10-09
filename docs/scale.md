@@ -111,6 +111,31 @@ for the sync path, plus Streamlit's own baseline. Beyond that:
 Warehouse-side filtering and pagination, which the roadmap defers, is the fix for larger
 backlogs. Memory remains an open concern rather than a solved one.
 
+The app now enforces 50,000 issues and 128 MiB of serialized issue data, including retained
+issues with pending edits. `--max-cache-issues` and `--max-cache-mib` can lower these limits,
+but cannot raise them. Sync checks the warehouse count before download, streams rows in pages
+of 500, and refuses an oversized result without replacing issues, Health, or the sync timestamp.
+Pending edits remain available in 100-issue local pages even for an oversized historical cache.
+The byte limit measures compact UTF-8 JSON, not resident memory: Python, pandas, client buffers
+and Streamlit add overhead, and one fetched row may temporarily exceed the budget before rejection.
+Pending replacement text is charged conservatively in addition to the cached JSON before overlay.
+
+### Safeguard boundary rerun (2026-10-09)
+
+The reproducible `integration_tests/scale/cache_boundary.py` harness measured the new real sync
+path on PostgreSQL 16.11 at exactly 50,000 Active issues, with synthetic processed history and
+408-byte captured payloads. It includes verified warehouse reads, atomic SQLite issue/Health
+replacement and the issue DataFrame. A fresh process measured **148.8 MiB baseline / 420.8 MiB
+peak RSS**, **2.17 s warehouse read / 5.90 s total**. Other acceptance suites were running on
+the same machine, so timings are indicative rather than a regression threshold. A running
+Streamlit server adds framework overhead; this is not an end-to-end server-memory guarantee.
+Raw results: [`cache-boundary-safeguards.json`](scale-results/cache-boundary-safeguards.json).
+
+```bash
+DBT_DQM_TEST_DSN='host=... port=... dbname=... user=... password=...' \
+uv run python integration_tests/scale/cache_boundary.py --output /tmp/cache-boundary.json
+```
+
 ## BigQuery
 
 Same volumes and payloads. Cost is in bytes processed (on-demand billing also applies a 10 MB
@@ -145,10 +170,12 @@ None of them can be pruned by clustering:
 - **History read:** a join.
 - **App read:** filters on Active *or* a recent archive date.
 
-BigQuery prunes clustered blocks only for constant filters. Clustering on `record_status` would
-trim part of one scan, while adding it to existing tables means rewriting them with a
-non-transactional swap that could lose a concurrent reviewer edit. Not worth it at about 1.5 GB
-(~$0.009) per run at 1M occurrences; this cost grows linearly with the occurrence table.
+Clustering benefit depends on the actual filters and execution plan. Existing tables can have
+their clustering metadata changed in place with `bq update --clustering_fields`; a table swap
+is not required. Existing rows may need a separate reclustering operation. The measurements
+above do not establish that clustering can never help these queries. Further controlled
+experiments remain deferred; this release keeps the measured query improvements and no new
+occurrence clustering. See [Google's clustered-table guide](https://docs.cloud.google.com/bigquery/docs/manage-clustered-tables).
 
 **App sync** reads about 1.1 GB and takes about 65 s for 100k issues. The read itself dominates,
 because the client downloads rows over the REST API. The same supported cache size as on

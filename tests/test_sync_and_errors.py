@@ -9,6 +9,16 @@ from dbt_dqm_app.config import AppConfig
 from dbt_dqm_app.errors import AppError, SnapshotUnavailable, WarehouseBusy, classify
 
 
+@pytest.fixture(autouse=True)
+def streamed_fake(monkeypatch):
+    # The legacy fake answers both small metadata reads and the new issue stream. Production
+    # adapter streaming is tested independently in test_cache_limits.
+    def streamed(config, query):
+        yield from warehouse._query_rows(config, query)
+
+    monkeypatch.setattr(warehouse, "_iter_issue_rows", streamed)
+
+
 def config(tmp_path, adapter="postgres", archive_cache_days=90):
     return AppConfig(
         tmp_path,

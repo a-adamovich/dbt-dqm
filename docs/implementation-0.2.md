@@ -1,5 +1,9 @@
 # 0.2 implementation and verification
 
+For the subsequent permissions and cache/staging safeguards, see the
+[current verification record](qa-release-safeguards.md). That record supersedes older app-memory
+and staging limitations below; restricted BigQuery permissions remain a separate live gate.
+
 The four workstreams are implemented in logical commit chunks. Pre-existing working-tree changes are preserved in three separate commits before the 0.2 implementation. Main implementation boundaries:
 
 1. Runtime SQL-returning hooks, stable reconciliation view, frozen inputs/receipts, generation fencing, fresh-install marker, ordered migrations, recovery and receipt-aware retention.

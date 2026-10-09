@@ -1,5 +1,11 @@
 # dbt-dqm
 
+The local app refuses caches above **50,000 issues or 128 MiB of serialized issue data**.
+Use `--max-cache-issues` / `--max-cache-mib` to lower these ceilings. Oversized syncs preserve
+cached data and pending edits; reduce `--archive-cache-days` or captured context before retrying.
+Issue and Health snapshots install together. Pending edits in an older oversized cache remain
+accessible through a bounded local panel. These ceilings do not guarantee a fixed process RSS.
+
 > **`main` is 0.2.0-dev and unreleased.** It needs a fresh DQM schema and isn't covered by a
 > release tag yet. For stable use, pin `revision: v0.1.0`.
 

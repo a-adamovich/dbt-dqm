@@ -10,6 +10,40 @@ from dbt_dqm_app.store import Workspace
 from dbt_dqm_app.warehouse import _relation_parts, insert_missed_issue
 
 
+def test_oauth_clients_use_explicit_independent_credentials(tmp_path, monkeypatch):
+    from dbt_dqm_app import warehouse
+
+    loaded = MagicMock(side_effect=[("runner-creds", None), ("reviewer-creds", None)])
+    factory = MagicMock()
+    monkeypatch.setattr(warehouse.google.auth, "load_credentials_from_file", loaded)
+    monkeypatch.setattr(warehouse.bigquery, "Client", factory)
+    for identity in ("runner", "reviewer"):
+        warehouse.client_for(replace(config(tmp_path, "bigquery"),
+                                     credentials_file=tmp_path / identity))
+    assert [call.kwargs["credentials"] for call in factory.call_args_list] == [
+        "runner-creds", "reviewer-creds"
+    ]
+    assert [call.args[0] for call in loaded.call_args_list] == [
+        str(tmp_path / "runner"), str(tmp_path / "reviewer")
+    ]
+
+
+def test_reviewer_dbt_subprocess_credentials_do_not_change_global_adc(tmp_path, monkeypatch):
+    import os
+
+    from dbt_dqm_app import warehouse
+
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "unrelated-original-adc")
+    run = MagicMock()
+    monkeypatch.setattr(warehouse.subprocess, "run", run)
+    reviewer_file = tmp_path / "reviewer-adc.json"
+    warehouse.validate_dbt(replace(config(tmp_path, "bigquery"), credentials_file=reviewer_file))
+    assert run.call_count == 2
+    assert all(call.kwargs["env"]["GOOGLE_APPLICATION_CREDENTIALS"] == str(reviewer_file)
+               for call in run.call_args_list)
+    assert os.environ["GOOGLE_APPLICATION_CREDENTIALS"] == "unrelated-original-adc"
+
+
 def config(tmp_path, adapter="postgres"):
     return AppConfig(
         tmp_path, tmp_path, "dev", "demo", adapter, "database", "schema", "US", "oauth", None

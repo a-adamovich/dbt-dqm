@@ -830,9 +830,10 @@ def test_event_payload_migration_upgrades_an_existing_02_schema(demo):
         "0001_initial",
         "0002_event_payload_mode",
         "0003_app_change_staging",
+        "0004_app_staging_safety",
     }
     control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
     assert (
-        control["schema_version"] == "0003_app_change_staging"
+        control["schema_version"] == "0004_app_staging_safety"
         and control["setup_status"] == "ready"
     )

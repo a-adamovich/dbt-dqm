@@ -10,7 +10,7 @@
 - Emits native BigQuery table/view grants without revoking unrelated access, and normalizes timestamp arithmetic for portable health and recovery filters.
 - Schema-only (`--empty`) runs require initialized current tables, leave tracking data unchanged, and keep the public views serving real data.
 - BigQuery adapter parity remains gated on credentialed lifecycle/concurrency tests.
-- Capture copies each stored-failure table once and rejects it as `collection_error` when its row count differs from dbt's `result.failures`, including passing tests, so an overwritten table never becomes lifecycle evidence.
+- Capture copies each stored-failure table once and rejects it as `collection_error` when its row count differs from dbt's `result.failures`, including passing tests. Equal counts do not prove provenance; captures sharing failure tables must remain serialized.
 - The review app verifies each sync before replacing its cache: setup must be ready, the control generation unchanged across the read, and the issue view's row count must match the tracking table. Inconsistent or unavailable data keeps the cache and pending edits; a verified empty result replaces it.
 - Postgres app connections use a lock timeout (`--lock-timeout`, default 5 seconds). Writes blocked by a running reconciliation, and BigQuery transaction conflicts, report the warehouse as busy without changing data. Sync and setup failures show a short message with technical details on request.
 - The app reads a Postgres profile's password from either `pass` or `password`, as dbt does.
@@ -18,6 +18,9 @@
 - Tracking-table grants are applied only by reconciliation and capture, not also by the parallel app-table models, so BigQuery no longer hits IAM "concurrent policy changes" errors during a package build.
 - `dbt_dqm_event_payloads` (`full` default, `changed_columns`, `none`) controls payload retention in events, adding `payload_mode`, `changed_columns` and payload digests. Migration `0002_event_payload_mode` upgrades existing 0.2 schemas in place.
 - Migration `0003_app_change_staging` creates the BigQuery app's staging table during setup; the app no longer issues DDL when applying edits, so BigQuery reviewers need no table-create rights on the DQM dataset.
+- Migration `0004_app_staging_safety` isolates upload attempts, supplies warehouse timestamps and bounds failed staging retention to 24 hours. Annotation idempotency is checked inside apply's transaction. Run migrations before restarting reviewer apps; old/new staging clients must not overlap.
+- App sync enforces 50,000 issues and 128 MiB of serialized data, streams downloads and atomically replaces issue/Health snapshots. Oversized syncs preserve the cache and pending edits; an older oversized cache exposes bounded pending-edit pages.
+- Add a separate restricted-account BigQuery QA test that preserves the pre-created QA dataset; it does not reuse destructive acceptance fixtures.
 - BigQuery reconciliation prunes observation partitions older than the run's evidence (−63% bytes at 1M occurrences), and the replay considers only Active issues of tests with new evidence plus untracked tests (Postgres steady reconcile 5.1 s → 2.4 s at 1M occurrences). Method and results: `docs/scale.md`.
 - Event values have their own retention and, with the default `full` payload mode and no `dbt_dqm_event_retention_days`, are kept indefinitely after raw logs are pruned.
 - Reconciliation planning no longer degrades to nested loops on Postgres, and the replay reads only Active rows plus the history of affected identities (see `docs/scale.md`).

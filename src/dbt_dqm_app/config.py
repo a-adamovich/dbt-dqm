@@ -11,6 +11,8 @@ from dbt.context.base import generate_base_context
 from dbt_common.context import set_invocation_context
 from platformdirs import user_data_path
 
+from .limits import MAX_CACHE_ISSUES, MAX_CACHE_MIB, validate_limits
+
 
 @dataclass(frozen=True)
 class AppConfig:
@@ -35,6 +37,18 @@ class AppConfig:
     # How long a Postgres statement waits for a lock (for example, while a reconciliation holds
     # the occurrence table) before the app reports the warehouse as busy.
     lock_timeout_seconds: int = 5
+    # Explicit per-client ADC file; useful for testing independent reviewer identities without
+    # changing the process environment shared by other clients.
+    credentials_file: Path | None = None
+    max_cache_issues: int = MAX_CACHE_ISSUES
+    max_cache_mib: int = MAX_CACHE_MIB
+
+    def __post_init__(self) -> None:
+        validate_limits(self.max_cache_issues, self.max_cache_mib)
+
+    @property
+    def max_cache_bytes(self) -> int:
+        return self.max_cache_mib * 2**20
 
     @property
     def workspace_path(self) -> Path:
@@ -109,4 +123,6 @@ def load_config(project_dir: str | Path, profiles_dir: str | Path, target: str) 
         archive_cache_days=archive_cache_days,
         target_path=project_dir / project.get("target-path", "target"),
         lock_timeout_seconds=lock_timeout_seconds,
+        max_cache_issues=int(os.environ.get("DBT_DQM_MAX_CACHE_ISSUES", str(MAX_CACHE_ISSUES))),
+        max_cache_mib=int(os.environ.get("DBT_DQM_MAX_CACHE_MIB", str(MAX_CACHE_MIB))),
     )

@@ -54,3 +54,8 @@
   {{ dbt_dqm.default__event_payload_mode_backfill() }}
   {% if var('interrupt_0002', false) %}select error('injected 0002 interruption');{% endif %}
 {% endmacro %}
+
+{% macro bigquery__app_staging_safety_backfill() %}
+  {{ dbt_dqm.default__app_staging_safety_backfill() }}
+  {% if var('interrupt_0004', false) %}select error('injected 0004 interruption');{% endif %}
+{% endmacro %}

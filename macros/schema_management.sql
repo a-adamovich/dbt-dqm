@@ -20,7 +20,8 @@
   {{ return([
     {'id': '0001_initial', 'description': 'Fresh 0.2 schema', 'apply': 'initial_schema_apply', 'verify': 'initial_schema_verify'},
     {'id': '0002_event_payload_mode', 'description': 'Event payload mode, changed columns and digests', 'apply': 'event_payload_mode_apply', 'backfill': 'event_payload_mode_backfill', 'verify': 'event_payload_mode_verify'},
-    {'id': '0003_app_change_staging', 'description': 'Package-owned staging table for BigQuery app edits', 'apply': 'app_change_staging_apply', 'verify': 'app_change_staging_verify'}
+    {'id': '0003_app_change_staging', 'description': 'Package-owned staging table for BigQuery app edits', 'apply': 'app_change_staging_apply', 'verify': 'app_change_staging_verify'},
+    {'id': '0004_app_staging_safety', 'description': 'Isolated app uploads with bounded lifetime', 'apply': 'app_staging_safety_apply', 'backfill': 'app_staging_safety_backfill', 'verify': 'app_staging_safety_verify'}
   ]) }}
 {% endmacro %}
 
@@ -80,6 +81,31 @@
 {% macro default__app_change_staging_verify() %}
   {% if target.type == 'bigquery' %}
     {{ dbt_dqm.assert_sql(dbt_dqm.table_exists_sql('dqm_app_change_staging'), dbt_dqm.sql_string('dqm_app_change_staging is missing. Rerun setup with the current package.')) }}
+  {% endif %}
+{% endmacro %}
+
+{#- 0004 is additive. Existing abandoned rows get a bounded grace period at migration time;
+    new JSON loads omit staged_at and use the warehouse default, independent of client clocks. #}
+{% macro default__app_staging_safety_apply() %}
+  {% if target.type == 'bigquery' %}
+    alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} add column if not exists upload_id string;
+    alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} add column if not exists staged_at timestamp;
+    alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} alter column staged_at set default current_timestamp();
+  {% endif %}
+{% endmacro %}
+{% macro default__app_staging_safety_backfill() %}
+  {% if target.type == 'bigquery' %}
+    update {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} set staged_at=current_timestamp() where staged_at is null;
+  {% endif %}
+{% endmacro %}
+{% macro default__app_staging_safety_verify() %}
+  {% if target.type == 'bigquery' %}
+    {{ dbt_dqm.assert_sql('(select count(*) from ' ~ dbt_dqm.columns_catalog() ~ " where table_name='dqm_app_change_staging' and column_name in ('upload_id','staged_at'))=2",
+      "'App staging safety columns are missing. Rerun setup.'") }}
+    {{ dbt_dqm.assert_sql("exists(select 1 from " ~ dbt_dqm.columns_catalog() ~ " where table_name='dqm_app_change_staging' and column_name='staged_at' and lower(column_default)='current_timestamp()')",
+      "'App staging timestamp default is missing. Rerun setup.'") }}
+    {{ dbt_dqm.assert_sql('not exists(select 1 from ' ~ dbt_dqm.dqm_relation('dqm_app_change_staging') ~ ' where staged_at is null)',
+      "'App staging timestamp backfill is incomplete. Rerun setup.'") }}
   {% endif %}
 {% endmacro %}
 
