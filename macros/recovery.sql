@@ -98,6 +98,9 @@ begin{% if target.type=='bigquery' %} transaction{% endif %};
       {% endfor %}
     {% endif %}
     {% if events_days is not none %}delete from {{ dbt_dqm.dqm_relation('dqm_issue_events') }} where event_at < {{ dbt_dqm.timestamp_add('day',-events_days,dbt.current_timestamp()) }};{% endif %}
+    {% if target.type=='bigquery' %}
+      delete from {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} where staged_at <= timestamp_sub(current_timestamp(), interval 24 hour);
+    {% endif %}
     {{ dbt_dqm.recovery_commit() }}
   {% endset %}
   {{ sql }}
@@ -118,7 +121,7 @@ begin{% if target.type=='bigquery' %} transaction{% endif %};
 {% endmacro %}
 {% macro retention_hook() %}
   {% if not execute or dbt_dqm.empty_mode() or flags.WHICH not in ['run','build','test'] %}{{ return('') }}{% endif %}
-  {% if var('dbt_dqm_retention_days',none) is none and var('dbt_dqm_event_retention_days',none) is none %}{{ return('') }}{% endif %}
+  {% if target.type!='bigquery' and var('dbt_dqm_retention_days',none) is none and var('dbt_dqm_event_retention_days',none) is none %}{{ return('') }}{% endif %}
   {% set relation=dbt_dqm.dqm_relation('dqm_reconciliation_control') %}
   {% if adapter.get_relation(database=relation.database,schema=relation.schema,identifier=relation.identifier) is not none %}
     {{ dbt_dqm.cleanup_dqm_logs_sql() }}

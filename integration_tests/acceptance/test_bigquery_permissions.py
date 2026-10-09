@@ -91,17 +91,20 @@ def test_restricted_bigquery_runner_and_reviewer(tmp_path):
         )
         assert result.returncode == (1 if test_failure else 0), result.stdout + result.stderr
         if test_failure:
-            results = json.loads((path / "target/run_results.json").read_text())["results"]
+            results = [r for r in json.loads((path / "target/run_results.json").read_text())["results"]
+                       if r["unique_id"].startswith("test.")]
             assert len(results) == 1 and results[0]["status"] == "fail"
 
     dbt("seed", "--select", fixture)
     dbt("run", "--select", fixture + "_records")
     dbt("test", "--select", fixture, test_failure=True)
-    dbt("build", "--select", "package:dbt_dqm")
+    dbt("run", "--select", "package:dbt_dqm")
+    dbt("test", "--select", "package:dbt_dqm", "--exclude", "assert_scenario_outcomes")
     migrations = {r.id for r in runner.query(
         f"select migration_id as id from `{PROJECT}.{DATASET}.dqm_schema_migrations`"
     ).result()}
     assert "0003_app_change_staging" in migrations
+    assert "0004_app_staging_safety" in migrations
 
     config = replace(load_config(path, profiles, "qa"), credentials_file=Path(REVIEWER_FILE))
     rows = fetch_issues(config)

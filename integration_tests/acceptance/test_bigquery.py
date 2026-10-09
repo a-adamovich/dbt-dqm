@@ -691,4 +691,114 @@ def test_bigquery_0002_upgrades_populated_schema_after_interruption(demo):
     assert demo.sql("select 1 from @dataset.dqm_app_change_staging` limit 0") == []
     control = demo.sql("select * from @dataset.dqm_reconciliation_control`")[0]
     assert control["setup_status"] == "ready" and control["migration_owner"] is None
-    assert control["schema_version"] == "0003_app_change_staging"
+    assert control["schema_version"] == "0004_app_staging_safety"
+
+
+def test_bigquery_0004_preserves_history_and_bounds_legacy_staging(demo):
+    demo.capture("initial")
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    demo.sql("update @dataset.dqm_issue_occurrences` set notes='keep for 0004', "
+             "annotation_version=annotation_version+1 where true")
+    before = demo.snapshot()
+    history = demo.sql("select * from @dataset.dqm_issue_events` order by event_id")
+    demo.sql("alter table @dataset.dqm_app_change_staging` drop column upload_id, drop column staged_at")
+    demo.sql("insert into @dataset.dqm_app_change_staging` (batch_id,occurrence_id,field_name) "
+             "values ('legacy','legacy','notes')")
+    demo.sql("delete from @dataset.dqm_schema_migrations` where migration_id='0004_app_staging_safety'")
+    demo.sql("update @dataset.dqm_reconciliation_control` set schema_version='0003_app_change_staging' where true")
+    demo.dbt("run", "--select", "dqm_reconcile", variables={"interrupt_0004": True}, success=False)
+    assert "injected 0004 interruption" in demo.last_output
+    assert demo.snapshot() == before
+    assert demo.sql("select staged_at from @dataset.dqm_app_change_staging`")[0]["staged_at"] is None
+    demo.dbt("run", "--select", "dqm_reconcile", success=False)
+    assert "already running" in demo.last_output
+    demo.sql("update @dataset.dqm_reconciliation_control` set "
+             "migration_lease_until=timestamp_sub(current_timestamp(),interval 1 minute) where true")
+    demo.dbt("run", "--select", "dqm_reconcile")
+    assert demo.snapshot() == before
+    assert demo.sql("select * from @dataset.dqm_issue_events` order by event_id") == history
+    assert demo.sql("select staged_at from @dataset.dqm_app_change_staging`")[0]["staged_at"] is not None
+
+
+def test_bigquery_annotation_attempts_rollback_expiry_and_retries(demo, monkeypatch):
+    from google.cloud import bigquery
+
+    from dbt_dqm_app import warehouse
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.store import Patch
+
+    demo.capture("initial")
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    config = load_config(demo.path, demo.profiles, "dev")
+    row = demo.snapshot()[0]
+    patches = [Patch(row["occurrence_id"], "notes", row["notes"], "staging check", 1,
+                     datetime.now(UTC).isoformat(), row["annotation_version"])]
+    sql = warehouse._bigquery_annotation_apply_sql(config)
+    monkeypatch.setattr(warehouse, "_bigquery_annotation_apply_sql", lambda _: sql.replace(
+        "commit transaction;", "select error('injected annotation failure'); commit transaction;"))
+    with pytest.raises(Exception, match="injected annotation failure"):
+        warehouse.apply_patches(config, patches)
+    assert demo.snapshot()[0] == row
+    assert not demo.sql("select * from @dataset.dqm_annotation_changes`")
+    staged = demo.sql("select * from @dataset.dqm_app_change_staging`")[0]
+    assert staged["staged_at"] is not None
+    demo.sql("update @dataset.dqm_app_change_staging` set "
+             "staged_at=timestamp_sub(current_timestamp(),interval 25 hour) where true")
+    parameters = [bigquery.ScalarQueryParameter(name, kind, value) for name, kind, value in (
+        ("upload_id", "STRING", staged["upload_id"]), ("batch_id", "STRING", staged["batch_id"]),
+        ("patch_count", "INT64", 1))]
+    with pytest.raises(Exception, match="expired"):
+        demo.client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=parameters)).result()
+    assert demo.snapshot()[0] == row
+    monkeypatch.setattr(warehouse, "_bigquery_annotation_apply_sql", lambda _: sql)
+    batch = warehouse.apply_patches(config, patches)
+    assert warehouse.apply_patches(config, patches) == batch
+    updated = demo.snapshot()[0]
+    assert updated["notes"] == "staging check"
+    assert updated["annotation_version"] == row["annotation_version"] + 1
+    assert len(demo.sql("select * from @dataset.dqm_annotation_changes`")) == 1
+    # Old failed upload survives successful retries until its own retention boundary.
+    assert len(demo.sql("select * from @dataset.dqm_app_change_staging`")) == 1
+    history = demo.sql("select * from @dataset.dqm_issue_events` order by event_id")
+    executions = demo.sql("select * from @dataset.dqm_test_executions` order by test_unique_id")
+    demo.dbt("run-operation", "cleanup_dqm_logs")  # No raw/event retention vars.
+    assert not demo.sql("select * from @dataset.dqm_app_change_staging`")
+    assert demo.sql("select * from @dataset.dqm_issue_events` order by event_id") == history
+    assert demo.sql("select * from @dataset.dqm_test_executions` order by test_unique_id") == executions
+
+
+def test_bigquery_annotation_concurrent_retries_and_independent_batches(demo):
+    from google.api_core.exceptions import GoogleAPICallError
+
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.errors import WarehouseBusy, classify
+    from dbt_dqm_app.store import Patch
+    from dbt_dqm_app.warehouse import apply_patches
+
+    demo.capture("initial")
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    config = load_config(demo.path, demo.profiles, "dev")
+    rows = demo.snapshot()[:2]
+
+    def edit(row, value):
+        return [Patch(row["occurrence_id"], "notes", row["notes"], value, 1,
+                      datetime.now(UTC).isoformat(), row["annotation_version"])]
+
+    first = edit(rows[0], "duplicate retries")
+    second = edit(rows[1], "independent batch")
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = [(pool.submit(apply_patches, config, patches), patches)
+                   for patches in (first, first, second)]
+        for future, patches in futures:
+            try:
+                future.result()
+            except GoogleAPICallError as error:
+                assert isinstance(classify(error), WarehouseBusy), str(error)
+                apply_patches(config, patches)
+    by_id = {r["occurrence_id"]: r for r in demo.snapshot()}
+    for row in rows:
+        assert by_id[row["occurrence_id"]]["annotation_version"] == row["annotation_version"] + 1
+    audit = demo.sql("select * from @dataset.dqm_annotation_changes`")
+    assert len(audit) == 2
+    # Failed transaction attempts are retained; successful attempts clean only themselves.
+    assert len(demo.sql("select * from @dataset.dqm_app_change_staging`")) <= 2

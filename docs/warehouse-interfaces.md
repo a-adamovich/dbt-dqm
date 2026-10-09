@@ -131,6 +131,21 @@ applies the four reviewer table grants after initialization. Reviewer dataset `d
 permits raw evidence reads; occurrence-table `dataEditor` permits broader writes than annotation
 fields. Editable-field restrictions are an application contract, not column-level IAM enforcement.
 
+### Annotation staging lifetime and upgrade
+
+Migration `0004_app_staging_safety` adds `upload_id` and `staged_at` to BigQuery app staging.
+JSON uploads omit `staged_at`, which receives a warehouse `CURRENT_TIMESTAMP()` default. Legacy
+rows are timestamped once during migration and are never consumed by new app clients. Run the
+package migrations, then restart all reviewer apps; mixed old/new staging clients are unsupported.
+
+The logical `batch_id` remains deterministic; each upload attempt has its own random ID. Apply
+checks the audit ledger inside the same transaction as edits and version increments. A completed
+batch is a no-op, and partial audit history is rejected. Successful attempts delete only their
+own rows. Failed/uncertain attempts remain isolated and expire after 24 hours; a retry uploads
+freshly from local pending edits. Package cleanup deletes expired staging even without raw/event
+retention settings. Cleanup requires a package run or `cleanup_dqm_logs`; expiration is not an
+autonomous BigQuery timer. No additional reviewer privileges are required.
+
 ## Health populations
 
 Defaults are a 30-day reporting window and 14-day stale threshold, configured through positive integer vars `dbt_dqm_metrics_window_days` and `dbt_dqm_stale_days`.

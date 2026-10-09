@@ -3,6 +3,7 @@ from __future__ import annotations
 import getpass
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import uuid
@@ -36,8 +37,13 @@ def validate_dbt(config: AppConfig) -> None:
         "--target",
         config.target,
     ]
-    subprocess.run([dbt_executable, "debug", *base], check=True, capture_output=True, text=True)
-    subprocess.run([dbt_executable, "parse", *base], check=True, capture_output=True, text=True)
+    environment = os.environ.copy()
+    if config.credentials_file is not None:
+        environment["GOOGLE_APPLICATION_CREDENTIALS"] = str(config.credentials_file.resolve())
+    subprocess.run([dbt_executable, "debug", *base], check=True, capture_output=True, text=True,
+                   env=environment)
+    subprocess.run([dbt_executable, "parse", *base], check=True, capture_output=True, text=True,
+                   env=environment)
 
 
 def client_for(config: AppConfig) -> bigquery.Client:
@@ -245,7 +251,7 @@ def _batch_id(patches: Iterable[Patch]) -> str:
 
 
 def apply_patches(config: AppConfig, patches: Iterable[Patch]) -> str:
-    patches = list(patches)
+    patches = _validated_patches(patches)
     if any(
         patch.field_name == "review_verdict"
         and patch.new_value not in {"UNREVIEWED", "TRUE_POSITIVE", "FALSE_POSITIVE"}
@@ -257,128 +263,131 @@ def apply_patches(config: AppConfig, patches: Iterable[Patch]) -> str:
     return _apply_bigquery_patches(config, patches)
 
 
+def _validated_patches(patches: Iterable[Patch]) -> list[Patch]:
+    canonical = {}
+    versions = {}
+    for patch in patches:
+        if patch.field_name not in EDITABLE_FIELDS or not patch.occurrence_id:
+            raise ValueError("Unsupported annotation field or missing occurrence ID")
+        if (isinstance(patch.base_annotation_version, bool)
+                or not isinstance(patch.base_annotation_version, int)
+                or patch.base_annotation_version < 0):
+            raise ValueError("Invalid annotation base version")
+        key = patch.occurrence_id, patch.field_name
+        if key in canonical and canonical[key] != patch:
+            raise ValueError("Conflicting duplicate annotation patches")
+        if versions.setdefault(patch.occurrence_id, patch.base_annotation_version) != patch.base_annotation_version:
+            raise ValueError("Inconsistent annotation base versions")
+        canonical[key] = patch
+    return list(canonical.values())
+
+
 def _apply_bigquery_patches(config: AppConfig, patches: Iterable[Patch]) -> str:
     patches = list(patches)
     if not patches:
         return ""
-    invalid = {patch.field_name for patch in patches} - set(EDITABLE_FIELDS)
-    if invalid:
-        raise ValueError(f"Unsupported fields: {sorted(invalid)}")
     batch_id = _batch_id(patches)
+    upload_id = uuid.uuid4().hex
     client = client_for(config)
-    existing_job = client.query(
-        f"select occurrence_id, field_name from {_table(config, 'dqm_annotation_changes')} "
-        "where batch_id=@batch_id",
-        job_config=bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("batch_id", "STRING", batch_id)]
-        ),
-    )
-    existing = {(row["occurrence_id"], row["field_name"]) for row in existing_job.result()}
-    expected = {(patch.occurrence_id, patch.field_name) for patch in patches}
-    if existing == expected:
-        return batch_id
-    if existing:
-        raise RuntimeError("Incomplete prior annotation batch; synchronize before retrying.")
-    staging_database, staging_schema, _ = _relation_parts(config, "dqm_issue_occurrences")
-    staging_id = f"{staging_database}.{staging_schema}.dqm_app_change_staging"
-    # dbt-dqm setup creates the staging table, so reviewers need only row access to it, not
-    # table-create rights on the DQM dataset.
+    database, schema, _ = _relation_parts(config, "dqm_issue_occurrences")
+    staging_id = f"{database}.{schema}.dqm_app_change_staging"
     try:
-        client.get_table(staging_id)
+        table = client.get_table(staging_id)
     except NotFound as error:
-        raise AppError(
-            "The DQM schema has no dqm_app_change_staging table. Run dbt build for "
-            "package:dbt_dqm with the current package, then apply again."
-        ) from error
-    payload = [
-        {
-            "batch_id": batch_id,
-            **asdict(patch),
-            "changed_by": getpass.getuser(),
-        }
-        for patch in patches
-    ]
-    for row in payload:
-        row.pop("version", None)
+        raise AppError("App staging is missing. Build package:dbt_dqm before applying.") from error
+    if not {"upload_id", "staged_at"} <= {field.name for field in table.schema}:
+        raise AppError("App staging requires migration 0004. Build package:dbt_dqm, "
+                       "then restart reviewer apps before applying.")
+    payload = []
+    for patch in patches:
+        row = {"batch_id": batch_id, "upload_id": upload_id,
+               **asdict(patch), "changed_by": getpass.getuser()}
+        row.pop("version")
+        payload.append(row)
+    # Omitting staged_at uses its CURRENT_TIMESTAMP() warehouse default. A load has its own
+    # job ID; uncertain uploads remain isolated from every later attempt until cleanup.
     load_config = bigquery.LoadJobConfig(
         write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-        schema=[
-            bigquery.SchemaField("batch_id", "STRING"),
-            bigquery.SchemaField("occurrence_id", "STRING"),
-            bigquery.SchemaField("field_name", "STRING"),
-            bigquery.SchemaField("old_value", "STRING"),
-            bigquery.SchemaField("new_value", "STRING"),
-            bigquery.SchemaField("changed_at", "TIMESTAMP"),
-            bigquery.SchemaField("changed_by", "STRING"),
-            bigquery.SchemaField("base_annotation_version", "INT64"),
-        ],
+        schema=[bigquery.SchemaField(name, kind) for name, kind in (
+            ("batch_id", "STRING"), ("upload_id", "STRING"), ("occurrence_id", "STRING"),
+            ("field_name", "STRING"), ("old_value", "STRING"), ("new_value", "STRING"),
+            ("changed_at", "TIMESTAMP"), ("changed_by", "STRING"),
+            ("base_annotation_version", "INT64"))],
     )
-    client.load_table_from_json(payload, staging_id, job_config=load_config).result()
+    client.load_table_from_json(payload, staging_id, job_config=load_config,
+                                job_id="dqm_annotation_upload_" + upload_id).result()
+    parameters = [bigquery.ScalarQueryParameter("batch_id", "STRING", batch_id),
+                  bigquery.ScalarQueryParameter("upload_id", "STRING", upload_id),
+                  bigquery.ScalarQueryParameter("patch_count", "INT64", len(patches))]
+    client.query(_bigquery_annotation_apply_sql(config), job_config=bigquery.QueryJobConfig(
+        query_parameters=parameters)).result()
+    return batch_id
 
+
+def _bigquery_annotation_apply_sql(config: AppConfig) -> str:
+    staging = _table(config, "dqm_app_change_staging")
+    occurrences = _table(config, "dqm_issue_occurrences")
+    audit = _table(config, "dqm_annotation_changes")
     assignments = []
     for field in EDITABLE_FIELDS:
         assignments.append(
-            f"{field} = if(exists(select 1 from `{staging_id}` b where b.batch_id=@batch_id "
-            f"and b.occurrence_id=t.occurrence_id and b.field_name='{field}'), "
-            f"(select any_value(new_value) from `{staging_id}` b where b.batch_id=@batch_id "
-            f"and b.occurrence_id=t.occurrence_id and b.field_name='{field}'), t.{field})"
+            f"{field} = if(exists(select 1 from attempt b where b.occurrence_id=t.occurrence_id "
+            f"and b.field_name='{field}'), "
+            f"(select new_value from attempt b where b.occurrence_id=t.occurrence_id "
+            f"and b.field_name='{field}'), t.{field})"
         )
-    workflow_assignment = next(
-        assignment for assignment in assignments if assignment.startswith("workflow_status =")
-    )
-    assignments.append(workflow_assignment.replace("workflow_status =", "test_status =", 1))
-    server_old_value = (
-        "case s.field_name "
-        + " ".join(f"when '{field}' then o.{field}" for field in EDITABLE_FIELDS)
-        + " end"
-    )
-    sql = f"""
+    workflow = next(a for a in assignments if a.startswith("workflow_status ="))
+    assignments.append(workflow.replace("workflow_status =", "test_status =", 1))
+    old_value = "case s.field_name " + " ".join(
+        f"when '{field}' then o.{field}" for field in EDITABLE_FIELDS) + " end"
+    fields = ",".join(f"'{field}'" for field in EDITABLE_FIELDS)
+    return f"""
+      declare audited_count int64;
       begin transaction;
-      assert not exists (
-        select 1
-        from `{staging_id}` s
-        left join {_table(config, "dqm_issue_occurrences")} o using (occurrence_id)
-        where s.batch_id=@batch_id
-          and (o.occurrence_id is null
-               or coalesce(o.annotation_version, 0) != s.base_annotation_version)
-      ) as 'Annotation conflict: synchronize and review the newer warehouse values.';
-      merge {_table(config, "dqm_annotation_changes")} t
-      using (
-        select
-          s.batch_id, s.occurrence_id, s.field_name,
-          {server_old_value} as old_value,
-          s.new_value, s.changed_at, s.changed_by,
-          coalesce(o.annotation_version, 0) as base_annotation_version,
-          coalesce(o.annotation_version, 0) + 1 as resulting_annotation_version
-        from (
-          select * except(row_number) from (
-            select *, row_number() over (
-              partition by batch_id, occurrence_id, field_name order by changed_at desc
-            ) as row_number
-            from `{staging_id}` where batch_id = @batch_id
-          ) where row_number = 1
-        ) s
-        join {_table(config, "dqm_issue_occurrences")} o using (occurrence_id)
-      ) s
-        on t.batch_id=s.batch_id and t.occurrence_id=s.occurrence_id and t.field_name=s.field_name
-      when not matched then insert(batch_id, occurrence_id, field_name, old_value, new_value,
-                                   changed_at, changed_by, base_annotation_version,
-                                   resulting_annotation_version)
-        values(s.batch_id, s.occurrence_id, s.field_name, s.old_value, s.new_value,
-               s.changed_at, s.changed_by, s.base_annotation_version,
-               s.resulting_annotation_version);
-      update {_table(config, "dqm_issue_occurrences")} t
-      set {", ".join(assignments)}, annotation_updated_at=current_timestamp(),
-          annotation_version=coalesce(annotation_version, 0) + 1
-      where occurrence_id in (select occurrence_id from `{staging_id}` where batch_id=@batch_id);
-      delete from `{staging_id}` where batch_id=@batch_id;
+      create temp table attempt as
+        select * from {staging} where upload_id=@upload_id and batch_id=@batch_id;
+      assert (select count(*) from attempt)=@patch_count
+        as 'Missing or duplicate annotation upload; retry with a new upload.';
+      assert not exists(select 1 from attempt group by occurrence_id,field_name having count(*)>1)
+        as 'Conflicting duplicate annotation patches.';
+      assert not exists(select 1 from attempt where occurrence_id is null or field_name is null
+        or field_name not in ({fields}) or base_annotation_version is null
+        or base_annotation_version<0)
+        as 'Invalid annotation upload.';
+      assert not exists(select 1 from attempt group by occurrence_id
+        having count(distinct base_annotation_version)>1)
+        as 'Inconsistent annotation base versions.';
+      set audited_count=(select count(*) from {audit} where batch_id=@batch_id);
+      if audited_count>0 then
+        assert audited_count=@patch_count and not exists (
+          select 1 from attempt s left join {audit} a
+            on a.batch_id=@batch_id and a.occurrence_id=s.occurrence_id and a.field_name=s.field_name
+          where a.occurrence_id is null or a.new_value is distinct from s.new_value
+            or a.base_annotation_version is distinct from s.base_annotation_version
+        ) as 'Incomplete prior annotation batch; synchronize before retrying.';
+      else
+        assert not exists(select 1 from attempt where staged_at is null
+          or staged_at <= timestamp_sub(current_timestamp(),interval 24 hour)
+          or staged_at>current_timestamp())
+          as 'Annotation upload expired; retry from your local pending edits.';
+        assert not exists (
+          select 1 from attempt s left join {occurrences} o using(occurrence_id)
+          where o.occurrence_id is null
+            or coalesce(o.annotation_version,0)!=s.base_annotation_version
+        ) as 'Annotation conflict: synchronize and review the newer warehouse values.';
+        insert into {audit} (batch_id,occurrence_id,field_name,old_value,new_value,changed_at,
+                             changed_by,base_annotation_version,resulting_annotation_version)
+          select s.batch_id,s.occurrence_id,s.field_name,{old_value},s.new_value,s.changed_at,
+                 s.changed_by,coalesce(o.annotation_version,0),coalesce(o.annotation_version,0)+1
+          from attempt s join {occurrences} o using(occurrence_id);
+        update {occurrences} t
+          set {", ".join(assignments)}, annotation_updated_at=current_timestamp(),
+              annotation_version=coalesce(annotation_version,0)+1
+          where occurrence_id in (select occurrence_id from attempt);
+      end if;
+      delete from {staging} where upload_id=@upload_id and batch_id=@batch_id;
       commit transaction;
     """
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("batch_id", "STRING", batch_id)]
-    )
-    client.query(sql, job_config=job_config).result()
-    return batch_id
 
 
 def _postgres_connection(config: AppConfig):
