@@ -6,7 +6,13 @@ import pytest
 
 from dbt_dqm_app import warehouse
 from dbt_dqm_app.config import AppConfig
-from dbt_dqm_app.limits import CacheLimitExceeded, issue_json
+from dbt_dqm_app.limits import (
+    MAX_CACHE_ISSUES,
+    MAX_CACHE_MIB,
+    CacheLimitExceeded,
+    check_cache_size,
+    issue_json,
+)
 from dbt_dqm_app.store import Workspace
 
 
@@ -25,6 +31,36 @@ def issue(identity, value="é"):
 def test_config_rejects_unsupported_limits(tmp_path, kwargs):
     with pytest.raises(ValueError, match="max-cache"):
         config(tmp_path, **kwargs)
+
+
+def test_supported_ceiling_accepts_exact_boundary_and_refuses_one_over():
+    budget = MAX_CACHE_MIB * 2**20
+    check_cache_size(MAX_CACHE_ISSUES, budget, MAX_CACHE_ISSUES, budget)
+    with pytest.raises(CacheLimitExceeded):
+        check_cache_size(MAX_CACHE_ISSUES + 1, budget, MAX_CACHE_ISSUES, budget)
+    with pytest.raises(CacheLimitExceeded):
+        check_cache_size(MAX_CACHE_ISSUES, budget + 1, MAX_CACHE_ISSUES, budget)
+
+
+def test_full_128_mib_snapshot_boundary_is_atomic(tmp_path):
+    workspace = Workspace(tmp_path / "boundary.sqlite")
+    budget = MAX_CACHE_MIB * 2**20
+
+    def rows(extra=0):
+        # Produce one row at a time: the boundary test itself never creates a 128 MiB list.
+        for index in range(64):
+            row = issue(str(index), "")
+            allowance = budget // 64 + (extra if index == 63 else 0)
+            overhead = len(issue_json(row).encode("utf-8"))
+            yield issue(str(index), "x" * (allowance - overhead))
+
+    workspace.replace_synced_data(rows(), {"tests": ["accepted"]})
+    assert workspace.cache_size() == (64, budget)
+    before = workspace.last_sync(), workspace.health_rows()
+    with pytest.raises(CacheLimitExceeded):
+        workspace.replace_synced_data(rows(extra=1), {"tests": ["must not install"]})
+    assert workspace.cache_size() == (64, budget)
+    assert (workspace.last_sync(), workspace.health_rows()) == before
 
 
 def test_preflight_overflow_never_downloads(tmp_path, monkeypatch):
@@ -79,13 +115,18 @@ def test_exact_row_and_utf8_byte_limits_then_one_byte_over(tmp_path):
     assert workspace.rows() == before[0]
 
 
-def test_retained_pending_rows_count_toward_limit_without_losing_edits(tmp_path):
+@pytest.mark.parametrize("budget", ["rows", "bytes"])
+def test_retained_pending_rows_count_toward_limit_without_losing_edits(tmp_path, budget):
     workspace = Workspace(tmp_path / "cache.sqlite")
     workspace.replace_synced_data([issue("pending")], {"tests": ["old"]})
     workspace.set_change("pending", "notes", "keep")
     before = workspace.rows(), workspace.health_rows(), workspace.last_sync(), workspace.pending()
+    incoming = issue("new")
+    limits = {"max_issues": 1} if budget == "rows" else {
+        "max_bytes": len(issue_json(incoming).encode()) + 50,
+    }
     with pytest.raises(CacheLimitExceeded):
-        workspace.replace_synced_data([issue("new")], {"tests": ["new"]}, max_issues=1)
+        workspace.replace_synced_data([incoming], {"tests": ["new"]}, **limits)
     assert (workspace.rows(), workspace.health_rows(), workspace.last_sync(), workspace.pending()) == before
 
 

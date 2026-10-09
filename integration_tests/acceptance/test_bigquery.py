@@ -695,12 +695,21 @@ def test_bigquery_0002_upgrades_populated_schema_after_interruption(demo):
 
 
 def test_bigquery_0004_preserves_history_and_bounds_legacy_staging(demo):
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.store import Patch
+    from dbt_dqm_app.warehouse import apply_patches
+
     demo.capture("initial")
     demo.dbt("build", "--select", "package:dbt_dqm")
-    demo.sql("update @dataset.dqm_issue_occurrences` set notes='keep for 0004', "
-             "annotation_version=annotation_version+1 where true")
+    row = demo.snapshot()[0]
+    apply_patches(load_config(demo.path, demo.profiles, "dev"), [
+        Patch(row["occurrence_id"], "notes", row["notes"], "keep for 0004", 1,
+              datetime.now(UTC).isoformat(), row["annotation_version"]),
+    ])
     before = demo.snapshot()
     history = demo.sql("select * from @dataset.dqm_issue_events` order by event_id")
+    audit = demo.sql("select * from @dataset.dqm_annotation_changes` order by batch_id,field_name")
+    assert audit  # Verify preservation of populated audit history, not an empty table.
     demo.sql("alter table @dataset.dqm_app_change_staging` drop column upload_id, drop column staged_at")
     demo.sql("insert into @dataset.dqm_app_change_staging` (batch_id,occurrence_id,field_name) "
              "values ('legacy','legacy','notes')")
@@ -709,6 +718,7 @@ def test_bigquery_0004_preserves_history_and_bounds_legacy_staging(demo):
     demo.dbt("run", "--select", "dqm_reconcile", variables={"interrupt_0004": True}, success=False)
     assert "injected 0004 interruption" in demo.last_output
     assert demo.snapshot() == before
+    assert demo.sql("select * from @dataset.dqm_annotation_changes` order by batch_id,field_name") == audit
     assert demo.sql("select staged_at from @dataset.dqm_app_change_staging`")[0]["staged_at"] is None
     demo.dbt("run", "--select", "dqm_reconcile", success=False)
     assert "already running" in demo.last_output
@@ -717,6 +727,7 @@ def test_bigquery_0004_preserves_history_and_bounds_legacy_staging(demo):
     demo.dbt("run", "--select", "dqm_reconcile")
     assert demo.snapshot() == before
     assert demo.sql("select * from @dataset.dqm_issue_events` order by event_id") == history
+    assert demo.sql("select * from @dataset.dqm_annotation_changes` order by batch_id,field_name") == audit
     assert demo.sql("select staged_at from @dataset.dqm_app_change_staging`")[0]["staged_at"] is not None
 
 
@@ -731,8 +742,10 @@ def test_bigquery_annotation_attempts_rollback_expiry_and_retries(demo, monkeypa
     demo.dbt("build", "--select", "package:dbt_dqm")
     config = load_config(demo.path, demo.profiles, "dev")
     row = demo.snapshot()[0]
-    patches = [Patch(row["occurrence_id"], "notes", row["notes"], "staging check", 1,
-                     datetime.now(UTC).isoformat(), row["annotation_version"])]
+    patches = [Patch(row["occurrence_id"], field, row[field], value, 1,
+                     datetime.now(UTC).isoformat(), row["annotation_version"])
+               for field, value in (("notes", "staging check"),
+                                    ("review_verdict", "TRUE_POSITIVE"))]
     sql = warehouse._bigquery_annotation_apply_sql(config)
     monkeypatch.setattr(warehouse, "_bigquery_annotation_apply_sql", lambda _: sql.replace(
         "commit transaction;", "select error('injected annotation failure'); commit transaction;"))
@@ -746,7 +759,7 @@ def test_bigquery_annotation_attempts_rollback_expiry_and_retries(demo, monkeypa
              "staged_at=timestamp_sub(current_timestamp(),interval 25 hour) where true")
     parameters = [bigquery.ScalarQueryParameter(name, kind, value) for name, kind, value in (
         ("upload_id", "STRING", staged["upload_id"]), ("batch_id", "STRING", staged["batch_id"]),
-        ("patch_count", "INT64", 1))]
+        ("patch_count", "INT64", len(patches)))]
     with pytest.raises(Exception, match="expired"):
         demo.client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=parameters)).result()
     assert demo.snapshot()[0] == row
@@ -756,15 +769,20 @@ def test_bigquery_annotation_attempts_rollback_expiry_and_retries(demo, monkeypa
     updated = demo.snapshot()[0]
     assert updated["notes"] == "staging check"
     assert updated["annotation_version"] == row["annotation_version"] + 1
-    assert len(demo.sql("select * from @dataset.dqm_annotation_changes`")) == 1
+    assert len(demo.sql("select * from @dataset.dqm_annotation_changes`")) == 2
     # Old failed upload survives successful retries until its own retention boundary.
-    assert len(demo.sql("select * from @dataset.dqm_app_change_staging`")) == 1
+    assert len(demo.sql("select * from @dataset.dqm_app_change_staging`")) == 2
     history = demo.sql("select * from @dataset.dqm_issue_events` order by event_id")
     executions = demo.sql("select * from @dataset.dqm_test_executions` order by test_unique_id")
     demo.dbt("run-operation", "cleanup_dqm_logs")  # No raw/event retention vars.
     assert not demo.sql("select * from @dataset.dqm_app_change_staging`")
     assert demo.sql("select * from @dataset.dqm_issue_events` order by event_id") == history
     assert demo.sql("select * from @dataset.dqm_test_executions` order by test_unique_id") == executions
+    demo.sql("delete from @dataset.dqm_annotation_changes` where field_name='review_verdict'")
+    with pytest.raises(Exception, match="Incomplete prior annotation batch"):
+        warehouse.apply_patches(config, patches)
+    assert demo.snapshot()[0] == updated
+    assert len(demo.sql("select * from @dataset.dqm_annotation_changes`")) == 1
 
 
 def test_bigquery_annotation_concurrent_retries_and_independent_batches(demo):
