@@ -108,6 +108,29 @@ On BigQuery use native IAM privilege maps, e.g. `roles/bigquery.dataViewer: ["us
 
 Setup creates `dqm_app_change_staging` (migration `0003_app_change_staging`), so reviewers never need table-create rights on the dataset; the app only loads rows into it. The Postgres reviewer grant set above is proven by an acceptance test with separate restricted roles. The BigQuery matrix has not yet been proven with separate restricted service accounts (the BigQuery suite runs as one elevated identity); see the verification record.
 
+### Restricted BigQuery QA gate
+
+The dedicated gate uses the pre-created `dbt-dqm.dbt_dqm_qa` dataset and exactly
+`dbt-dqm-runner@dbt-dqm.iam.gserviceaccount.com` and
+`dbt-dqm-reviewer@dbt-dqm.iam.gserviceaccount.com`. Run it alone, with exclusive use of QA:
+
+```bash
+DBT_DQM_BIGQUERY_RUNNER_CREDENTIALS=/absolute/path/runner-adc.json \
+DBT_DQM_BIGQUERY_REVIEWER_CREDENTIALS=/absolute/path/reviewer-adc.json \
+uv run pytest -q integration_tests/acceptance/test_bigquery_permissions.py
+```
+
+Credentials are loaded independently per client and passed explicitly to runner subprocesses;
+the gate verifies both `SESSION_USER()` identities. It creates uniquely named synthetic fixtures,
+leaves history and reports in QA, and never drops or resets that dataset. Do not use the existing
+destructive acceptance fixture on QA. Cloud Shell credential files do not exist automatically on
+a local workstation. Do not commit credentials.
+
+The runner uses dataset `dataEditor` and no package/view grant configuration. An administrator
+applies the four reviewer table grants after initialization. Reviewer dataset `dataViewer` also
+permits raw evidence reads; occurrence-table `dataEditor` permits broader writes than annotation
+fields. Editable-field restrictions are an application contract, not column-level IAM enforcement.
+
 ## Health populations
 
 Defaults are a 30-day reporting window and 14-day stale threshold, configured through positive integer vars `dbt_dqm_metrics_window_days` and `dbt_dqm_stale_days`.

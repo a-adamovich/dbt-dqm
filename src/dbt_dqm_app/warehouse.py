@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import google.auth
 import psycopg2
 from google.api_core.exceptions import Conflict, NotFound
 from google.cloud import bigquery
@@ -49,6 +50,13 @@ def client_for(config: AppConfig) -> bigquery.Client:
             project=config.project_id, credentials=credentials, location=config.location
         )
     if config.method == "oauth":
+        if config.credentials_file is not None:
+            credentials, _ = google.auth.load_credentials_from_file(
+                str(config.credentials_file), scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+            return bigquery.Client(
+                project=config.project_id, credentials=credentials, location=config.location
+            )
         return bigquery.Client(project=config.project_id, location=config.location)
     raise ValueError(f"Unsupported BigQuery authentication method: {config.method}")
 

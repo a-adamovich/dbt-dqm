@@ -35,6 +35,9 @@ class AppConfig:
     # How long a Postgres statement waits for a lock (for example, while a reconciliation holds
     # the occurrence table) before the app reports the warehouse as busy.
     lock_timeout_seconds: int = 5
+    # Explicit per-client ADC file; useful for testing independent reviewer identities without
+    # changing the process environment shared by other clients.
+    credentials_file: Path | None = None
 
     @property
     def workspace_path(self) -> Path:

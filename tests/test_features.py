@@ -10,6 +10,24 @@ from dbt_dqm_app.store import Workspace
 from dbt_dqm_app.warehouse import _relation_parts, insert_missed_issue
 
 
+def test_oauth_clients_use_explicit_independent_credentials(tmp_path, monkeypatch):
+    from dbt_dqm_app import warehouse
+
+    loaded = MagicMock(side_effect=[("runner-creds", None), ("reviewer-creds", None)])
+    factory = MagicMock()
+    monkeypatch.setattr(warehouse.google.auth, "load_credentials_from_file", loaded)
+    monkeypatch.setattr(warehouse.bigquery, "Client", factory)
+    for identity in ("runner", "reviewer"):
+        warehouse.client_for(replace(config(tmp_path, "bigquery"),
+                                     credentials_file=tmp_path / identity))
+    assert [call.kwargs["credentials"] for call in factory.call_args_list] == [
+        "runner-creds", "reviewer-creds"
+    ]
+    assert [call.args[0] for call in loaded.call_args_list] == [
+        str(tmp_path / "runner"), str(tmp_path / "reviewer")
+    ]
+
+
 def config(tmp_path, adapter="postgres"):
     return AppConfig(
         tmp_path, tmp_path, "dev", "demo", adapter, "database", "schema", "US", "oauth", None
