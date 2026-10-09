@@ -1,6 +1,7 @@
 # Permissions and release safeguards verification
 
-This branch is based on PR #9 at `0243792`. It remains unmerged, untagged and unpublished.
+This branch is based on PR #9 at `0243792`, with safeguards review in
+[PR #10](https://github.com/a-adamovich/dbt-dqm/pull/10). It remains unmerged, untagged and unpublished.
 The existing QA and demo datasets have not been reset. The restricted gate upgraded QA to
 migration 0004 and left uniquely named synthetic fixtures, annotations and missed reports;
 existing history was preserved. The demo dataset was untouched.
@@ -37,7 +38,7 @@ existing history was preserved. The demo dataset was untouched.
 | Restricted runner/reviewer gate | Pass; 269.60 s, 2026-10-09, actual provisioned runner/reviewer |
 | Offline BigQuery compilation | Pass |
 | Wheel/source distribution build and wheel CLI check | Pass; artifacts not published |
-| GitHub CI for this branch | Not run; branch has not been pushed |
+| GitHub CI for this branch | Current-head results in [PR #10 checks](https://github.com/a-adamovich/dbt-dqm/pull/10/checks) |
 
 The credentialed mechanics tests use the development service account and disposable datasets
 in project `dbt-dqm`, US. They cannot substitute for the restricted-account gate. Postgres tests
@@ -74,7 +75,8 @@ rights. Both were corrected without broadening IAM, and the complete rerun passe
 
 The final documentation commit records the completed checks above. Earlier commit messages
 describe the checks that were still pending when each chunk was saved; this record supersedes
-those pending validation notes. No branch push, merge, tag or package publication has occurred.
+those pending validation notes. The review branch has been pushed; no merge, tag or package
+publication has occurred.
 
 ### Browser evidence
 
@@ -99,8 +101,9 @@ The reproducible harness and raw measurement are linked from [scale.md](scale.md
 
 ## Remaining release gates and operating limits
 
-- Run GitHub CI on the review branch before merge or release approval. Earlier PR #9 results
-  are not CI results for these changes.
+- Require passing current-head CI in PR #10 before merge or release approval. This is a stacked
+  PR: merge #9 first, retarget #10 to `main`, then rerun CI on the combined merge revision.
+  Earlier PR #9 results are not CI results for these changes.
 - Capture invocations sharing stored-failure tables remain serialized: equal counts do not
   prove provenance. BigQuery reconcile latency/cost and warehouse-side app pagination remain
   separate work.
