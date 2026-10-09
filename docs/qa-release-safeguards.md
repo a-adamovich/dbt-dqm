@@ -27,11 +27,11 @@ The existing QA dataset and demo dataset have not been reset or changed by these
 
 | Check | Result |
 | --- | --- |
-| Ruff and Python unit/UI tests | Pass; 84 tests |
+| Ruff and Python unit/UI tests | Pass; 85 tests |
 | Postgres 14.20 acceptance | 17 passed, 387.54 s |
 | Postgres 16.11 acceptance | 17 passed, 386.23 s |
 | BigQuery staging/migration/concurrent retry cases | 3 passed (812.82 s); 2 stronger populated/partial-audit reruns passed (547.93 s) |
-| Existing BigQuery lifecycle/concurrency suite | Running |
+| Existing BigQuery lifecycle/concurrency suite | 14 passed, 4061.37 s (67 min 41 s) |
 | Restricted runner/reviewer gate | Blocked: separate local credentials unavailable |
 | Offline BigQuery compilation | Pass |
 | Wheel/source distribution build and wheel CLI check | Pass; artifacts not published |
@@ -40,6 +40,30 @@ The existing QA dataset and demo dataset have not been reset or changed by these
 The credentialed mechanics tests use the development service account and disposable datasets
 in project `dbt-dqm`, US. They cannot substitute for the restricted-account gate. Postgres tests
 use isolated password-protected UTF-8 clusters and disposable schemas.
+
+These runs cover 17 distinct BigQuery cases, with the two stronger audit cases rerun after their
+assertions were expanded. The application and package code under test is the final safeguarded
+production code (`625dbc6`); subsequent commits only strengthen tests and documentation.
+The permissions gate upgrades QA before ordinary model execution, then uses the reviewer's full
+sync entry point, including explicitly authenticated dbt debug/parse subprocesses. The separate
+live gate remains blocked on authentication: the available browser requires GCP sign-in and the
+restricted ADC files are not present locally. The development identity is never substituted.
+
+## Reviewable commits
+
+| Commit | Scope |
+| --- | --- |
+| `83caf5d` | Separate restricted-account BigQuery gate and explicit client credentials |
+| `d60a4b9` | Streaming issue limits, atomic issue/Health cache installation, pending panel |
+| `2fecee2` | Migration 0004, isolated uploads, guarded audit/apply and staging expiry |
+| `625dbc6` | Pending-text budget and supported-boundary memory benchmark |
+| `52d474f` | Full byte ceiling, retained pending budgets and populated/partial audit tests |
+| `3fa04b3` | Verification record, rollout guidance and capture-provenance clarification |
+| `9f570de` | Full reviewer sync credentials and correct QA upgrade order |
+
+The final documentation commit records the completed checks above. Earlier commit messages
+describe the checks that were still pending when each chunk was saved; this record supersedes
+those pending validation notes. No branch push, merge, tag or package publication has occurred.
 
 ### Browser evidence
 
