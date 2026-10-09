@@ -118,7 +118,11 @@
       ('previous_record_values_json', 'string'),
       ('record_values_json', 'string'),
       ('reason', 'string'),
-      ('actor', 'string')
+      ('actor', 'string'),
+      ('payload_mode', 'string'),
+      ('changed_columns', 'string'),
+      ('previous_payload_digest', 'string'),
+      ('payload_digest', 'string')
     ],
     'dqm_annotation_changes': [
       ('batch_id', 'string'),

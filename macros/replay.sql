@@ -1,4 +1,6 @@
-{% macro reconcile_change_set_sql(run_id) %}
+{% macro reconcile_change_set_sql(run_id, observation_floor=none) %}
+{% set occurrences = dbt_dqm.dqm_relation('dqm_issue_occurrences') %}
+{% set occurrence_columns %}{% for col, kind in dbt_dqm.table_schemas()['dqm_issue_occurrences'] %}{{ col }}{% if not loop.last %},{% endif %}{% endfor %}{% endset %}
 {% set tracked_test_ids = [] %}
 {% for node in graph.nodes.values() %}
   {% if node.resource_type == 'test' and dbt_dqm.tracked_test(node) %}
@@ -18,16 +20,24 @@ with currently_tracked_tests as (
   {% endif %}
 ),
 
-existing as (select {% for col,kind in dbt_dqm.table_schemas()['dqm_issue_occurrences'] %}{{ col }}{% if not loop.last %},{% endif %}{% endfor %} from {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }}),
-
+{#- Only Active rows and the history of identities this run touches are read. Archived history
+    of untouched identities never affects the change set, and reading the whole table made every
+    run scale with total history. #}
+{#- Active rows that this run can change: those of tests with frozen inputs, plus those of tests
+    no longer tracked (the TEST_REMOVED sweep). Other tests' Active rows can't produce states,
+    because states join each identity to executions of its own test. #}
 active_existing as (
-  select * from existing where record_status = 'Active'
-),
-
-occurrence_counts as (
-  select test_unique_id, unique_id, max(occurrence_number) as max_occurrence_number
-  from existing
-  group by test_unique_id, unique_id
+  select {{ occurrence_columns }} from {{ occurrences }} active
+  where record_status = 'Active'
+    and (
+      exists(
+        select 1 from {{ dbt_dqm.dqm_relation('dqm_reconciliation_inputs') }} frozen
+        where frozen.run_id = {{ dbt_dqm.sql_string(run_id) }}
+          and frozen.test_unique_id = active.test_unique_id)
+      or not exists(
+        select 1 from currently_tracked_tests tracked
+        where tracked.test_unique_id = active.test_unique_id)
+    )
 ),
 
 unprocessed_executions as (
@@ -57,6 +67,9 @@ new_observations as (
   inner join ordered_executions execution
     on observation.invocation_id = execution.invocation_id
    and observation.test_unique_id = execution.test_unique_id
+  {#- A constant lower bound lets BigQuery prune observation partitions; it never excludes
+      evidence, because observations are written after their execution row (see reconcile_pre). #}
+  {% if observation_floor is not none %}where observation.observed_at >= {{ observation_floor }}{% endif %}
 ),
 
 candidate_identities as (
@@ -65,6 +78,23 @@ candidate_identities as (
   union distinct
   select distinct test_unique_id, unique_id, identity_scheme_signature
   from active_existing
+),
+
+affected_identities as (
+  select distinct test_unique_id, unique_id from candidate_identities
+),
+
+affected_history as (
+  select {% for col, kind in dbt_dqm.table_schemas()['dqm_issue_occurrences'] %}history.{{ col }}{% if not loop.last %},{% endif %}{% endfor %}
+  from {{ occurrences }} history
+  inner join affected_identities affected
+    on history.test_unique_id = affected.test_unique_id and history.unique_id = affected.unique_id
+),
+
+occurrence_counts as (
+  select test_unique_id, unique_id, max(occurrence_number) as max_occurrence_number
+  from affected_history
+  group by test_unique_id, unique_id
 ),
 
 execution_identity_states as (
@@ -304,7 +334,7 @@ occurrence_changes as (
   union all select * from orphaned_occurrences
 ),
 all_history as (
-  select * from existing where record_status='Archived'
+  select * from affected_history where record_status='Archived'
   union all select * from occurrence_changes
 ),
 transition_events as (
@@ -336,12 +366,30 @@ transition_events as (
           (state.capture_mode in ('full','allowlist') and state.record_values_json is distinct from state.previous_payload)
           {% if var('dbt_dqm_emit_still_failing_events',false) %}or true{% endif %}))
 ),
-event_changes as (
+event_changes_full as (
   select *, cast(null as {{ dbt.type_string() }}) as actor from transition_events
   union all
   select test_unique_id, occurrence_id, unique_id, {{ dbt_dqm.sql_string(run_id) }}, archived_at,
     'CLOSED_STRUCTURAL', record_values_json, record_values_json, close_reason,
     cast(null as {{ dbt.type_string() }}) from orphaned_occurrences
+),
+{#- Lifecycle is computed from full payloads; only what the event ledger keeps depends on
+    dbt_dqm_event_payloads. #}
+{% set payload_mode = dbt_dqm.event_payload_mode() %}
+event_changes as (
+  select test_unique_id, occurrence_id, unique_id, invocation_id, event_at, event_type,
+    {% if payload_mode == 'full' %}previous_record_values_json{% else %}cast(null as {{ dbt.type_string() }}){% endif %} as previous_record_values_json,
+    {% if payload_mode == 'full' %}record_values_json{% else %}cast(null as {{ dbt.type_string() }}){% endif %} as record_values_json,
+    reason, actor,
+    {{ dbt_dqm.sql_string(payload_mode) }} as payload_mode,
+    {% if payload_mode == 'none' %}cast(null as {{ dbt.type_string() }})
+    {% else %}case when event_type = 'VALUES_CHANGED'
+      then {{ dbt_dqm.json_changed_keys('previous_record_values_json', 'record_values_json') }} end{% endif %} as changed_columns,
+    {% if payload_mode == 'none' %}cast(null as {{ dbt.type_string() }})
+    {% else %}case when previous_record_values_json is not null then {{ dbt_dqm.sha256_hex('previous_record_values_json') }} end{% endif %} as previous_payload_digest,
+    {% if payload_mode == 'none' %}cast(null as {{ dbt.type_string() }})
+    {% else %}case when record_values_json is not null then {{ dbt_dqm.sha256_hex('record_values_json') }} end{% endif %} as payload_digest
+  from event_changes_full
 )
 select 'occurrence' as row_kind, changes.*,
  {% for col,kind in dbt_dqm.table_schemas()['dqm_issue_events'] if col not in ['test_unique_id','occurrence_id','unique_id','record_values_json'] %}

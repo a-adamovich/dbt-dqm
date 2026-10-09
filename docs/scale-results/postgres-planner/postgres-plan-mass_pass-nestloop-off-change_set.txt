@@ -1,0 +1,472 @@
+Append  (cost=1965911.11..2448777.92 rows=75565 width=1240) (actual time=6536.236..8649.654 rows=200007 loops=1)
+  Buffers: shared hit=101191 read=458955 dirtied=1 written=210, temp read=263721 written=249771
+  CTE currently_tracked_tests
+    ->  Append  (cost=0.00..3.18 rows=212 width=32) (actual time=0.069..0.500 rows=212 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.066..0.068 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.007..0.008 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.003..0.004 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.006 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.003..0.004 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.004..0.004 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.003..0.004 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.003..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.004..0.004 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.003..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.003..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.003..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.006 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.003..0.004 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.003..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.006..0.006 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.003..0.004 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.003..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.002 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.002..0.003 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.01 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=1)
+  CTE active_existing
+    ->  Index Scan using dqm_occurrence_active_identity on dqm_issue_occurrences active  (cost=0.42..1364692.88 rows=75548 width=1043) (actual time=1.622..520.045 rows=100007 loops=1)
+          Filter: ((hashed SubPlan 3) OR (NOT (hashed SubPlan 5)))
+          Buffers: shared hit=89704 read=11843 dirtied=1 written=210
+          SubPlan 3
+            ->  Index Only Scan using dqm_reconciliation_inputs_pkey on dqm_reconciliation_inputs frozen  (cost=0.27..6.04 rows=1 width=39) (actual time=0.037..0.086 rows=203 loops=1)
+                  Index Cond: (run_id = 'scale-explain'::text)
+                  Heap Fetches: 203
+                  Buffers: shared hit=9
+          SubPlan 5
+            ->  CTE Scan on currently_tracked_tests tracked  (cost=0.00..4.24 rows=212 width=32) (never executed)
+  CTE ordered_executions
+    ->  WindowAgg  (cost=2307.12..2307.15 rows=1 width=547) (actual time=7.178..7.275 rows=203 loops=1)
+          Buffers: shared hit=1534
+          ->  Sort  (cost=2307.12..2307.13 rows=1 width=539) (actual time=7.165..7.180 rows=203 loops=1)
+                Sort Key: execution.test_unique_id, execution.captured_at, execution.invocation_id
+                Sort Method: quicksort  Memory: 131kB
+                Buffers: shared hit=1534
+                ->  Hash Join  (cost=6.05..2307.11 rows=1 width=539) (actual time=6.988..7.070 rows=203 loops=1)
+                      Hash Cond: ((execution.test_unique_id = frozen_1.test_unique_id) AND (execution.invocation_id = frozen_1.invocation_id))
+                      Buffers: shared hit=1531
+                      ->  Seq Scan on dqm_test_executions execution  (cost=0.00..2032.85 rows=51085 width=539) (actual time=0.004..3.365 rows=50427 loops=1)
+                            Buffers: shared hit=1522
+                      ->  Hash  (cost=6.04..6.04 rows=1 width=76) (actual time=0.074..0.080 rows=203 loops=1)
+                            Buckets: 1024  Batches: 1  Memory Usage: 30kB
+                            Buffers: shared hit=9
+                            ->  Index Only Scan using dqm_reconciliation_inputs_pkey on dqm_reconciliation_inputs frozen_1  (cost=0.27..6.04 rows=1 width=76) (actual time=0.023..0.056 rows=203 loops=1)
+                                  Index Cond: (run_id = 'scale-explain'::text)
+                                  Heap Fetches: 203
+                                  Buffers: shared hit=9
+  CTE new_observations
+    ->  Hash Join  (cost=0.04..446645.57 rows=200001 width=673) (actual time=1616.857..1616.868 rows=7 loops=1)
+          Hash Cond: ((observation.invocation_id = execution_1.invocation_id) AND (observation.test_unique_id = execution_1.test_unique_id))
+          Buffers: shared hit=1536 read=357143
+          ->  Seq Scan on dqm_issue_observations observation  (cost=0.00..407145.30 rows=5000030 width=601) (actual time=0.215..1229.846 rows=5000021 loops=1)
+                Buffers: shared hit=2 read=357143
+          ->  Hash  (cost=0.02..0.02 rows=1 width=136) (actual time=7.410..7.410 rows=203 loops=1)
+                Buckets: 1024  Batches: 1  Memory Usage: 45kB
+                Buffers: shared hit=1534
+                ->  CTE Scan on ordered_executions execution_1  (cost=0.00..0.02 rows=1 width=136) (actual time=7.180..7.376 rows=203 loops=1)
+                      Buffers: shared hit=1534
+  CTE candidate_identities
+    ->  HashAggregate  (cost=8473.14..8748.68 rows=27555 width=96) (actual time=2363.964..2391.004 rows=100007 loops=1)
+          Group Key: new_observations.test_unique_id, new_observations.unique_id, new_observations.execution_identity_scheme_signature
+          Batches: 21  Memory Usage: 4153kB  Disk Usage: 15256kB
+          Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=4721 written=15482
+          ->  Append  (cost=5500.03..8266.47 rows=27555 width=96) (actual time=1616.937..2334.567 rows=100014 loops=1)
+                Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=2376 written=12737
+                ->  HashAggregate  (cost=5500.03..5700.03 rows=20000 width=96) (actual time=1616.934..1616.986 rows=7 loops=1)
+                      Group Key: new_observations.test_unique_id, new_observations.unique_id, new_observations.execution_identity_scheme_signature
+                      Batches: 1  Memory Usage: 409kB
+                      Buffers: shared hit=1536 read=357143
+                      ->  CTE Scan on new_observations  (cost=0.00..4000.02 rows=200001 width=96) (actual time=1616.875..1616.888 rows=7 loops=1)
+                            Buffers: shared hit=1536 read=357143
+                ->  HashAggregate  (cost=2077.57..2153.12 rows=7555 width=96) (actual time=679.585..713.999 rows=100007 loops=1)
+                      Group Key: active_existing.test_unique_id, active_existing.unique_id, active_existing.identity_scheme_signature
+                      Batches: 21  Memory Usage: 4409kB  Disk Usage: 15344kB
+                      Buffers: shared hit=89704 read=11843 dirtied=1 written=210, temp read=2376 written=12737
+                      ->  CTE Scan on active_existing  (cost=0.00..1510.96 rows=75548 width=96) (actual time=1.629..617.035 rows=100007 loops=1)
+                            Buffers: shared hit=89704 read=11843 dirtied=1 written=210, temp written=8865
+  CTE affected_history
+    ->  Hash Join  (cost=785.33..115945.86 rows=14 width=1043) (actual time=64.262..2350.780 rows=100007 loops=1)
+          Hash Cond: ((history.test_unique_id = candidate_identities.test_unique_id) AND (history.unique_id = candidate_identities.unique_id))
+          Buffers: shared hit=9942 read=89969, temp read=72707 written=71781
+          ->  Seq Scan on dqm_issue_occurrences history  (cost=0.00..109910.69 rows=999969 width=1043) (actual time=0.011..1181.074 rows=1000007 loops=1)
+                Buffers: shared hit=9942 read=89969
+          ->  Hash  (cost=743.99..743.99 rows=2756 width=64) (actual time=64.234..64.235 rows=100007 loops=1)
+                Buckets: 65536 (originally 4096)  Batches: 4 (originally 1)  Memory Usage: 3585kB
+                Buffers: temp read=2543 written=2455
+                ->  HashAggregate  (cost=688.88..716.43 rows=2756 width=64) (actual time=31.422..48.261 rows=100007 loops=1)
+                      Group Key: candidate_identities.test_unique_id, candidate_identities.unique_id
+                      Batches: 5  Memory Usage: 4145kB  Disk Usage: 7704kB
+                      Buffers: temp read=2543 written=1617
+                      ->  CTE Scan on candidate_identities  (cost=0.00..551.10 rows=27555 width=64) (actual time=0.018..6.901 rows=100007 loops=1)
+                            Buffers: temp read=1661 written=1
+  CTE states_grouped
+    ->  WindowAgg  (cost=21201.49..21211.50 rows=138 width=688) (actual time=3089.485..3248.966 rows=100007 loops=1)
+          Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=60021 written=63603
+          ->  WindowAgg  (cost=21201.49..21206.32 rows=138 width=680) (actual time=3089.467..3176.593 rows=100007 loops=1)
+                Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=60021 written=63603
+                ->  Sort  (cost=21201.49..21201.84 rows=138 width=700) (actual time=3089.437..3130.543 rows=100007 loops=1)
+                      Sort Key: execution_2.test_unique_id, candidate.unique_id, candidate.identity_scheme_signature, execution_2.execution_sequence
+                      Sort Method: external merge  Disk: 81888kB
+                      Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=60021 written=63603
+                      ->  Hash Right Join  (cost=5196.47..21196.59 rows=138 width=700) (actual time=2788.684..2931.490 rows=100007 loops=1)
+                            Hash Cond: ((observation_1.invocation_id = execution_2.invocation_id) AND (observation_1.test_unique_id = candidate.test_unique_id) AND (observation_1.unique_id = candidate.unique_id))
+                            Join Filter: (NOT (candidate.identity_scheme_signature IS DISTINCT FROM observation_1.execution_identity_scheme_signature))
+                            Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=44700 written=48256
+                            ->  CTE Scan on new_observations observation_1  (cost=0.00..4000.02 rows=200001 width=300) (actual time=0.001..0.005 rows=7 loops=1)
+                            ->  Hash  (cost=5194.06..5194.06 rows=138 width=528) (actual time=2788.582..2788.584 rows=100007 loops=1)
+                                  Buckets: 8192 (originally 1024)  Batches: 32 (originally 1)  Memory Usage: 4033kB
+                                  Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=29122 written=43149
+                                  ->  Hash Right Join  (cost=657.91..5194.06 rows=138 width=528) (actual time=2496.715..2698.969 rows=100007 loops=1)
+                                        Hash Cond: ((active_1.test_unique_id = candidate.test_unique_id) AND (active_1.unique_id = candidate.unique_id))
+                                        Join Filter: (NOT (candidate.identity_scheme_signature IS DISTINCT FROM active_1.identity_scheme_signature))
+                                        Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=29122 written=32678
+                                        ->  CTE Scan on active_existing active_1  (cost=0.00..1510.96 rows=75548 width=160) (actual time=0.022..23.701 rows=100007 loops=1)
+                                              Buffers: temp read=8866 written=1
+                                        ->  Hash  (cost=655.84..655.84 rows=138 width=464) (actual time=2495.884..2495.885 rows=100007 loops=1)
+                                              Buckets: 16384 (originally 1024)  Batches: 16 (originally 1)  Memory Usage: 3969kB
+                                              Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=4721 written=22144
+                                              ->  Hash Join  (cost=0.03..655.84 rows=138 width=464) (actual time=2364.100..2435.987 rows=100007 loops=1)
+                                                    Hash Cond: (candidate.test_unique_id = execution_2.test_unique_id)
+                                                    Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=4721 written=17142
+                                                    ->  CTE Scan on candidate_identities candidate  (cost=0.00..551.10 rows=27555 width=96) (actual time=2363.977..2418.694 rows=100007 loops=1)
+                                                          Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=4721 written=17142
+                                                    ->  Hash  (cost=0.02..0.02 rows=1 width=368) (actual time=0.087..0.087 rows=203 loops=1)
+                                                          Buckets: 1024  Batches: 1  Memory Usage: 73kB
+                                                          ->  CTE Scan on ordered_executions execution_2  (cost=0.00..0.02 rows=1 width=368) (actual time=0.005..0.045 rows=203 loops=1)
+  CTE episode_occurrences
+    ->  Hash Left Join  (cost=15.63..2094.49 rows=16 width=888) (actual time=6535.974..6880.395 rows=100007 loops=1)
+          Hash Cond: ((episode_1.test_unique_id = counts.test_unique_id) AND (episode_1.unique_id = counts.unique_id))
+          Buffers: shared hit=101191 read=458955 dirtied=1 written=210, temp read=168372 written=187305
+          ->  Hash Right Join  (cost=14.76..2092.78 rows=16 width=1192) (actual time=4004.042..4169.797 rows=100007 loops=1)
+                Hash Cond: ((active_2.test_unique_id = episode_1.test_unique_id) AND (active_2.unique_id = episode_1.unique_id))
+                Join Filter: ((NOT (episode_1.identity_scheme_signature IS DISTINCT FROM active_2.identity_scheme_signature)) AND (episode_1.episode_group = 0))
+                Buffers: shared hit=91249 read=368986 dirtied=1 written=210, temp read=85630 written=95511
+                ->  CTE Scan on active_existing active_2  (cost=0.00..1510.96 rows=75548 width=644) (actual time=0.010..18.204 rows=100007 loops=1)
+                      Buffers: temp read=8866
+                ->  Hash  (cost=14.52..14.52 rows=16 width=644) (actual time=4003.691..4003.716 rows=100007 loops=1)
+                      Buckets: 16384 (originally 1024)  Batches: 8 (originally 1)  Memory Usage: 4026kB
+                      Buffers: shared hit=91249 read=368986 dirtied=1 written=210, temp read=64797 written=86808
+                      ->  Subquery Scan on episode_1  (cost=5.68..14.52 rows=16 width=644) (actual time=3521.560..3959.946 rows=100007 loops=1)
+                            Buffers: shared hit=91249 read=368986 dirtied=1 written=210, temp read=64797 written=83544
+                            ->  GroupAggregate  (cost=5.68..14.36 rows=16 width=680) (actual time=3521.556..3953.233 rows=100007 loops=1)
+                                  Group Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group
+                                  Buffers: shared hit=91249 read=368986 dirtied=1 written=210, temp read=64797 written=83544
+                                  ->  WindowAgg  (cost=5.68..11.64 rows=16 width=736) (actual time=3521.521..3853.051 rows=100007 loops=1)
+                                        Buffers: shared hit=91249 read=368986 dirtied=1 written=210, temp read=64797 written=83544
+                                        ->  Incremental Sort  (cost=5.68..11.12 rows=16 width=584) (actual time=3521.502..3811.853 rows=100007 loops=1)
+                                              Sort Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group, (CASE WHEN (state_1.is_failing = 1) THEN 0 ELSE 1 END), state_1.execution_sequence
+                                              Presorted Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group, (CASE WHEN (state_1.is_failing = 1) THEN 0 ELSE 1 END)
+                                              Full-sort Groups: 3126  Sort Method: quicksort  Average Memory: 45kB  Peak Memory: 45kB
+                                              Buffers: shared hit=91249 read=368986 dirtied=1 written=210, temp read=64797 written=83544
+                                              ->  WindowAgg  (cost=5.35..10.40 rows=16 width=584) (actual time=3521.383..3780.153 rows=100007 loops=1)
+                                                    Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=64797 written=83544
+                                                    ->  Incremental Sort  (cost=5.35..9.88 rows=16 width=576) (actual time=3521.370..3743.900 rows=100007 loops=1)
+                                                          Sort Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group, (CASE WHEN (state_1.is_failing = 1) THEN 0 ELSE 1 END), state_1.execution_sequence DESC
+                                                          Presorted Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group
+                                                          Full-sort Groups: 3126  Sort Method: quicksort  Average Memory: 45kB  Peak Memory: 45kB
+                                                          Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=64797 written=83544
+                                                          ->  WindowAgg  (cost=5.09..9.16 rows=16 width=576) (actual time=3521.277..3713.092 rows=100007 loops=1)
+                                                                Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=64797 written=83544
+                                                                ->  Incremental Sort  (cost=5.09..8.68 rows=16 width=568) (actual time=3521.254..3676.956 rows=100007 loops=1)
+                                                                      Sort Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group, state_1.execution_sequence DESC
+                                                                      Presorted Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group
+                                                                      Full-sort Groups: 3126  Sort Method: quicksort  Average Memory: 45kB  Peak Memory: 45kB
+                                                                      Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=64797 written=83544
+                                                                      ->  WindowAgg  (cost=4.89..7.96 rows=16 width=568) (actual time=3521.184..3646.662 rows=100007 loops=1)
+                                                                            Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=64797 written=83544
+                                                                            ->  Incremental Sort  (cost=4.89..7.44 rows=16 width=560) (actual time=3521.172..3611.847 rows=100007 loops=1)
+                                                                                  Sort Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group, (CASE WHEN (state_1.is_failing = 0) THEN 0 ELSE 1 END), state_1.execution_sequence
+                                                                                  Presorted Key: state_1.test_unique_id, state_1.unique_id, state_1.identity_scheme_signature, state_1.episode_group
+                                                                                  Full-sort Groups: 3126  Sort Method: quicksort  Average Memory: 45kB  Peak Memory: 45kB
+                                                                                  Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=64797 written=83544
+                                                                                  ->  Subquery Scan on state_1  (cost=4.76..6.72 rows=16 width=560) (actual time=3521.109..3582.300 rows=100007 loops=1)
+                                                                                        Filter: ((state_1.first_absence_sequence IS NULL) OR (state_1.execution_sequence <= state_1.first_absence_sequence))
+                                                                                        Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=64797 written=83544
+                                                                                        ->  WindowAgg  (cost=4.76..6.05 rows=47 width=696) (actual time=3521.102..3573.542 rows=100007 loops=1)
+                                                                                              Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=64797 written=83544
+                                                                                              ->  Sort  (cost=4.76..4.87 rows=47 width=552) (actual time=3521.083..3533.744 rows=100007 loops=1)
+                                                                                                    Sort Key: state_2.test_unique_id, state_2.unique_id, state_2.identity_scheme_signature, state_2.episode_group
+                                                                                                    Sort Method: external merge  Disk: 38208kB
+                                                                                                    Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=64797 written=83544
+                                                                                                    ->  CTE Scan on states_grouped state_2  (cost=0.00..3.45 rows=47 width=552) (actual time=3089.492..3449.064 rows=100007 loops=1)
+                                                                                                          Filter: ((episode_group > 0) OR (prior_active = 1))
+                                                                                                          Buffers: shared hit=91240 read=368986 dirtied=1 written=210, temp read=60021 written=78755
+          ->  Hash  (cost=0.67..0.67 rows=14 width=68) (actual time=2531.869..2531.869 rows=100007 loops=1)
+                Buckets: 65536 (originally 1024)  Batches: 4 (originally 1)  Memory Usage: 3585kB
+                Buffers: shared hit=9942 read=89969, temp read=73899 written=83826
+                ->  Subquery Scan on counts  (cost=0.39..0.67 rows=14 width=68) (actual time=2489.484..2517.200 rows=100007 loops=1)
+                      Buffers: shared hit=9942 read=89969, temp read=73899 written=82951
+                      ->  HashAggregate  (cost=0.39..0.53 rows=14 width=68) (actual time=2489.483..2513.232 rows=100007 loops=1)
+                            Group Key: affected_history_1.test_unique_id, affected_history_1.unique_id
+                            Batches: 21  Memory Usage: 4177kB  Disk Usage: 11104kB
+                            Buffers: shared hit=9942 read=89969, temp read=73899 written=82951
+                            ->  CTE Scan on affected_history affected_history_1  (cost=0.00..0.28 rows=14 width=68) (actual time=64.272..2452.193 rows=100007 loops=1)
+                                  Buffers: shared hit=9942 read=89969, temp read=72707 written=80646
+  CTE orphaned_occurrences
+    ->  Hash Anti Join  (cost=6.89..2844.66 rows=37774 width=876) (actual time=21.422..21.424 rows=0 loops=1)
+          Hash Cond: (existing.test_unique_id = tracked_1.test_unique_id)
+          Buffers: temp read=8866
+          ->  CTE Scan on active_existing existing  (cost=0.00..1510.96 rows=75548 width=740) (actual time=0.367..13.310 rows=100007 loops=1)
+                Buffers: temp read=8866
+          ->  Hash  (cost=4.24..4.24 rows=212 width=32) (actual time=0.395..0.397 rows=212 loops=1)
+                Buckets: 1024  Batches: 1  Memory Usage: 23kB
+                ->  CTE Scan on currently_tracked_tests tracked_1  (cost=0.00..4.24 rows=212 width=32) (actual time=0.073..0.380 rows=212 loops=1)
+  CTE occurrence_changes
+    ->  Append  (cost=0.00..1417.12 rows=37790 width=880) (actual time=6536.219..7093.526 rows=100007 loops=1)
+          Buffers: shared hit=101191 read=458955 dirtied=1 written=210, temp read=177238 written=197183
+          ->  Subquery Scan on "*SELECT* 1_5"  (cost=0.00..0.52 rows=16 width=880) (actual time=6536.216..7068.229 rows=100007 loops=1)
+                Buffers: shared hit=101191 read=458955 dirtied=1 written=210, temp read=168372 written=197183
+                ->  CTE Scan on episode_occurrences  (cost=0.00..0.32 rows=16 width=880) (actual time=6535.987..7052.379 rows=100007 loops=1)
+                      Buffers: shared hit=101191 read=458955 dirtied=1 written=210, temp read=168372 written=197183
+          ->  Subquery Scan on "*SELECT* 2_4"  (cost=0.00..1227.65 rows=37774 width=880) (actual time=21.430..21.430 rows=0 loops=1)
+                Buffers: temp read=8866
+                ->  CTE Scan on orphaned_occurrences orphaned_occurrences_1  (cost=0.00..755.48 rows=37774 width=876) (actual time=21.429..21.429 rows=0 loops=1)
+                      Buffers: temp read=8866
+  ->  Subquery Scan on "*SELECT* 1"  (cost=0.00..1228.18 rows=37790 width=1240) (actual time=6536.235..7251.922 rows=100007 loops=1)
+        Buffers: shared hit=101191 read=458955 dirtied=1 written=210, temp read=177238 written=206878
+        ->  CTE Scan on occurrence_changes changes  (cost=0.00..755.80 rows=37790 width=1240) (actual time=6536.231..7240.557 rows=100007 loops=1)
+              Buffers: shared hit=101191 read=458955 dirtied=1 written=210, temp read=177238 written=206878
+  ->  Subquery Scan on "*SELECT* 2"  (cost=6.07..481260.81 rows=37775 width=1240) (actual time=670.444..1389.542 rows=100000 loops=1)
+        Buffers: temp read=86483 written=42893
+        ->  Subquery Scan on event_changes_full  (cost=6.07..480694.19 rows=37775 width=1236) (actual time=670.437..1378.609 rows=100000 loops=1)
+              Buffers: temp read=86483 written=42893
+              ->  Append  (cost=6.07..3501.50 rows=37775 width=296) (actual time=670.356..833.574 rows=100000 loops=1)
+                    Buffers: temp read=86483 written=42893
+                    ->  Subquery Scan on "*SELECT* 1_1"  (cost=6.07..2179.40 rows=1 width=296) (actual time=670.349..829.804 rows=100000 loops=1)
+                          Buffers: temp read=86483 written=42893
+                          ->  Hash Right Join  (cost=6.07..2179.39 rows=1 width=296) (actual time=670.342..818.196 rows=100000 loops=1)
+                                Hash Cond: (("*SELECT* 1_2".test_unique_id = episode.test_unique_id) AND ("*SELECT* 1_2".unique_id = episode.unique_id) AND ((("*SELECT* 1_2".occurrence_number)::bigint) = (episode.occurrence_number - 1)))
+                                Join Filter: (NOT (episode.identity_scheme_signature IS DISTINCT FROM "*SELECT* 1_2".identity_scheme_signature))
+                                Buffers: temp read=86483 written=42893
+                                ->  Append  (cost=0.00..1322.98 rows=37791 width=880) (actual time=26.726..57.266 rows=100007 loops=1)
+                                      Buffers: temp read=18562 written=2
+                                      ->  Subquery Scan on "*SELECT* 1_2"  (cost=0.00..0.33 rows=1 width=880) (actual time=26.675..26.680 rows=0 loops=1)
+                                            Buffers: temp read=8866 written=1
+                                            ->  CTE Scan on affected_history  (cost=0.00..0.32 rows=1 width=876) (actual time=26.670..26.670 rows=0 loops=1)
+                                                  Filter: (record_status = 'Archived'::text)
+                                                  Rows Removed by Filter: 100007
+                                                  Buffers: temp read=8866 written=1
+                                      ->  CTE Scan on occurrence_changes  (cost=0.00..755.80 rows=37790 width=880) (actual time=0.047..26.807 rows=100007 loops=1)
+                                            Buffers: temp read=9696 written=1
+                                ->  Hash  (cost=6.05..6.05 rows=1 width=440) (actual time=536.352..536.353 rows=100000 loops=1)
+                                      Buckets: 8192 (originally 1024)  Batches: 32 (originally 1)  Memory Usage: 4033kB
+                                      Buffers: temp read=47935 written=33338
+                                      ->  Hash Join  (cost=5.54..6.05 rows=1 width=440) (actual time=192.847..450.145 rows=100000 loops=1)
+                                            Hash Cond: ((episode.test_unique_id = state.test_unique_id) AND (episode.unique_id = state.unique_id) AND (episode.episode_group = state.episode_group))
+                                            Join Filter: (NOT (state.identity_scheme_signature IS DISTINCT FROM episode.identity_scheme_signature))
+                                            Buffers: temp read=47935 written=22905
+                                            ->  CTE Scan on episode_occurrences episode  (cost=0.00..0.32 rows=16 width=176) (actual time=0.026..22.633 rows=100007 loops=1)
+                                                  Buffers: temp read=9879 written=1
+                                            ->  Hash  (cost=5.52..5.52 rows=1 width=280) (actual time=153.085..153.086 rows=100000 loops=1)
+                                                  Buckets: 8192 (originally 1024)  Batches: 32 (originally 1)  Memory Usage: 4033kB
+                                                  Buffers: temp read=15153 written=8352
+                                                  ->  CTE Scan on states_grouped state  (cost=0.00..5.52 rows=1 width=280) (actual time=1.296..62.735 rows=100000 loops=1)
+                                                        Filter: (((is_failing = 1) AND (previous_failing = 0)) OR ((is_failing = 0) AND (previous_failing = 1)) OR ((is_failing = 1) AND (previous_failing = 1) AND (capture_mode = ANY ('{full,allowlist}'::text[])) AND (record_values_json IS DISTINCT FROM previous_payload)))
+                                                        Rows Removed by Filter: 7
+                                                        Buffers: temp read=15153 written=1
+                    ->  CTE Scan on orphaned_occurrences  (cost=0.00..755.48 rows=37774 width=296) (actual time=0.001..0.001 rows=0 loops=1)
+              SubPlan 15
+                ->  Aggregate  (cost=12.55..12.56 rows=1 width=32) (never executed)
+                      ->  Subquery Scan on changed  (cost=4.54..12.05 rows=199 width=32) (never executed)
+                            Filter: (((event_changes_full.previous_record_values_json)::jsonb -> changed.key) IS DISTINCT FROM ((event_changes_full.record_values_json)::jsonb -> changed.key))
+                            ->  HashAggregate  (cost=4.54..6.54 rows=200 width=32) (never executed)
+                                  Group Key: (jsonb_object_keys(COALESCE((event_changes_full.previous_record_values_json)::jsonb, '{}'::jsonb)))
+                                  ->  Append  (cost=0.00..4.04 rows=200 width=32) (never executed)
+                                        ->  ProjectSet  (cost=0.00..0.52 rows=100 width=32) (never executed)
+                                              ->  Result  (cost=0.00..0.01 rows=1 width=0) (never executed)
+                                        ->  ProjectSet  (cost=0.00..0.52 rows=100 width=32) (never executed)
+                                              ->  Result  (cost=0.00..0.01 rows=1 width=0) (never executed)
+Planning:
+  Buffers: shared hit=401 read=13
+Planning Time: 7.266 ms
+Execution Time: 8678.633 ms

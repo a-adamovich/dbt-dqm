@@ -11,5 +11,5 @@ left join {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} prev
   on cur.test_unique_id=prev.test_unique_id and cur.unique_id=prev.unique_id
   and cur.identity_scheme_signature is not distinct from prev.identity_scheme_signature
   and cur.occurrence_number=prev.occurrence_number+1
-where {% if dbt_dqm.empty_mode() %}false{% elif active_only %}cur.record_status='Active'{% else %}true{% endif %}
+where {% if active_only %}cur.record_status='Active'{% else %}true{% endif %}
 {% endmacro %}

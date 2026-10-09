@@ -8,7 +8,7 @@ import sys
 import uuid
 from collections.abc import Iterable
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +19,7 @@ from google.oauth2 import service_account
 from psycopg2.extras import RealDictCursor
 
 from .config import AppConfig
+from .errors import AppError, SnapshotUnavailable, classify
 from .store import EDITABLE_FIELDS, Patch
 
 
@@ -83,32 +84,75 @@ def _table(config: AppConfig, name: str) -> str:
     return f'"{schema}"."{identifier}"'
 
 
-def fetch_issues(config: AppConfig) -> list[dict[str, Any]]:
-    if config.archive_cache_days == 0:
-        history_predicate = "record_status = 'Active'"
-    elif config.adapter_type == "bigquery":
-        history_predicate = (
-            "(record_status = 'Active' or archived_at >= "
-            f"timestamp_sub(current_timestamp(), interval {config.archive_cache_days} day))"
-        )
-    else:
-        history_predicate = (
-            "(record_status = 'Active' or archived_at >= current_timestamp - "
-            f"interval '{config.archive_cache_days} days')"
-        )
-    query = (
-        f"select * from {_table(config, 'dqm_all_issues')} "
-        f"where {history_predicate} order by first_seen_at desc"
-    )
+def _query_rows(config: AppConfig, query: str) -> list[dict[str, Any]]:
     if config.adapter_type == "bigquery":
-        rows = [dict(row.items()) for row in client_for(config).query(query).result()]
-    else:
-        with (
-            _postgres_connection(config) as connection,
-            connection.cursor(cursor_factory=RealDictCursor) as cursor,
-        ):
-            cursor.execute(query)
-            rows = [dict(row) for row in cursor.fetchall()]
+        return [dict(row.items()) for row in client_for(config).query(query).result()]
+    with (
+        _postgres_connection(config) as connection,
+        connection.cursor(cursor_factory=RealDictCursor) as cursor,
+    ):
+        cursor.execute(query)
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def _issue_predicate(config: AppConfig) -> str:
+    """Rows the local cache holds: Active issues plus recently archived history.
+
+    The archive cutoff is fixed once per sync, so the view rows and the direct table count
+    below are filtered identically even when a row is close to the boundary.
+    """
+    if config.archive_cache_days == 0:
+        return "record_status = 'Active'"
+    cutoff = (datetime.now(UTC) - timedelta(days=config.archive_cache_days)).isoformat()
+    literal = (
+        f"timestamp '{cutoff}'" if config.adapter_type == "bigquery" else f"timestamptz '{cutoff}'"
+    )
+    return f"(record_status = 'Active' or archived_at >= {literal})"
+
+
+def _snapshot_state(config: AppConfig, predicate: str) -> dict[str, Any]:
+    control = _table(config, "dqm_reconciliation_control")
+    occurrences = _table(config, "dqm_issue_occurrences")
+    return _query_rows(
+        config,
+        f"select (select max(generation) from {control}) as generation, "
+        f"(select max(setup_status) from {control}) as setup_status, "
+        f"(select count(*) from {occurrences} where {predicate}) as issue_count",
+    )[0]
+
+
+def fetch_issues(config: AppConfig) -> list[dict[str, Any]]:
+    """Read the issue view and verify it before it may replace the local cache.
+
+    Every reconciliation, migration and recovery operation bumps the control generation, so an
+    unchanged generation around the read means the rows come from one tracking state. A view
+    whose row count disagrees with the tracking table (stale or redefined views, wrong schema) is
+    rejected instead of silently emptying the cache; a verified empty result is accepted.
+    """
+    predicate = _issue_predicate(config)
+    before = _snapshot_state(config, predicate)
+    if before["setup_status"] != "ready":
+        raise SnapshotUnavailable(
+            "dbt-dqm setup or a migration is in progress, so warehouse data isn't ready yet. "
+            "Showing cached data; sync again shortly."
+        )
+    rows = _query_rows(
+        config,
+        f"select * from {_table(config, 'dqm_all_issues')} "
+        f"where {predicate} order by first_seen_at desc",
+    )
+    after = _snapshot_state(config, predicate)
+    if after["generation"] != before["generation"]:
+        raise SnapshotUnavailable(
+            "The warehouse changed while syncing (a reconciliation finished). "
+            "Showing cached data; sync again."
+        )
+    if len(rows) != after["issue_count"]:
+        raise SnapshotUnavailable(
+            f"dqm_all_issues returned {len(rows)} issues but the tracking table holds "
+            f"{after['issue_count']}. The public views may be out of date; rebuild "
+            "package:dbt_dqm, then sync again. Showing cached data."
+        )
     _validate_issue_rows(rows)
     return rows
 
@@ -197,18 +241,15 @@ def _apply_bigquery_patches(config: AppConfig, patches: Iterable[Patch]) -> str:
         raise RuntimeError("Incomplete prior annotation batch; synchronize before retrying.")
     staging_database, staging_schema, _ = _relation_parts(config, "dqm_issue_occurrences")
     staging_id = f"{staging_database}.{staging_schema}.dqm_app_change_staging"
-    client.query(
-        f"""
-        create table if not exists `{staging_id}` (
-          batch_id string, occurrence_id string, field_name string,
-          old_value string, new_value string, changed_at timestamp, changed_by string,
-          base_annotation_version int64
-        )
-        """
-    ).result()
-    client.query(
-        f"alter table `{staging_id}` add column if not exists base_annotation_version int64"
-    ).result()
+    # dbt-dqm setup creates the staging table, so reviewers need only row access to it, not
+    # table-create rights on the DQM dataset.
+    try:
+        client.get_table(staging_id)
+    except NotFound as error:
+        raise AppError(
+            "The DQM schema has no dqm_app_change_staging table. Run dbt build for "
+            "package:dbt_dqm with the current package, then apply again."
+        ) from error
     payload = [
         {
             "batch_id": batch_id,
@@ -310,6 +351,8 @@ def _postgres_connection(config: AppConfig):
     }
     if config.sslmode:
         parameters["sslmode"] = config.sslmode
+    # A reconciliation holds the occurrence table exclusively; fail fast instead of hanging the UI.
+    parameters["options"] = f"-c lock_timeout={config.lock_timeout_seconds * 1000}"
     return psycopg2.connect(
         **{key: value for key, value in parameters.items() if value is not None}
     )
@@ -399,10 +442,16 @@ def sync_worker(config: AppConfig) -> dict[str, Any]:
     return {"issues": fetch_issues(config), "health": fetch_health(config)}
 
 
-def apply_worker(config: AppConfig, patches: list[Patch]) -> tuple[str, dict[str, Any]]:
+def apply_worker(
+    config: AppConfig, patches: list[Patch]
+) -> tuple[str, dict[str, Any] | None, AppError | None]:
+    """Apply patches, then refresh. A failed refresh doesn't undo or hide a committed apply."""
     validate_dbt(config)
     batch_id = apply_patches(config, patches)
-    return batch_id, {"issues": fetch_issues(config), "health": fetch_health(config)}
+    try:
+        return batch_id, {"issues": fetch_issues(config), "health": fetch_health(config)}, None
+    except Exception as error:  # noqa: BLE001 - the apply already committed; report the refresh.
+        return batch_id, None, classify(error)
 
 
 MISSED_ROOT_CAUSES = ("no_test", "test_logic_gap", "threshold_too_loose", "test_not_run", "other")
@@ -431,16 +480,7 @@ def manifest_nodes(config: AppConfig) -> dict[str, dict[str, Any]]:
 def fetch_health(config: AppConfig) -> dict[str, Any]:
     health: dict[str, Any] = {"synced_at": datetime.now(UTC).isoformat()}
     for kind, table in (("tests", "dqm_test_health"), ("areas", "dqm_area_health")):
-        query = f"select * from {_table(config, table)}"
-        if config.adapter_type == "bigquery":
-            health[kind] = [dict(row.items()) for row in client_for(config).query(query).result()]
-        else:
-            with (
-                _postgres_connection(config) as connection,
-                connection.cursor(cursor_factory=RealDictCursor) as cursor,
-            ):
-                cursor.execute(query)
-                health[kind] = [dict(row) for row in cursor.fetchall()]
+        health[kind] = _query_rows(config, f"select * from {_table(config, table)}")
     return health
 
 

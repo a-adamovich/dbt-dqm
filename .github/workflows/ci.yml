@@ -155,9 +155,23 @@ jobs:
           uv run dbt run-operation assert_postgres_query_plans
 
       - name: Transactional acceptance and application interfaces
-        run: uv run pytest -q integration_tests/acceptance/test_postgres.py
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p acceptance-results
+          uv run pytest -q -rA integration_tests/acceptance/test_postgres.py \
+            --junitxml=acceptance-results/junit.xml 2>&1 | tee acceptance-results/pytest.log
         env:
           DBT_DQM_TEST_DSN: host=localhost port=5432 dbname=dbt_dqm_ci user=postgres password=dbtdqm
+
+      # Annotations only report the exit code; keep the full pytest output for diagnosis.
+      - name: Upload acceptance results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: postgres-${{ matrix.postgres }}-acceptance
+          path: acceptance-results/
+          if-no-files-found: ignore
 
   bigquery-compile:
     runs-on: ubuntu-latest

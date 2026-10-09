@@ -41,7 +41,17 @@ Row ownership uses explicit case-insensitive `meta.dbt_dqm.owner_column`, otherw
 
 ## History events
 
-Events include `APPEARED`, `REAPPEARED`, `VALUES_CHANGED`, `DISAPPEARED`, `CLOSED_STRUCTURAL`, and `EVIDENCE_SKIPPED`. `dbt_dqm_emit_still_failing_events: true` also emits `STILL_FAILING`. Value changes retain before/after payloads and require `allowlist` or `full` capture. IDs use SHA-256 over the canonical length-prefixed, null-safe `dqm-event-v1` encoding of test, occurrence, original invocation and event type. Skipped evidence has a null occurrence ID and includes the test ID, so skipping two tests from one invocation creates two distinct events.
+Events include `APPEARED`, `REAPPEARED`, `VALUES_CHANGED`, `DISAPPEARED`, `CLOSED_STRUCTURAL`, and `EVIDENCE_SKIPPED`. `dbt_dqm_emit_still_failing_events: true` also emits `STILL_FAILING`. Value changes require `allowlist` or `full` capture.
+
+`dbt_dqm_event_payloads` controls what the event ledger keeps; lifecycle processing always uses the full captured payloads. Each event records the mode it was written with in `payload_mode`.
+
+| Mode | `previous_record_values_json`, `record_values_json` | `changed_columns` (`VALUES_CHANGED` only) | `previous_payload_digest`, `payload_digest` |
+| --- | --- | --- | --- |
+| `full` (default) | before/after captured values | sorted, comma-separated changed keys | SHA-256 of each payload |
+| `changed_columns` | null | sorted, comma-separated changed keys | SHA-256 of each payload |
+| `none` | null | null | null |
+
+With the default `full` mode, captured values in events are kept until event retention (`dbt_dqm_event_retention_days`, separate from raw-log retention) removes them. Under `allowlist` or `full` capture those values can include personal data: set event retention or choose a smaller mode. Digests are not anonymization; predictable values can be recovered by hashing guesses. A key missing on one side counts as changed, distinct from an explicit JSON null. Changing the mode affects new events only; migration `0002_event_payload_mode` marks events written before it as `full`. IDs use SHA-256 over the canonical length-prefixed, null-safe `dqm-event-v1` encoding of test, occurrence, original invocation and event type. Skipped evidence has a null occurrence ID and includes the test ID, so skipping two tests from one invocation creates two distinct events.
 
 ## Recovery and retention
 
@@ -58,11 +68,13 @@ Skip validates conclusive, late, unreceipted inputs and atomically writes receip
 
 Raw-log retention is opt-in, receipt-aware and portable. Observations, executions and receipts are pruned together only after processing and outside unfinished runs. High-water state is never pruned. Unconditional BigQuery partition expiration is removed. `dbt_dqm_reconcile_lookback_days` is deprecated, warns and is ignored. Events persist indefinitely unless `dbt_dqm_event_retention_days` is configured. Health exposes the raw retention boundary separately from zero observed activity.
 
-`run --empty` and `build --empty` require initialized current tracking tables. They skip capture, reconciliation, migrations, table grants and cleanup, and project zero rows. Ordinary dbt relation DDL still occurs; no DQM tracking-data changes occur.
+`run --empty` and `build --empty` require initialized current tracking tables. They skip capture, reconciliation, migrations, table grants and cleanup, so no DQM tracking data changes. The public views keep their normal definitions and keep returning real data; ordinary dbt relation DDL (recreating those views) still occurs.
 
 ## Capture concurrency
 
 Serialize dbt test invocations that share a stored-failure schema. dbt overwrites each test's failure table, which the on-run-end capture reads; overlapping invocations could otherwise capture another invocation's rows. The reconciliation generation protocol protects apply concurrency, while this capture-side boundary still requires runner coordination.
+
+Capture detects some of these races. Each test's stored failures are copied once into a capture stage inside the capture transaction, and the stage's row count must equal the `result.failures` that dbt reported (0 for a passing test). A mismatch records `collection_status = 'collection_error'` with the message "Stored failures changed before capture", writes no observations, and produces no lifecycle evidence; a mismatched pass is never treated as a pass. Matching counts don't prove the rows came from this invocation (two runs can fail the same number of rows differently), so the serialization requirement above still applies.
 
 ## Grants
 
@@ -72,6 +84,8 @@ Public-view grants use normal dbt model configuration. On BigQuery, a package po
 vars:
   dbt_dqm_schema: dqm_v02
   dbt_dqm_table_grants:
+    dqm_reconciliation_control:
+      select: [dqm_reviewer]
     dqm_issue_occurrences:
       select: [dqm_reviewer]
       update: [dqm_reviewer]
@@ -83,7 +97,16 @@ vars:
       insert: [dqm_reviewer]
 ```
 
-On BigQuery use native IAM privilege maps, e.g. `roles/bigquery.dataViewer: ["user:reviewer@example.com"]` and `roles/bigquery.dataEditor` on writable tables. The runner also needs dataset table creation and control/migration permissions. The app needs reads on public issue/health views and direct reads of occurrences/audit, occurrence updates, audit inserts and missed-issue inserts. The BigQuery app's existing annotation staging path additionally needs staging-table create/load/read access and jobs.create; Postgres does not create app staging tables.
+This is the complete reviewer grant set on Postgres, together with `+grants: {select: [dqm_reviewer]}` on the package models (the public views) and `grant usage on schema <dqm schema> to dqm_reviewer`, which dbt doesn't issue. The acceptance suite proves it with separate non-superuser runner and reviewer roles: the reviewer can sync (which reads `dqm_reconciliation_control` to verify the snapshot), read Health, apply annotations and file missed issues, and is denied every other write and raw-log read. The runner needs only `create` on the database (plus `pgcrypto` already installed).
+
+On BigQuery use native IAM privilege maps, e.g. `roles/bigquery.dataViewer: ["user:reviewer@example.com"]`. The least-privilege identities are:
+
+| Identity | Project | DQM dataset | Tables |
+| --- | --- | --- | --- |
+| Runner (dbt test/build) | `roles/bigquery.jobUser` | `roles/bigquery.dataEditor`; `roles/bigquery.dataOwner` instead if `dbt_dqm_table_grants` or view `+grants` are configured, because issuing GRANT needs `setIamPolicy`. Plus `dataViewer` on the datasets the tests read. | — |
+| Reviewer (review app) | `roles/bigquery.jobUser` | `roles/bigquery.dataViewer`: BigQuery views run with the caller's access to their source tables, and the Health views read executions, receipts and events | `roles/bigquery.dataEditor` on `dqm_issue_occurrences`, `dqm_annotation_changes`, `dqm_missed_issues` and `dqm_app_change_staging` |
+
+Setup creates `dqm_app_change_staging` (migration `0003_app_change_staging`), so reviewers never need table-create rights on the dataset; the app only loads rows into it. The Postgres reviewer grant set above is proven by an acceptance test with separate restricted roles. The BigQuery matrix has not yet been proven with separate restricted service accounts (the BigQuery suite runs as one elevated identity); see the verification record.
 
 ## Health populations
 

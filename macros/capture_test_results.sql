@@ -288,13 +288,26 @@
           {% endfor %}
 
           {% set owner_value %}{% if resolved_owner %}nullif(trim(cast({{ adapter.quote(resolved_owner[0].name) }} as {{ dbt.type_string() }})),''){% else %}cast(null as {{ dbt.type_string() }}){% endif %}{% endset %}
+          {# Read the stored failures exactly once into a capture stage. The consistency check and
+             the observation merge both use that copy, so another invocation overwriting the failure
+             table can't slip in between them. Equal counts don't prove provenance, though; runs
+             that share failure tables still have to be serialized. #}
+          {% set expected_rows = result.failures | int %}
+          {% set stage_count = '(select count(*) from dqm_capture_stage)' %}
+          {% set capture_stage %}
+            {% if target.type == 'postgres' %}create temporary table dqm_capture_stage on commit drop as
+            {% else %}create or replace temp table dqm_capture_stage as{% endif %}
+            select
+              {{ dbt_dqm.sha256_hex(dbt_dqm.canonical_identity_string(key_pairs)) }} as unique_id,
+              {{ dbt_dqm.json_object_string(record_pairs) }} as record_values_json,
+              {{ owner_value }} as owner_value
+            from {{ relation }}
+          {% endset %}
           {% set query %}
             with failure_rows as (
-              select
-                {{ dbt_dqm.sha256_hex(dbt_dqm.canonical_identity_string(key_pairs)) }} as unique_id,
-                {{ dbt_dqm.json_object_string(record_pairs) }} as record_values_json,
-                {{ owner_value }} as owner_value
-              from {{ relation }}
+              select unique_id, record_values_json, owner_value
+              from dqm_capture_stage
+              where {{ stage_count }} = {{ expected_rows }}
             ),
             owner_rollup as (
               select unique_id, count(distinct owner_value) as owner_count, min(owner_value) as owner_value
@@ -338,13 +351,24 @@
               observation_columns
             ) }}
           {% endset %}
+          {# BigQuery creates the temp stage just before the transaction; Postgres creates it inside
+             the transaction so it's dropped at commit. #}
+          {% if target.type == 'bigquery' %}{% do capture_sql.append(capture_stage ~ ';') %}{% endif %}
           {% do capture_sql.append('begin transaction;' if target.type=='bigquery' else 'begin;') %}
+          {% if target.type == 'postgres' %}{% do capture_sql.append(capture_stage ~ ';') %}{% endif %}
           {% do capture_sql.append(observation_merge ~ ';') %}
           {% set status_update %}
             update {{ dbt_dqm.relation_name('dqm_test_executions') }}
-            set collection_status = {{ dbt_dqm.sql_string('success') }},
+            set collection_status = case when {{ stage_count }} = {{ expected_rows }}
+                  then {{ dbt_dqm.sql_string('success') }} else {{ dbt_dqm.sql_string('collection_error') }} end,
                 owner_conflict_identity_count=(select coalesce(sum(owner_conflict),0) from {{ dbt_dqm.dqm_relation('dqm_issue_observations') }} where invocation_id={{ dbt_dqm.sql_string(invocation_id) }} and test_unique_id={{ dbt_dqm.sql_string(node.unique_id) }}),
-                collection_message=case when exists(select 1 from {{ dbt_dqm.dqm_relation('dqm_issue_observations') }} where invocation_id={{ dbt_dqm.sql_string(invocation_id) }} and test_unique_id={{ dbt_dqm.sql_string(node.unique_id) }} and owner_conflict=1) then 'Conflicting row owners; static owner used.' else null end
+                collection_message=case
+                  when {{ stage_count }} != {{ expected_rows }} then concat(
+                    'Stored failures changed before capture: dbt reported {{ expected_rows }} rows, the table had ',
+                    cast({{ stage_count }} as {{ dbt.type_string() }}),
+                    '. Serialize invocations that share failure tables.')
+                  when exists(select 1 from {{ dbt_dqm.dqm_relation('dqm_issue_observations') }} where invocation_id={{ dbt_dqm.sql_string(invocation_id) }} and test_unique_id={{ dbt_dqm.sql_string(node.unique_id) }} and owner_conflict=1) then 'Conflicting row owners; static owner used.'
+                  else null end
             where invocation_id = {{ dbt_dqm.sql_string(invocation_id) }}
               and test_unique_id = {{ dbt_dqm.sql_string(node.unique_id) }}
               and collection_status = {{ dbt_dqm.sql_string('pending') }}
@@ -352,7 +376,7 @@
           {% do capture_sql.append(status_update ~ ';') %}
           {% do capture_sql.append('commit transaction;' if target.type=='bigquery' else 'commit;') %}
         {% else %}
-          {% do successful_test_ids.append(node.unique_id) %}
+          {% do successful_test_ids.append((node.unique_id, relation)) %}
         {% endif %}
       {% else %}
         {% set relation_error %}
@@ -369,17 +393,27 @@
   {% endfor %}
 
   {# Only zero-failure tests remain here — tests with failure evidence already committed their
-     own observation merge and status update above. There's no observation payload at risk for a
-     zero-failure test, so one batched update for all of them is safe and keeps this cheap. #}
+     own observation merge and status update above. A pass is only evidence if its stored-failure
+     table is still empty when we look; rows there mean another invocation overwrote it, which is
+     a collection error, never a pass. One batched update counts every table in a single statement. #}
   {% if successful_test_ids | length > 0 %}
-    {% set quoted_ids = [] %}
-    {% for test_id in successful_test_ids %}{% do quoted_ids.append(dbt_dqm.sql_string(test_id)) %}{% endfor %}
+    {% set counts = [] %}
+    {% for test_id, relation in successful_test_ids %}
+      {% do counts.append('select ' ~ dbt_dqm.sql_string(test_id) ~ ' as test_unique_id, (select count(*) from ' ~ relation ~ ') as stored_rows') %}
+    {% endfor %}
+    {% set executions = dbt_dqm.relation_name('dqm_test_executions') %}
     {% set success_update %}
-      update {{ dbt_dqm.relation_name('dqm_test_executions') }}
-      set collection_status = {{ dbt_dqm.sql_string('not_applicable') }}
-      where invocation_id = {{ dbt_dqm.sql_string(invocation_id) }}
-        and test_unique_id in ({{ quoted_ids | join(',') }})
-        and collection_status = {{ dbt_dqm.sql_string('pending') }}
+      update {{ executions }} as execution
+      set collection_status = case when stored.stored_rows = 0
+            then {{ dbt_dqm.sql_string('not_applicable') }} else {{ dbt_dqm.sql_string('collection_error') }} end,
+          collection_message = case when stored.stored_rows = 0 then null else concat(
+            'Stored failures changed before capture: dbt reported 0 rows, the table had ',
+            cast(stored.stored_rows as {{ dbt.type_string() }}),
+            '. Serialize invocations that share failure tables.') end
+      from ({{ counts | join('\nunion all\n') }}) stored
+      where execution.invocation_id = {{ dbt_dqm.sql_string(invocation_id) }}
+        and execution.test_unique_id = stored.test_unique_id
+        and execution.collection_status = {{ dbt_dqm.sql_string('pending') }}
     {% endset %}
     {% do capture_sql.append(success_update ~ ';') %}
   {% endif %}

@@ -88,7 +88,7 @@
 
 ## 0.2 additions
 
-Reconciliation must be idempotent across retries and protect concurrent annotations. Each run freezes exact execution IDs, rejects late evidence, and applies occurrences, events, receipts and state atomically under a generation guard. Installation rejects recognizable legacy tables before writes; subsequent additive migrations preserve history. Schema-only runs have zero-row projections and no tracking-data changes.
+Reconciliation must be idempotent across retries and protect concurrent annotations. Each run freezes exact execution IDs, rejects late evidence, and applies occurrences, events, receipts and state atomically under a generation guard. Installation rejects recognizable legacy tables before writes; subsequent additive migrations preserve history. Schema-only (`--empty`) runs make no tracking-data changes, and the public views keep their normal definitions and data.
 
 Ownership may come from each failed row without expanding captured payloads. Conflicts use the static fallback and are measurable. Priority/criticality refresh Active issues and freeze on closure. Review verdicts are separate, audited annotations. History distinguishes previous occurrences, Passed recurrences and potential regressions, and persists payload changes independently of raw-log retention.
 

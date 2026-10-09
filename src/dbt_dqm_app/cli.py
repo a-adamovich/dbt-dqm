@@ -23,6 +23,12 @@ def parser() -> argparse.ArgumentParser:
         default=90,
         help="Archived history retained in SQLite; zero disables archived caching",
     )
+    app.add_argument(
+        "--lock-timeout",
+        type=int,
+        default=5,
+        help="Seconds a Postgres write waits for a lock before the app reports the warehouse busy",
+    )
     workspace = commands.add_parser("workspace", help="Inspect or purge local failed-row data")
     workspace_commands = workspace.add_subparsers(dest="workspace_command", required=True)
     for name, help_text in (
@@ -62,6 +68,8 @@ def main() -> None:
     if args.command == "app":
         if args.archive_cache_days < 0:
             raise SystemExit("--archive-cache-days must be zero or a positive integer")
+        if args.lock_timeout <= 0:
+            raise SystemExit("--lock-timeout must be a positive integer")
         environment = os.environ.copy()
         environment.update(
             {
@@ -70,6 +78,7 @@ def main() -> None:
                 "DBT_DQM_TARGET": args.target,
                 "STREAMLIT_BROWSER_GATHER_USAGE_STATS": "false",
                 "DBT_DQM_ARCHIVE_CACHE_DAYS": str(args.archive_cache_days),
+                "DBT_DQM_LOCK_TIMEOUT_SECONDS": str(args.lock_timeout),
             }
         )
         app_path = Path(__file__).with_name("streamlit_app.py")

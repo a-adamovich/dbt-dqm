@@ -19,6 +19,7 @@ from pathlib import Path
 import psycopg2
 import pytest
 import yaml
+from psycopg2.extensions import parse_dsn
 from psycopg2.extras import RealDictCursor
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -87,8 +88,10 @@ def demo(tmp_path):
     (project / "dbt_packages").mkdir()
     (project / "dbt_packages/dbt_dqm").symlink_to(ROOT, target_is_directory=True)
     (project / "packages.yml").write_text(yaml.safe_dump({"packages": [{"local": str(ROOT)}]}))
+    # get_dsn_parameters() never returns the password, so a password-authenticated server (as in
+    # CI) would receive an empty one. Merge it back from the DSN the caller supplied.
     with psycopg2.connect(DSN) as connection:
-        p = connection.get_dsn_parameters()
+        p = {**connection.get_dsn_parameters(), **parse_dsn(DSN)}
     profiles = tmp_path / "profiles"
     profiles.mkdir()
     output = {
@@ -119,14 +122,37 @@ def demo(tmp_path):
     (project / "dbt_project.yml").write_text(yaml.safe_dump(config, sort_keys=False))
     (project / "macros/acceptance_hooks.sql").write_text("""
 {% macro acceptance_pause() %}{% if execute and var('pause',false) and not dbt_dqm.empty_mode() %}select pg_sleep(4);{% endif %}{% endmacro %}
-{% macro acceptance_fault() %}{% if execute and var('fault',false) and not dbt_dqm.empty_mode() %}do $$ begin raise exception 'injected apply failure'; end $$;{% endif %}{% endmacro %}
+{% macro acceptance_fault() %}{% if execute and var('fault',false) and not dbt_dqm.empty_mode() %}do $$ begin raise exception 'injected apply failure'; end $$;{% endif %}{% if execute and var('hold',false) and not dbt_dqm.empty_mode() %}select pg_sleep(6);{% endif %}{% endmacro %}
 {% macro postgres__migrations() %}
 {% set registry=dbt_dqm.default__migrations() %}
-{% if var('future',false) %}{% do registry.append({'id':'0002_acceptance','apply':'acceptance_add','backfill':'acceptance_backfill','verify':'acceptance_verify'}) %}{% endif %}
+{% if var('future',false) %}{% do registry.append({'id':'9999_acceptance','apply':'acceptance_add','backfill':'acceptance_backfill','verify':'acceptance_verify'}) %}{% endif %}
 {{ return(registry) }}{% endmacro %}
 {% macro default__acceptance_add() %}alter table {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} add column if not exists future_field text;{% endmacro %}
 {% macro default__acceptance_backfill() %}update {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} set future_field='preserved' where future_field is null;{% endmacro %}
+{% macro postgres__event_payload_mode_backfill() %}{{ dbt_dqm.default__event_payload_mode_backfill() }}{% if var('interrupt_0002',false) %} raise exception 'injected 0002 interruption';{% endif %}{% endmacro %}
 {% macro default__acceptance_verify() %}{{ dbt_dqm.assert_sql('not exists(select 1 from ' ~ dbt_dqm.dqm_relation('dqm_issue_occurrences') ~ ' where future_field is null)',"'backfill incomplete'") }}{% endmacro %}
+""")
+    # dbt runs package on-run-end hooks before the root project's, ordered by package name. This
+    # package sorts before dbt_dqm, so it can change a stored-failure table after dbt computed
+    # result.failures but before dbt-dqm captures it, as a concurrent invocation would.
+    tamper = project / "dbt_packages/aaa_acceptance_tamper"
+    (tamper / "macros").mkdir(parents=True)
+    (tamper / "dbt_project.yml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "aaa_acceptance_tamper",
+                "version": "1.0.0",
+                "config-version": 2,
+                "macro-paths": ["macros"],
+                "on-run-end": ["{{ aaa_acceptance_tamper.tamper_failures() }}"],
+            }
+        )
+    )
+    (tamper / "macros/tamper.sql").write_text("""
+{% macro tamper_failures() %}{% if execute and var('tamper', false) %}
+insert into "{{ target.schema }}_dbt_test__audit"."demo_customer_email_invalid" (customer_id, email, reason)
+values ('tamper-row', 'tamper@example.com', 'tampered');
+{% endif %}{% endmacro %}
 """)
     instance = Demo(project, profiles, schema)
     try:
@@ -223,7 +249,10 @@ def test_batched_replay_rollback_and_empty(demo):
             variables={"demo_scenario": "recurrence"},
         )
         assert demo.tracking() == baseline
-        assert demo.sql("select count(*) n from @schema.dqm_all_issues")[0]["n"] == 0
+        # --empty disables tracking writes only; the public views keep serving real data.
+        assert demo.sql("select count(*) n from @schema.dqm_all_issues")[0]["n"] == len(before)
+        assert demo.sql("select count(*) n from @schema.dqm_issue_timeline")[0]["n"] == len(before)
+        assert demo.sql("select count(*) n from @schema.dqm_test_health")[0]["n"] > 0
 
 
 def test_reconciliation_serializes_and_reviewer_edit_survives(demo):
@@ -460,3 +489,350 @@ def test_health_includes_outstanding_evidence_older_than_window(demo):
     demo.dbt("run", "--select", "dqm_reconcile")
     health = demo.sql("select * from @schema.dqm_test_health where test_unique_id=%s", [test_id])[0]
     assert health["processing_lag_count"] == 0 and health["pending_collection_count"] == 1
+
+
+def _latest_execution(demo, test_name):
+    return demo.sql(
+        "select * from @schema.dqm_test_executions where test_name=%s order by captured_at desc limit 1",
+        [test_name],
+    )[0]
+
+
+def test_capture_rejects_failure_tables_changed_before_capture(demo):
+    customer = "demo_customer_email_invalid"
+
+    def customer_rows():
+        return [row for row in demo.occurrences() if row["test_name"] == customer]
+
+    demo.capture()
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    baseline = customer_rows()
+    assert baseline and all(row["record_status"] == "Active" for row in baseline)
+
+    # A failing test whose table gained a row after dbt counted it: no evidence is recorded.
+    demo.capture(tamper=True)
+    tampered = _latest_execution(demo, customer)
+    assert tampered["collection_status"] == "collection_error"
+    assert "Stored failures changed before capture" in tampered["collection_message"]
+    assert not demo.sql(
+        "select 1 from @schema.dqm_issue_observations where invocation_id=%s and test_unique_id=%s",
+        [tampered["invocation_id"], tampered["test_unique_id"]],
+    )
+    assert _latest_execution(demo, "demo_order_amount_invalid")["collection_status"] == "success"
+    demo.dbt("run", "--select", "dqm_reconcile")
+    assert customer_rows() == baseline
+
+    # A passing test whose table isn't empty at capture time is never treated as a pass.
+    demo.capture("passed", tamper=True)
+    tampered_pass = _latest_execution(demo, customer)
+    assert tampered_pass["collection_status"] == "collection_error"
+    assert "dbt reported 0 rows, the table had 1" in tampered_pass["collection_message"]
+    assert (
+        _latest_execution(demo, "demo_order_amount_invalid")["collection_status"]
+        == "not_applicable"
+    )
+    demo.dbt("run", "--select", "dqm_reconcile")
+    assert all(row["record_status"] == "Active" for row in customer_rows())
+    assert all(
+        row["record_status"] == "Archived" and row["close_reason"] == "Passed"
+        for row in demo.occurrences()
+        if row["test_name"] != customer
+    )
+
+    # An untampered pass is still a pass.
+    demo.capture("passed")
+    assert _latest_execution(demo, customer)["collection_status"] == "not_applicable"
+    demo.dbt("run", "--select", "dqm_reconcile")
+    assert all(row["record_status"] == "Archived" for row in customer_rows())
+
+
+def _wait_for_exclusive_occurrence_lock(demo):
+    for _ in range(150):
+        held = demo.sql(
+            "select 1 from pg_locks l join pg_class c on c.oid=l.relation "
+            "join pg_namespace n on n.oid=c.relnamespace "
+            "where n.nspname=%s and c.relname='dqm_issue_occurrences' "
+            "and l.mode='ExclusiveLock' and l.granted",
+            [demo.schema],
+        )
+        if held:
+            return
+        time.sleep(0.1)
+    raise AssertionError("reconciliation never took the occurrence table lock")
+
+
+def test_app_write_fails_fast_while_reconciliation_holds_the_table(demo):
+    from dataclasses import replace
+
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.errors import WarehouseBusy, classify
+    from dbt_dqm_app.store import Patch
+    from dbt_dqm_app.warehouse import apply_patches
+
+    demo.capture()
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    config = replace(load_config(demo.project, demo.profiles, "dev"), lock_timeout_seconds=1)
+    row = demo.occurrences()[0]
+    patch = Patch(
+        row["occurrence_id"],
+        "notes",
+        None,
+        "edited after reconciliation",
+        1,
+        datetime.now(UTC).isoformat(),
+        row["annotation_version"],
+    )
+    with ThreadPoolExecutor(1) as pool:
+        # The post-hook sleeps inside the reconciliation transaction, holding its table lock.
+        running = pool.submit(
+            demo.dbt, "run", "--select", "dqm_reconcile", variables={"hold": True}
+        )
+        _wait_for_exclusive_occurrence_lock(demo)
+        started = time.monotonic()
+        with pytest.raises(Exception) as caught:
+            apply_patches(config, [patch])
+        assert time.monotonic() - started < 4
+        assert isinstance(classify(caught.value), WarehouseBusy)
+        running.result()
+    unchanged = next(r for r in demo.occurrences() if r["occurrence_id"] == row["occurrence_id"])
+    assert unchanged["notes"] == row["notes"]
+    assert unchanged["annotation_version"] == row["annotation_version"]
+    assert not demo.sql("select 1 from @schema.dqm_annotation_changes")
+    # Once the reconciliation commits, the same patch applies normally.
+    apply_patches(config, [patch])
+    applied = next(r for r in demo.occurrences() if r["occurrence_id"] == row["occurrence_id"])
+    assert applied["notes"] == "edited after reconciliation"
+
+
+def test_capture_completing_after_a_later_run_is_late_evidence(demo):
+    """A real capture whose collection commits after a later capture was reconciled.
+
+    Holding the first capture at 'pending' stands in for its transaction committing late; the
+    reconciliation in between must exclude it, and once it becomes visible it is older than the
+    processed high-water and must be rejected before any lifecycle write.
+    """
+    customer = "demo_customer_email_invalid"
+    demo.capture()
+    demo.dbt("run", "--select", "dqm_reconcile")
+    demo.capture("passed")
+    slow = _latest_execution(demo, customer)
+    demo.sql(
+        "update @schema.dqm_test_executions set collection_status='pending' where invocation_id=%s",
+        [slow["invocation_id"]],
+    )
+    demo.capture("recurrence")
+    demo.dbt("run", "--select", "dqm_reconcile")
+    assert not demo.sql(
+        "select 1 from @schema.dqm_reconciliation_receipts where invocation_id=%s",
+        [slow["invocation_id"]],
+    )
+    before = demo.occurrences()
+    receipts = demo.sql("select * from @schema.dqm_reconciliation_receipts order by 1,2")
+
+    demo.sql(
+        "update @schema.dqm_test_executions set collection_status=%s "
+        "where invocation_id=%s and test_unique_id=%s",
+        [slow["collection_status"], slow["invocation_id"], slow["test_unique_id"]],
+    )
+    late = demo.dbt("run", "--select", "dqm_reconcile", success=False)
+    assert "Late DQM evidence" in late.stdout
+    assert slow["invocation_id"] in late.stdout
+    assert demo.occurrences() == before
+    assert demo.sql("select * from @schema.dqm_reconciliation_receipts order by 1,2") == receipts
+
+    items = [{"test_unique_id": slow["test_unique_id"], "invocation_id": slow["invocation_id"]}]
+    demo.dbt(
+        "run-operation",
+        "dqm_skip_late_evidence",
+        "--args",
+        json.dumps({"items": items, "reason": "Capture committed after a later run"}),
+    )
+    demo.dbt("run", "--select", "dqm_reconcile")
+    assert demo.occurrences() == before
+    skipped = demo.sql(
+        "select * from @schema.dqm_issue_events where event_type='EVIDENCE_SKIPPED' "
+        "and invocation_id=%s",
+        [slow["invocation_id"]],
+    )
+    assert len(skipped) == len(items)
+
+
+def test_restricted_runner_and_reviewer_use_only_documented_grants(demo):
+    """A non-superuser runner builds everything; a reviewer with only the documented grants can
+    perform every app operation and nothing else."""
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.store import Patch
+    from dbt_dqm_app.warehouse import apply_patches, fetch_health, fetch_issues, insert_missed_issue
+
+    suffix = demo.schema.removeprefix("dqm_it_")
+    runner, reviewer = f"dqm_runner_{suffix}", f"dqm_reviewer_{suffix}"
+    password = f"restricted-{suffix}"
+    schema = f"{demo.schema}_restricted"
+    dbname = parse_dsn(DSN)["dbname"]
+    for role in (runner, reviewer):
+        demo.sql(f'create role "{role}" login password %s', [password])
+    demo.sql(f'grant create on database "{dbname}" to "{runner}"')
+
+    def profiles_for(user, directory):
+        directory.mkdir()
+        profile = yaml.safe_load((demo.profiles / "profiles.yml").read_text())
+        output = profile["dbt_dqm_demo_postgres"]["outputs"]["dev"]
+        output.update({"user": user, "password": password, "schema": schema})
+        (directory / "profiles.yml").write_text(yaml.safe_dump(profile))
+        return directory
+
+    config_path = demo.project / "dbt_project.yml"
+    project = yaml.safe_load(config_path.read_text())
+    project["models"]["dbt_dqm"]["+grants"] = {"select": [reviewer]}
+    project.setdefault("vars", {})["dbt_dqm_table_grants"] = {
+        "dqm_reconciliation_control": {"select": [reviewer]},
+        "dqm_issue_occurrences": {"select": [reviewer], "update": [reviewer]},
+        "dqm_annotation_changes": {"select": [reviewer], "insert": [reviewer]},
+        "dqm_missed_issues": {"select": [reviewer], "insert": [reviewer]},
+    }
+    config_path.write_text(yaml.safe_dump(project, sort_keys=False))
+    as_runner = Demo(demo.project, profiles_for(runner, demo.project.parent / "runner"), schema)
+    try:
+        as_runner.dbt("seed")
+        as_runner.capture()
+        as_runner.dbt("build", "--select", "package:dbt_dqm")
+        as_runner.capture("passed")
+        as_runner.dbt("run", "--select", "dqm_reconcile")
+        as_runner.sql(f'grant usage on schema "{schema}" to "{reviewer}"')
+
+        reviewer_profiles = profiles_for(reviewer, demo.project.parent / "reviewer")
+        config = load_config(demo.project, reviewer_profiles, "dev")
+        issues = fetch_issues(config)
+        assert len(issues) == len(as_runner.occurrences())
+        assert fetch_health(config)["tests"]
+        row = issues[0]
+        patch = Patch(
+            row["occurrence_id"],
+            "notes",
+            row.get("notes"),
+            "reviewed with restricted grants",
+            1,
+            datetime.now(UTC).isoformat(),
+            row["annotation_version"],
+        )
+        apply_patches(config, [patch])
+        insert_missed_issue(
+            config,
+            {
+                "missed_issue_id": f"restricted-{suffix}",
+                "area_label": "Restricted reviewer check",
+                "description": "Filed by the restricted reviewer",
+                "root_cause": "no_test",
+                "discovered_at": datetime.now(UTC).isoformat(),
+            },
+        )
+
+        reviewer_dsn = " ".join(
+            f"{key}={value}"
+            for key, value in {**parse_dsn(DSN), "user": reviewer, "password": password}.items()
+        )
+        for statement in (
+            f'delete from "{schema}".dqm_issue_occurrences',
+            f'update "{schema}".dqm_reconciliation_control set generation = generation + 1',
+            (
+                f'insert into "{schema}".dqm_reconciliation_receipts '
+                "(test_unique_id, invocation_id) values ('x', 'y')"
+            ),
+            f'select * from "{schema}".dqm_test_executions',
+        ):
+            with (
+                psycopg2.connect(reviewer_dsn) as conn,
+                conn.cursor() as cursor,
+                pytest.raises(psycopg2.errors.InsufficientPrivilege),
+            ):
+                cursor.execute(statement)
+    finally:
+        as_runner.sql(f'drop schema if exists "{schema}" cascade')
+        as_runner.sql(f'drop schema if exists "{schema}_dbt_test__audit" cascade')
+        for role in (runner, reviewer):
+            as_runner.sql(f'drop owned by "{role}" cascade')
+            as_runner.sql(f'drop role "{role}"')
+
+
+@pytest.mark.parametrize("mode", ["full", "changed_columns", "none"])
+def test_event_payload_modes(demo, mode):
+    variables = {"dbt_dqm_event_payloads": mode}
+    demo.capture()
+    demo.dbt("build", "--select", "package:dbt_dqm", variables=variables)
+    demo.capture("recurrence")  # Continuing failures with changed payloads.
+    demo.dbt("run", "--select", "dqm_reconcile", variables=variables)
+    changed = demo.sql("select * from @schema.dqm_issue_events where event_type='VALUES_CHANGED'")
+    appeared = demo.sql("select * from @schema.dqm_issue_events where event_type='APPEARED'")
+    assert changed and appeared
+    assert {row["payload_mode"] for row in changed + appeared} == {mode}
+    for row in changed:
+        if mode == "full":
+            before = json.loads(row["previous_record_values_json"])
+            after = json.loads(row["record_values_json"])
+            expected = sorted(
+                k
+                for k in before.keys() | after.keys()
+                if before.get(k, object()) != after.get(k, object())
+            )
+            assert row["changed_columns"] == ",".join(expected)
+        else:
+            assert row["previous_record_values_json"] is None and row["record_values_json"] is None
+        if mode == "none":
+            assert row["changed_columns"] is None and row["payload_digest"] is None
+        else:
+            assert row["changed_columns"]
+            assert row["previous_payload_digest"] and row["payload_digest"]
+            assert row["previous_payload_digest"] != row["payload_digest"]
+
+
+def test_event_payload_migration_upgrades_an_existing_02_schema(demo):
+    demo.capture()
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    demo.capture("passed")
+    demo.dbt("run", "--select", "dqm_reconcile")
+    demo.sql(
+        "update @schema.dqm_issue_occurrences set notes='kept through 0002', "
+        "review_verdict='TRUE_POSITIVE', annotation_version=annotation_version+1"
+    )
+    # Turn the schema back into a populated 0001-only 0.2 install.
+    columns = ("payload_mode", "changed_columns", "previous_payload_digest", "payload_digest")
+    for column in columns:
+        demo.sql(f"alter table @schema.dqm_issue_events drop column {column}")
+    demo.sql("delete from @schema.dqm_schema_migrations where migration_id <> '0001_initial'")
+    demo.sql("update @schema.dqm_reconciliation_control set schema_version='0001_initial'")
+    before = demo.occurrences()
+    history = demo.sql("select * from @schema.dqm_issue_events order by event_id")
+    assert history
+
+    # Interrupted: the migration runs inside the reconcile transaction, so nothing persists.
+    demo.dbt("run", "--select", "dqm_reconcile", variables={"interrupt_0002": True}, success=False)
+    assert demo.occurrences() == before
+    assert not demo.sql(
+        "select 1 from information_schema.columns where table_schema=%s "
+        "and table_name='dqm_issue_events' and column_name='payload_mode'",
+        [demo.schema],
+    )
+    assert (
+        demo.sql("select schema_version from @schema.dqm_reconciliation_control")[0][
+            "schema_version"
+        ]
+        == "0001_initial"
+    )
+
+    demo.dbt("run", "--select", "dqm_reconcile")
+    assert demo.occurrences() == before
+    migrated = demo.sql("select * from @schema.dqm_issue_events order by event_id")
+    assert [{k: v for k, v in row.items() if k not in columns} for row in migrated] == history
+    assert {row["payload_mode"] for row in migrated} == {"full"}
+    assert {
+        row["migration_id"] for row in demo.sql("select * from @schema.dqm_schema_migrations")
+    } == {
+        "0001_initial",
+        "0002_event_payload_mode",
+        "0003_app_change_staging",
+    }
+    control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
+    assert (
+        control["schema_version"] == "0003_app_change_staging"
+        and control["setup_status"] == "ready"
+    )

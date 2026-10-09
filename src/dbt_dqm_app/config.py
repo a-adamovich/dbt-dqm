@@ -32,6 +32,9 @@ class AppConfig:
     sslmode: str | None = None
     archive_cache_days: int = 90
     target_path: Path | None = None
+    # How long a Postgres statement waits for a lock (for example, while a reconciliation holds
+    # the occurrence table) before the app reports the warehouse as busy.
+    lock_timeout_seconds: int = 5
 
     @property
     def workspace_path(self) -> Path:
@@ -81,6 +84,11 @@ def load_config(project_dir: str | Path, profiles_dir: str | Path, target: str) 
     archive_cache_days = int(os.environ.get("DBT_DQM_ARCHIVE_CACHE_DAYS", "90"))
     if archive_cache_days < 0:
         raise ValueError("DBT_DQM_ARCHIVE_CACHE_DAYS must be zero or a positive integer")
+    # dbt-postgres accepts both spellings of the password key.
+    password = output.get("pass", output.get("password"))
+    lock_timeout_seconds = int(os.environ.get("DBT_DQM_LOCK_TIMEOUT_SECONDS", "5"))
+    if lock_timeout_seconds <= 0:
+        raise ValueError("DBT_DQM_LOCK_TIMEOUT_SECONDS must be a positive integer")
     return AppConfig(
         project_dir=project_dir,
         profiles_dir=profiles_dir,
@@ -95,9 +103,10 @@ def load_config(project_dir: str | Path, profiles_dir: str | Path, target: str) 
         host=_plain(output.get("host")) if output.get("host") is not None else None,
         port=int(_plain(output.get("port", 5432))) if adapter_type == "postgres" else None,
         user=_plain(output.get("user")) if output.get("user") is not None else None,
-        password=_plain(output.get("pass")) if output.get("pass") is not None else None,
+        password=_plain(password) if password is not None else None,
         dbname=_plain(output.get("dbname")) if output.get("dbname") is not None else None,
         sslmode=_plain(output.get("sslmode")) if output.get("sslmode") is not None else None,
         archive_cache_days=archive_cache_days,
         target_path=project_dir / project.get("target-path", "target"),
+        lock_timeout_seconds=lock_timeout_seconds,
     )
