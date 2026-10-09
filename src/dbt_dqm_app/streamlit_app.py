@@ -29,6 +29,7 @@ from dbt_dqm_app.display import (
     workflow_status_options,
 )
 from dbt_dqm_app.errors import classify
+from dbt_dqm_app.limits import CacheLimitExceeded, check_cache_size
 from dbt_dqm_app.store import EDITABLE_FIELDS, Workspace
 from dbt_dqm_app.warehouse import (
     MISSED_ROOT_CAUSES,
@@ -105,8 +106,11 @@ def run_app() -> None:
                 batch_id, snapshot, refresh_error = job.result()
                 workspace.clear_applied(st.session_state.job_patches)
                 if refresh_error is None:
-                    workspace.replace_snapshot(snapshot["issues"])
-                    workspace.replace_health(snapshot["health"])
+                    try:
+                        _install_snapshot(workspace, config, snapshot)
+                    except Exception as error:  # noqa: BLE001 - Apply already committed.
+                        refresh_error = classify(error)
+                if refresh_error is None:
                     st.session_state.job_notice = (
                         "success",
                         f"Applied batch {batch_id} and synchronized local data.",
@@ -120,8 +124,7 @@ def run_app() -> None:
                     )
             else:
                 snapshot = job.result()
-                workspace.replace_snapshot(snapshot["issues"])
-                workspace.replace_health(snapshot["health"])
+                _install_snapshot(workspace, config, snapshot)
                 st.session_state.job_notice = ("success", "Local data synchronized.", "")
         except Exception as error:  # noqa: BLE001 - patches must survive worker failures.
             failure = classify(error)
@@ -136,8 +139,13 @@ def run_app() -> None:
             st.rerun()
 
     busy = st.session_state.job is not None
-    pending = workspace.pending()
-    drifted = workspace.drifted_patches() if not busy else []
+    try:
+        check_cache_size(*workspace.cache_size(), config.max_cache_issues, config.max_cache_bytes)
+        oversized = False
+    except CacheLimitExceeded:
+        oversized = True
+    pending = [] if oversized else workspace.pending()
+    drifted = workspace.drifted_patches() if not busy and not oversized else []
     with st.container(key="dqm-action-bar"):
         col_sync, col_apply, col_state = st.columns([1, 1.35, 3])
         with col_sync:
@@ -163,7 +171,7 @@ def run_app() -> None:
                 st.info(f"Background {st.session_state.job_kind} is running…")
             else:
                 st.write(
-                    f"Pending changes: **{len(pending)}** · "
+                    f"Pending changes: **{workspace.pending_count()}** · "
                     f"Last sync: {format_timestamp(workspace.last_sync(), 'Never')}"
                 )
 
@@ -211,15 +219,64 @@ def run_app() -> None:
 
     issues_tab, health_tab, missed_tab = st.tabs(["Issues", "Health", "Report missed issue"])
     with issues_tab:
-        _render_issues(workspace, pending)
+        try:
+            _render_issues(workspace, pending, config)
+        except CacheLimitExceeded as error:
+            st.warning(error.message)
+            _render_pending_panel(workspace, config)
     with health_tab:
         _render_health(workspace)
     with missed_tab:
         _render_missed_form(config)
 
 
-def _render_issues(workspace, pending) -> None:
-    rows = workspace.rows()
+def _install_snapshot(workspace, config, snapshot) -> None:
+    workspace.replace_synced_data(snapshot["issues"], snapshot["health"],
+                                  max_issues=config.max_cache_issues,
+                                  max_bytes=config.max_cache_bytes)
+
+
+def _render_pending_panel(workspace, config) -> None:
+    """Bounded escape hatch for old oversized caches, without decoding cached payloads."""
+    count = workspace.pending_issue_count()
+    st.subheader("Pending edits")
+    if not count:
+        st.info("No pending edits. Reduce the archive window and restart the app to sync.")
+        return
+    pages = max(1, math.ceil(count / 100))
+    key = "pending-issue-page"
+    if key in st.session_state:
+        st.session_state[key] = min(st.session_state[key], pages)
+    page = st.number_input("Pending edits page", min_value=1, max_value=pages, value=1,
+                           step=1, key=key)
+    st.caption(f"Up to 100 issues per page · {count:,} issues with pending edits")
+    try:
+        patches = workspace.pending_page(page, max_bytes=config.max_cache_bytes)
+    except CacheLimitExceeded as error:
+        st.error(error.message)
+        previews = workspace.pending_previews(page)
+        for patch in previews:
+            st.write(f"{patch.occurrence_id} · {patch.field_name} (preview only)")
+            st.code(patch.new_value or "(unset)", language=None)
+        if st.button("Discard oversized edits on this page"):
+            workspace.discard_patches(previews)
+            st.rerun()
+        return
+    for patch in patches:
+        st.write(f"{patch.occurrence_id} · {patch.field_name}")
+        st.code((patch.new_value or "(unset)")[:4000], language=None)
+    if st.button("Apply this page", disabled=st.session_state.job is not None):
+        st.session_state.job_kind = "apply"
+        st.session_state.job_patches = patches
+        st.session_state.job = _get_executor().submit(apply_worker, config, patches)
+        st.rerun()
+    if st.button("Discard edits on this page", disabled=st.session_state.job is not None):
+        workspace.discard_patches(patches)
+        st.rerun()
+
+
+def _render_issues(workspace, pending, config) -> None:
+    rows = workspace.rows(max_issues=config.max_cache_issues, max_bytes=config.max_cache_bytes)
     if not rows:
         st.info("No local data. Select Sync after building the dbt-dqm package models.")
         return

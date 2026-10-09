@@ -21,6 +21,7 @@ from psycopg2.extras import RealDictCursor
 
 from .config import AppConfig
 from .errors import AppError, SnapshotUnavailable, classify
+from .limits import check_cache_size, issue_json
 from .store import EDITABLE_FIELDS, Patch
 
 
@@ -118,6 +119,24 @@ def _issue_predicate(config: AppConfig) -> str:
     return f"(record_status = 'Active' or archived_at >= {literal})"
 
 
+def _iter_issue_rows(config: AppConfig, query: str):
+    """Only issue downloads stream; small metadata/Health queries retain the list API."""
+    if config.adapter_type == "bigquery":
+        result = client_for(config).query(query).result(page_size=500)
+        for page in result.pages:
+            for row in page:
+                yield dict(row.items())
+        return
+    with (_postgres_connection(config) as connection,
+          connection.cursor(name="dqm_sync_" + uuid.uuid4().hex,
+                            cursor_factory=RealDictCursor) as cursor):
+        cursor.itersize = 500
+        cursor.execute(query)
+        while page := cursor.fetchmany(500):
+            for row in page:
+                yield dict(row)
+
+
 def _snapshot_state(config: AppConfig, predicate: str) -> dict[str, Any]:
     control = _table(config, "dqm_reconciliation_control")
     occurrences = _table(config, "dqm_issue_occurrences")
@@ -144,17 +163,30 @@ def fetch_issues(config: AppConfig) -> list[dict[str, Any]]:
             "dbt-dqm setup or a migration is in progress, so warehouse data isn't ready yet. "
             "Showing cached data; sync again shortly."
         )
-    rows = _query_rows(
+    check_cache_size(before["issue_count"], 0, config.max_cache_issues, config.max_cache_bytes)
+    downloaded = _iter_issue_rows(
         config,
         f"select * from {_table(config, 'dqm_all_issues')} "
-        f"where {predicate} order by first_seen_at desc",
+        f"where {predicate} order by first_seen_at desc, occurrence_id "
+        f"limit {config.max_cache_issues + 1}",
     )
+    rows = []
+    size = 0
+    try:
+        for row in downloaded:
+            size += len(issue_json(row).encode("utf-8"))
+            check_cache_size(len(rows) + 1, size, config.max_cache_issues, config.max_cache_bytes)
+            rows.append(row)
+    finally:
+        downloaded.close()
     after = _snapshot_state(config, predicate)
     if after["generation"] != before["generation"]:
         raise SnapshotUnavailable(
             "The warehouse changed while syncing (a reconciliation finished). "
             "Showing cached data; sync again."
         )
+    if after["setup_status"] != "ready":
+        raise SnapshotUnavailable("DQM setup changed while syncing. Cached data is kept.")
     if len(rows) != after["issue_count"]:
         raise SnapshotUnavailable(
             f"dqm_all_issues returned {len(rows)} issues but the tracking table holds "

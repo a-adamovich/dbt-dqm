@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from dbt_dqm_app.config import resolve_workspace_path
+from dbt_dqm_app.limits import MAX_CACHE_ISSUES, MAX_CACHE_MIB, validate_limits
 
 
 def parser() -> argparse.ArgumentParser:
@@ -17,6 +18,10 @@ def parser() -> argparse.ArgumentParser:
     app.add_argument("--profiles-dir", required=True)
     app.add_argument("--target", required=True)
     app.add_argument("--port", type=int, default=8501)
+    app.add_argument("--max-cache-issues", type=int, default=MAX_CACHE_ISSUES,
+                     help="Issue cache ceiling, configurable downward from 50000")
+    app.add_argument("--max-cache-mib", type=int, default=MAX_CACHE_MIB,
+                     help="Serialized issue cache ceiling, configurable downward from 128 MiB")
     app.add_argument(
         "--archive-cache-days",
         type=int,
@@ -66,6 +71,10 @@ def main() -> None:
         print(f"Purged workspace: {workspace_path}")
         return
     if args.command == "app":
+        try:
+            validate_limits(args.max_cache_issues, args.max_cache_mib)
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
         if args.archive_cache_days < 0:
             raise SystemExit("--archive-cache-days must be zero or a positive integer")
         if args.lock_timeout <= 0:
@@ -79,6 +88,8 @@ def main() -> None:
                 "STREAMLIT_BROWSER_GATHER_USAGE_STATS": "false",
                 "DBT_DQM_ARCHIVE_CACHE_DAYS": str(args.archive_cache_days),
                 "DBT_DQM_LOCK_TIMEOUT_SECONDS": str(args.lock_timeout),
+                "DBT_DQM_MAX_CACHE_ISSUES": str(args.max_cache_issues),
+                "DBT_DQM_MAX_CACHE_MIB": str(args.max_cache_mib),
             }
         )
         app_path = Path(__file__).with_name("streamlit_app.py")
