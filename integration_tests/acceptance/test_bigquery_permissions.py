@@ -70,7 +70,8 @@ def test_restricted_bigquery_runner_and_reviewer(tmp_path):
     (path / f"models/{fixture}_records.sql").write_text(
         "select * from {{ ref('" + fixture + "') }}"
     )
-    (path / f"tests/{fixture}.sql").write_text(
+    test_name = fixture + "_invalid"
+    (path / f"tests/{test_name}.sql").write_text(
         "{{ config(tags=['dqm'], store_failures=true, "
         "meta={'dbt_dqm': {'granularity': ['id']}}) }}\n"
         "select * from {{ ref('" + fixture + "_records') }} where value='invalid'"
@@ -106,14 +107,14 @@ def test_restricted_bigquery_runner_and_reviewer(tmp_path):
 
     dbt("seed", "--select", fixture)
     dbt("run", "--select", fixture + "_records")
-    dbt("test", "--select", fixture, test_failure=True)
+    dbt("test", "--select", test_name, test_failure=True)
     dbt("run", "--select", "package:dbt_dqm")
     dbt("test", "--select", "package:dbt_dqm", "--exclude", "assert_scenario_outcomes")
 
     config = replace(load_config(path, profiles, "qa"), credentials_file=Path(REVIEWER_FILE))
     snapshot = sync_worker(config)  # Includes reviewer-authenticated dbt debug/parse.
     rows = snapshot["issues"]
-    owned = [r for r in rows if r["test_unique_id"].endswith("." + fixture)]
+    owned = [r for r in rows if r["test_unique_id"].endswith("." + test_name)]
     assert len(owned) == 1
     row = owned[0]
     assert "tests" in snapshot["health"]

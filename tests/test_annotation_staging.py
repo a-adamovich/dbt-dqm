@@ -45,6 +45,9 @@ def test_retries_have_same_batch_and_independent_uploads(tmp_path, monkeypatch):
     payloads = [call.args[0][0] for call in fake.load_table_from_json.call_args_list]
     assert payloads[0]["upload_id"] != payloads[1]["upload_id"]
     assert all("staged_at" not in payload for payload in payloads)
+    assert all(call.kwargs["job_config"].create_disposition ==
+               bigquery.CreateDisposition.CREATE_NEVER
+               for call in fake.load_table_from_json.call_args_list)
     assert all(call.kwargs["job_id"].endswith(payload["upload_id"])
                for call, payload in zip(fake.load_table_from_json.call_args_list, payloads, strict=True))
     assert fake.query.call_count == 2  # No pre-transaction audit check.

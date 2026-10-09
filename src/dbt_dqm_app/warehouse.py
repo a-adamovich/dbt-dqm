@@ -307,6 +307,7 @@ def _apply_bigquery_patches(config: AppConfig, patches: Iterable[Patch]) -> str:
     # Omitting staged_at uses its CURRENT_TIMESTAMP() warehouse default. A load has its own
     # job ID; uncertain uploads remain isolated from every later attempt until cleanup.
     load_config = bigquery.LoadJobConfig(
+        create_disposition=bigquery.CreateDisposition.CREATE_NEVER,
         write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
         schema=[bigquery.SchemaField(name, kind) for name, kind in (
             ("batch_id", "STRING"), ("upload_id", "STRING"), ("occurrence_id", "STRING"),
