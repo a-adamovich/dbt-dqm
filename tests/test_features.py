@@ -28,6 +28,22 @@ def test_oauth_clients_use_explicit_independent_credentials(tmp_path, monkeypatc
     ]
 
 
+def test_reviewer_dbt_subprocess_credentials_do_not_change_global_adc(tmp_path, monkeypatch):
+    import os
+
+    from dbt_dqm_app import warehouse
+
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "unrelated-original-adc")
+    run = MagicMock()
+    monkeypatch.setattr(warehouse.subprocess, "run", run)
+    reviewer_file = tmp_path / "reviewer-adc.json"
+    warehouse.validate_dbt(replace(config(tmp_path, "bigquery"), credentials_file=reviewer_file))
+    assert run.call_count == 2
+    assert all(call.kwargs["env"]["GOOGLE_APPLICATION_CREDENTIALS"] == str(reviewer_file)
+               for call in run.call_args_list)
+    assert os.environ["GOOGLE_APPLICATION_CREDENTIALS"] == "unrelated-original-adc"
+
+
 def config(tmp_path, adapter="postgres"):
     return AppConfig(
         tmp_path, tmp_path, "dev", "demo", adapter, "database", "schema", "US", "oauth", None

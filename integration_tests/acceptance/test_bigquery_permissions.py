@@ -24,7 +24,7 @@ from google.cloud import bigquery
 
 from dbt_dqm_app.config import load_config
 from dbt_dqm_app.store import Patch
-from dbt_dqm_app.warehouse import apply_patches, fetch_health, fetch_issues, insert_missed_issue
+from dbt_dqm_app.warehouse import apply_patches, fetch_issues, insert_missed_issue, sync_worker
 
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT = "dbt-dqm"
@@ -95,23 +95,28 @@ def test_restricted_bigquery_runner_and_reviewer(tmp_path):
                        if r["unique_id"].startswith("test.")]
             assert len(results) == 1 and results[0]["status"] == "fail"
 
-    dbt("seed", "--select", fixture)
-    dbt("run", "--select", fixture + "_records")
-    dbt("test", "--select", fixture, test_failure=True)
+    # QA may still be at migration 0003. Upgrade before ordinary model runs invoke cleanup,
+    # and before any new reviewer client can upload annotation attempts.
     dbt("run", "--select", "package:dbt_dqm")
-    dbt("test", "--select", "package:dbt_dqm", "--exclude", "assert_scenario_outcomes")
     migrations = {r.id for r in runner.query(
         f"select migration_id as id from `{PROJECT}.{DATASET}.dqm_schema_migrations`"
     ).result()}
     assert "0003_app_change_staging" in migrations
     assert "0004_app_staging_safety" in migrations
 
+    dbt("seed", "--select", fixture)
+    dbt("run", "--select", fixture + "_records")
+    dbt("test", "--select", fixture, test_failure=True)
+    dbt("run", "--select", "package:dbt_dqm")
+    dbt("test", "--select", "package:dbt_dqm", "--exclude", "assert_scenario_outcomes")
+
     config = replace(load_config(path, profiles, "qa"), credentials_file=Path(REVIEWER_FILE))
-    rows = fetch_issues(config)
+    snapshot = sync_worker(config)  # Includes reviewer-authenticated dbt debug/parse.
+    rows = snapshot["issues"]
     owned = [r for r in rows if r["test_unique_id"].endswith("." + fixture)]
     assert len(owned) == 1
     row = owned[0]
-    assert "tests" in fetch_health(config)
+    assert "tests" in snapshot["health"]
     patches = [Patch(row["occurrence_id"], field, row.get(field), value, 1,
                      datetime.now(UTC).isoformat(), row["annotation_version"])
                for field, value in (("notes", "Permissions QA " + token),
