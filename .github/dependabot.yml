@@ -4,6 +4,19 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Deferred compatibility work: https://github.com/a-adamovich/dbt-dqm/issues/11
+    # Update-type exclusions preserve patch updates and security-update handling.
+    ignore:
+      - dependency-name: dbt-core
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: dbt-bigquery
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: dbt-postgres
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: pandas
+        update-types: ["version-update:semver-major"]
+      - dependency-name: pyarrow
+        update-types: ["version-update:semver-major"]
     groups:
       python-minor-patches:
         patterns: ["*"]
