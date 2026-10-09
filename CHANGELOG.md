@@ -10,7 +10,7 @@
 - Emits native BigQuery table/view grants without revoking unrelated access, and normalizes timestamp arithmetic for portable health and recovery filters.
 - Schema-only (`--empty`) runs require initialized current tables, leave tracking data unchanged, and keep the public views serving real data.
 - BigQuery adapter parity remains gated on credentialed lifecycle/concurrency tests.
-- Capture copies each stored-failure table once and rejects it as `collection_error` when its row count differs from dbt's `result.failures`, including passing tests, so an overwritten table never becomes lifecycle evidence.
+- Capture copies each stored-failure table once and rejects it as `collection_error` when its row count differs from dbt's `result.failures`, including passing tests. Equal counts do not prove provenance; captures sharing failure tables must remain serialized.
 - The review app verifies each sync before replacing its cache: setup must be ready, the control generation unchanged across the read, and the issue view's row count must match the tracking table. Inconsistent or unavailable data keeps the cache and pending edits; a verified empty result replaces it.
 - Postgres app connections use a lock timeout (`--lock-timeout`, default 5 seconds). Writes blocked by a running reconciliation, and BigQuery transaction conflicts, report the warehouse as busy without changing data. Sync and setup failures show a short message with technical details on request.
 - The app reads a Postgres profile's password from either `pass` or `password`, as dbt does.

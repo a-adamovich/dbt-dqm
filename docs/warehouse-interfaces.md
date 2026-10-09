@@ -135,8 +135,9 @@ fields. Editable-field restrictions are an application contract, not column-leve
 
 Migration `0004_app_staging_safety` adds `upload_id` and `staged_at` to BigQuery app staging.
 JSON uploads omit `staged_at`, which receives a warehouse `CURRENT_TIMESTAMP()` default. Legacy
-rows are timestamped once during migration and are never consumed by new app clients. Run the
-package migrations, then restart all reviewer apps; mixed old/new staging clients are unsupported.
+rows are timestamped once during migration and are never consumed by new app clients. Stop all
+reviewer apps, run the package migrations, then restart with the new client; mixed old/new staging
+clients are unsupported.
 
 The logical `batch_id` remains deterministic; each upload attempt has its own random ID. Apply
 checks the audit ledger inside the same transaction as edits and version increments. A completed
