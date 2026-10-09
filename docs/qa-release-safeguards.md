@@ -1,7 +1,9 @@
 # Permissions and release safeguards verification
 
 This branch is based on PR #9 at `0243792`. It remains unmerged, untagged and unpublished.
-The existing QA dataset and demo dataset have not been reset or changed by these checks.
+The existing QA and demo datasets have not been reset. The restricted gate upgraded QA to
+migration 0004 and left uniquely named synthetic fixtures, annotations and missed reports;
+existing history was preserved. The demo dataset was untouched.
 
 ## Delivered behavior
 
@@ -32,7 +34,7 @@ The existing QA dataset and demo dataset have not been reset or changed by these
 | Postgres 16.11 acceptance | 17 passed, 386.23 s |
 | BigQuery staging/migration/concurrent retry cases | 3 passed (812.82 s); 2 stronger populated/partial-audit reruns passed (547.93 s) |
 | Existing BigQuery lifecycle/concurrency suite | 14 passed, 4061.37 s (67 min 41 s) |
-| Restricted runner/reviewer gate | Blocked: separate local credentials unavailable |
+| Restricted runner/reviewer gate | Pass; 269.60 s, 2026-10-09, actual provisioned runner/reviewer |
 | Offline BigQuery compilation | Pass |
 | Wheel/source distribution build and wheel CLI check | Pass; artifacts not published |
 | GitHub CI for this branch | Not run; branch has not been pushed |
@@ -43,11 +45,18 @@ use isolated password-protected UTF-8 clusters and disposable schemas.
 
 These runs cover 17 distinct BigQuery cases, with the two stronger audit cases rerun after their
 assertions were expanded. The application and package code under test is the final safeguarded
-production code (`625dbc6`); subsequent commits only strengthen tests and documentation.
+production code (`625dbc6`). The later one-line upload fix at `63f5400` explicitly uses
+`CREATE_NEVER`; it passed the restricted gate, Ruff and all 85 unit/UI tests (8.90 s).
+The full disposable warehouse suites were not repeated after that upload configuration change.
 The permissions gate upgrades QA before ordinary model execution, then uses the reviewer's full
 sync entry point, including explicitly authenticated dbt debug/parse subprocesses. The separate
-live gate remains blocked on authentication: the available browser requires GCP sign-in and the
-restricted ADC files are not present locally. The development identity is never substituted.
+live gate now passes with separately supplied local service-account files. `SESSION_USER()`
+verified both identities; the development identity was never substituted. It proved runner
+seed/model execution, capture, reconciliation and migration, reviewer full sync and Health reads,
+audited notes/verdict updates, idempotent retries and missed reports, and denied reviewer writes
+to control/executions/receipts and denied table creation. Its first run exposed a seed/failure-table
+name collision; the next exposed the default upload create disposition requesting dataset-create
+rights. Both were corrected without broadening IAM, and the complete rerun passed.
 
 ## Reviewable commits
 
@@ -60,6 +69,8 @@ restricted ADC files are not present locally. The development identity is never 
 | `52d474f` | Full byte ceiling, retained pending budgets and populated/partial audit tests |
 | `3fa04b3` | Verification record, rollout guidance and capture-provenance clarification |
 | `9f570de` | Full reviewer sync credentials and correct QA upgrade order |
+| `c399236` | Final prior warehouse verification record |
+| `63f5400` | Restricted gate fixture naming and existing-table-only reviewer uploads |
 
 The final documentation commit records the completed checks above. Earlier commit messages
 describe the checks that were still pending when each chunk was saved; this record supersedes
@@ -88,9 +99,6 @@ The reproducible harness and raw measurement are linked from [scale.md](scale.md
 
 ## Remaining release gates and operating limits
 
-- Run the restricted gate with the two provisioned identities. Their Cloud Shell files are not
-  automatically available on the Mac. Supply separate local ADC paths; no private key needs to
-  be added to this repository.
 - Run GitHub CI on the review branch before merge or release approval. Earlier PR #9 results
   are not CI results for these changes.
 - Capture invocations sharing stored-failure tables remain serialized: equal counts do not
