@@ -1,5 +1,9 @@
 # Permissions and release safeguards verification
 
+> **Historical record (2026-10-09).** Preserved as written; statuses, gates and limitations below
+> may since have changed. The current release gates are in the
+> [release checklist](release-checklist.md).
+
 This branch is based on PR #9 at `0243792`, with safeguards review in
 [PR #10](https://github.com/a-adamovich/dbt-dqm/pull/10). It remains unmerged, untagged and unpublished.
 The existing QA and demo datasets have not been reset. The restricted gate upgraded QA to

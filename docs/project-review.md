@@ -1,7 +1,8 @@
 # Project review: findings and roadmap (2026-08-09)
 
 > **Historical review:** findings below are preserved as originally assessed and may now be fixed.
-> Use the [current roadmap](roadmap.md) for live status and remaining priorities.
+> Use the [current roadmap](roadmap.md) for live status and remaining priorities, and the
+> [release checklist](release-checklist.md) for release gates.
 
 A holistic review of dbt-dqm covering the dbt package (`models/`, `macros/`), the local review app
 (`src/dbt_dqm_app/`), and project meta (licensing, packaging, CI, repo hygiene). Findings are
