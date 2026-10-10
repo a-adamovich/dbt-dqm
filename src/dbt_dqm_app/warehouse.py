@@ -10,13 +10,14 @@ import uuid
 from collections.abc import Iterable
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-import google.auth
 import psycopg2
 from google.api_core.exceptions import Conflict, NotFound
 from google.cloud import bigquery
+from google.oauth2 import credentials as user_credentials
 from google.oauth2 import service_account
 from psycopg2.extras import RealDictCursor
 
@@ -25,8 +26,58 @@ from .errors import AppError, SnapshotUnavailable, classify
 from .limits import check_cache_size, issue_json
 from .store import EDITABLE_FIELDS, Patch
 
+BIGQUERY_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+UNREADABLE_CREDENTIALS = "The BigQuery credentials file can't be read as a JSON credentials file."
+UNSUPPORTED_CREDENTIALS = (
+    "The BigQuery credentials file must be a service-account key or authorized-user (gcloud) "
+    "credentials. For other credential types, use Application Default Credentials without a "
+    "credentials file override."
+)
+INCOMPLETE_CREDENTIALS = "The BigQuery credentials file is missing required fields for its type."
+
+
+def override_credentials(path: Path):
+    """Validated credentials for an explicit credentials-file override.
+
+    Only service-account keys and authorized-user (gcloud) files are accepted; generic loading
+    could accept credential configurations that run commands or call arbitrary endpoints. The file
+    is parsed once per version and the credentials are built from that parsed object. Errors are
+    fixed messages: they never contain file contents or loader exception text.
+    """
+    try:
+        stat = path.stat()
+    except OSError:
+        raise AppError(UNREADABLE_CREDENTIALS) from None
+    return _override_credentials(str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+
+
+@lru_cache(maxsize=8)
+def _override_credentials(path: str, mtime_ns: int, size: int):
+    try:
+        info = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        raise AppError(UNREADABLE_CREDENTIALS) from None
+    kind = info.get("type") if isinstance(info, dict) else None
+    if kind == "service_account":
+        factory = service_account.Credentials.from_service_account_info
+    elif kind == "authorized_user":
+        factory = user_credentials.Credentials.from_authorized_user_info
+    else:
+        raise AppError(UNSUPPORTED_CREDENTIALS)
+    try:
+        return factory(info, scopes=BIGQUERY_SCOPES)
+    except (ValueError, KeyError, TypeError):
+        raise AppError(INCOMPLETE_CREDENTIALS) from None
+
 
 def validate_dbt(config: AppConfig) -> None:
+    """Validate the credentials override first, then run dbt debug and parse with it.
+
+    dbt rereads the override path itself, so that file must stay under the user's control for the
+    whole operation.
+    """
+    if config.credentials_file is not None:
+        override_credentials(config.credentials_file)
     environment_dbt = str(Path(sys.executable).with_name("dbt"))
     dbt_executable = environment_dbt if Path(environment_dbt).exists() else "dbt"
     base = [
@@ -58,9 +109,7 @@ def client_for(config: AppConfig) -> bigquery.Client:
         )
     if config.method == "oauth":
         if config.credentials_file is not None:
-            credentials, _ = google.auth.load_credentials_from_file(
-                str(config.credentials_file), scopes=["https://www.googleapis.com/auth/cloud-platform"]
-            )
+            credentials = override_credentials(config.credentials_file)
             return bigquery.Client(
                 project=config.project_id, credentials=credentials, location=config.location
             )

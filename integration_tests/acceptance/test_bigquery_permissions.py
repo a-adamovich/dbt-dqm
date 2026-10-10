@@ -16,11 +16,11 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-import google.auth
 import pytest
 import yaml
 from google.api_core.exceptions import Forbidden
 from google.cloud import bigquery
+from google.oauth2 import service_account
 
 from dbt_dqm_app.config import load_config
 from dbt_dqm_app.store import Patch
@@ -39,7 +39,8 @@ pytestmark = pytest.mark.skipif(
 
 
 def _client(path):
-    credentials, _ = google.auth.load_credentials_from_file(
+    # The gate's runner and reviewer identities are service accounts, so load only that type.
+    credentials = service_account.Credentials.from_service_account_file(
         path, scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
     return bigquery.Client(project=PROJECT, credentials=credentials, location="US")
