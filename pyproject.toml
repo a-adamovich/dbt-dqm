@@ -23,7 +23,7 @@ dependencies = [
   "google-cloud-bigquery>=3.25,<4",
   "pandas>=2.2,<3",
   "platformdirs>=4,<5",
-  "pyarrow>=17,<20",
+  "pyarrow>=23.0.1,<24",
   "pyyaml>=6,<7",
   "streamlit>=1.41,<2",
 ]
