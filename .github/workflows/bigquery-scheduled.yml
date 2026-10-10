@@ -1,5 +1,8 @@
 name: Scheduled BigQuery lifecycle
 
+# Weekly credentialed BigQuery verification. Keyless: GitHub's OIDC token is exchanged through
+# Workload Identity Federation for a short-lived token of a dedicated CI service account, so no
+# long-lived key is stored. Inert until the repository variables below are set.
 on:
   workflow_dispatch:
   schedule:
@@ -7,53 +10,63 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  issues: write
 
 jobs:
   lifecycle:
     concurrency:
       group: dbt-dqm-${{ vars.DBT_DQM_BIGQUERY_PROJECT }}-dbt_dqm_scheduled_ci
       cancel-in-progress: false
-    if: vars.BIGQUERY_LIFECYCLE_ENABLED == 'true'
+    if: vars.BIGQUERY_LIFECYCLE_ENABLED == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     env:
       DBT_DQM_BIGQUERY_PROJECT: ${{ vars.DBT_DQM_BIGQUERY_PROJECT }}
       DBT_DQM_BIGQUERY_TEST_PROJECT: ${{ vars.DBT_DQM_BIGQUERY_PROJECT }}
-      GOOGLE_APPLICATION_CREDENTIALS: /tmp/dbt-dqm-ci-key.json
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: uv sync --all-groups
-      - name: Write credentialed profile
-        env:
-          DBT_DQM_BIGQUERY_KEYFILE_JSON: ${{ secrets.DBT_DQM_BIGQUERY_KEYFILE_JSON }}
-          DBT_DQM_BIGQUERY_PROJECT: ${{ vars.DBT_DQM_BIGQUERY_PROJECT }}
+        run: uv sync --locked --all-groups
+      - name: Write profile (Application Default Credentials from the step above)
         run: |
           mkdir -p ~/.dbt
-          python - <<'PYKEY'
-          import os
-          from pathlib import Path
-          path = Path('/tmp/dbt-dqm-ci-key.json')
-          path.write_text(os.environ['DBT_DQM_BIGQUERY_KEYFILE_JSON'])
-          path.chmod(0o600)
-          PYKEY
           cat > ~/.dbt/profiles.yml <<'PROFILES'
           dbt_dqm_demo:
             target: ci
             outputs:
               ci:
                 type: bigquery
-                method: service-account
+                method: oauth
                 project: "{{ env_var('DBT_DQM_BIGQUERY_PROJECT') }}"
                 dataset: dbt_dqm_scheduled_ci
                 location: US
-                keyfile: /tmp/dbt-dqm-ci-key.json
                 threads: 4
           PROFILES
-      - name: Full credentialed lifecycle
+      - name: The CI identity cannot read the shared QA dataset
+        run: |
+          uv run python - <<'PY'
+          import os
+          from google.api_core.exceptions import Forbidden, NotFound
+          from google.cloud import bigquery
+          project = os.environ["DBT_DQM_BIGQUERY_PROJECT"]
+          try:
+              bigquery.Client(project=project).query(
+                  f"select 1 from `{project}.dbt_dqm_qa.dqm_install` limit 1").result()
+          except (Forbidden, NotFound):
+              print("As expected, the CI service account has no access to dbt_dqm_qa.")
+          else:
+              raise SystemExit("The CI service account can read dbt_dqm_qa; narrow its roles.")
+          PY
+      - name: Full credentialed lifecycle (dedicated dataset)
         working-directory: integration_tests/demo_bigquery
         run: |
           set -e
@@ -67,6 +80,34 @@ jobs:
             uv run dbt build --select package:dbt_dqm --vars "{demo_scenario: $scenario}"
             uv run dbt test --select assert_scenario_outcomes --vars "{demo_scenario: $scenario}"
           done
-
-      - name: Credentialed transactional release gate
-        run: uv run pytest -q integration_tests/acceptance/test_bigquery.py
+      - name: Credentialed acceptance suite (parallel, disposable datasets)
+        shell: bash
+        run: |
+          mkdir -p acceptance-results
+          set -o pipefail
+          uv run pytest -q -rA -n 6 --dist load integration_tests/acceptance/test_bigquery.py \
+            --junitxml=acceptance-results/bigquery.xml 2>&1 | tee acceptance-results/bigquery.log
+      - name: Sweep stale acceptance datasets
+        if: always()
+        run: uv run python integration_tests/acceptance/bigquery_datasets.py --project "$DBT_DQM_BIGQUERY_PROJECT" --older-than-hours 6
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scheduled-bigquery-results
+          path: acceptance-results/
+          if-no-files-found: ignore
+      - name: Report failure in an issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create scheduled-bigquery --color B60205 --description "Scheduled BigQuery verification" 2>/dev/null || true
+          existing="$(gh issue list --label scheduled-bigquery --state open --json number --jq '.[0].number')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Scheduled BigQuery verification failed again: $RUN_URL"
+          else
+            gh issue create --label scheduled-bigquery --title "Scheduled BigQuery verification failed" \
+              --body "The weekly credentialed BigQuery run failed on \`main\`: $RUN_URL"
+          fi
