@@ -79,50 +79,36 @@ begin{% if target.type=='bigquery' %} transaction{% endif %};
   {% set days=retention_days if retention_days is not none else dbt_dqm.positive_integer_var('dbt_dqm_retention_days',none) %}
   {% if days is not none and (days is boolean or days is not number or days|int!=days or days<=0) %}{{ exceptions.raise_compiler_error('retention_days must be a positive integer.') }}{% endif %}
   {% set events_days=dbt_dqm.positive_integer_var('dbt_dqm_event_retention_days',none) %}
-  {% set sql %}{{ dbt_dqm.recovery_begin() }}
-    {% if days is not none %}
-      update {{ dbt_dqm.dqm_relation('dqm_reconciliation_control') }} set raw_pruned_before=case when raw_pruned_before > {{ dbt_dqm.timestamp_add('day',-days,dbt.current_timestamp()) }} then raw_pruned_before else {{ dbt_dqm.timestamp_add('day',-days,dbt.current_timestamp()) }} end,generation=generation+1 where true;
-      {% set eligible %}select execution.test_unique_id,execution.invocation_id
-      from {{ dbt_dqm.dqm_relation('dqm_test_executions') }} execution
-      inner join {{ dbt_dqm.dqm_relation('dqm_reconciliation_receipts') }} receipt using(test_unique_id,invocation_id)
-      where execution.captured_at < {{ dbt_dqm.timestamp_add('day',-days,dbt.current_timestamp()) }}
-      and not exists(select 1 from {{ dbt_dqm.dqm_relation('dqm_reconciliation_inputs') }} input
-        inner join {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }} run using(run_id)
-        where run.status='started' and input.test_unique_id=execution.test_unique_id and input.invocation_id=execution.invocation_id)
-      {% endset %}
-      {% if target.type=='postgres' %}create temporary table dqm_prune on commit drop as {{ eligible }};
-      {% else %}create temp table dqm_prune as {{ eligible }};{% endif %}
-      {% for name in ['dqm_issue_observations','dqm_reconciliation_receipts','dqm_test_executions'] %}
-        delete from {{ dbt_dqm.dqm_relation(name) }} target where exists(select 1 from dqm_prune prune
-          where prune.test_unique_id=target.test_unique_id and prune.invocation_id=target.invocation_id);
-      {% endfor %}
+  {{ return(dbt_dqm.maintenance_sql(days, events_days)) }}
+{% endmacro %}
+
+{#- Explicit cleanup still reports failure: steps are protected (so one failure doesn't stop the
+    others), then this invocation's outcomes are checked and any failed step is raised. #}
+{% macro cleanup_dqm_logs(retention_days=none) %}
+  {% if execute and not dbt_dqm.empty_mode() %}
+    {% do run_query(dbt_dqm.cleanup_dqm_logs_sql(retention_days)) %}
+    {% set failed = run_query('select step, diagnostic_id from ' ~ dbt_dqm.dqm_relation('dqm_maintenance_log')
+      ~ ' where invocation_id=' ~ dbt_dqm.sql_string(invocation_id) ~ " and outcome='failed' order by step") %}
+    {% if failed.rows | length > 0 %}
+      {% set details = [] %}
+      {% for row in failed.rows %}{% do details.append(row[0] ~ ' (diagnostic ' ~ (row[1] or 'n/a') ~ ')') %}{% endfor %}
+      {{ exceptions.raise_compiler_error('DQM maintenance steps failed: ' ~ details | join(', ') ~ '. See dqm_maintenance_log.') }}
     {% endif %}
-    {% if events_days is not none %}delete from {{ dbt_dqm.dqm_relation('dqm_issue_events') }} where event_at < {{ dbt_dqm.timestamp_add('day',-events_days,dbt.current_timestamp()) }};{% endif %}
-    {% if target.type=='bigquery' %}
-      delete from {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} where staged_at <= timestamp_sub(current_timestamp(), interval 24 hour);
-    {% endif %}
-    {{ dbt_dqm.recovery_commit() }}
-  {% endset %}
-  {{ sql }}
-  {{ dbt_dqm.cleanup_stages_sql() }}
-  {% if days is not none %}
-    {% set prune_runs %}
-      {{ dbt_dqm.recovery_begin() }}
-      delete from {{ dbt_dqm.dqm_relation('dqm_reconciliation_inputs') }} input where exists(select 1 from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }} run
-        where run.run_id=input.run_id and run.status!='started' and run.completed_at < {{ dbt_dqm.timestamp_add('day',-days,dbt.current_timestamp()) }});
-      delete from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }} where status!='started' and completed_at < {{ dbt_dqm.timestamp_add('day',-days,dbt.current_timestamp()) }};
-      {{ dbt_dqm.recovery_commit() }}
-    {% endset %}{{ prune_runs }}
   {% endif %}
 {% endmacro %}
 
-{% macro cleanup_dqm_logs(retention_days=none) %}
-  {% if execute and not dbt_dqm.empty_mode() %}{% do run_query(dbt_dqm.cleanup_dqm_logs_sql(retention_days)) %}{% endif %}
-{% endmacro %}
-{% macro retention_hook() %}
+{#- Optional maintenance after run/build/test. It runs only when the invocation executed dbt-dqm
+    models or tracked tests, so unrelated runs never touch DQM tables, and it can't fail the
+    invocation (see macros/maintenance.sql). #}
+{% macro retention_hook(results=none) %}
   {% if not execute or dbt_dqm.empty_mode() or flags.WHICH not in ['run','build','test'] %}{{ return('') }}{% endif %}
   {% if target.type!='bigquery' and var('dbt_dqm_retention_days',none) is none and var('dbt_dqm_event_retention_days',none) is none %}{{ return('') }}{% endif %}
-  {% set relation=dbt_dqm.dqm_relation('dqm_reconciliation_control') %}
+  {% set touched = [] %}
+  {% for result in (results or []) %}
+    {% if result.node.package_name == 'dbt_dqm' or dbt_dqm.tracked_test(result.node) %}{% do touched.append(result.node.unique_id) %}{% endif %}
+  {% endfor %}
+  {% if touched | length == 0 %}{{ return('') }}{% endif %}
+  {% set relation=dbt_dqm.dqm_relation('dqm_maintenance_log') %}
   {% if adapter.get_relation(database=relation.database,schema=relation.schema,identifier=relation.identifier) is not none %}
     {{ dbt_dqm.cleanup_dqm_logs_sql() }}
   {% endif %}

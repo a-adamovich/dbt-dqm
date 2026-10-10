@@ -4,6 +4,7 @@
 
 - Requires PyArrow 23.x (`>=23.0.1,<24`). Sync memory at the 50,000-issue boundary is unchanged within run-to-run variation (`docs/scale.md`).
 - Postgres reconciliation replaces the `dqm_reconcile` view in place after taking its lock (`dqm_entry_view` materialization), so overlapping runs no longer act on each other's temporary relations (#17).
+- Optional maintenance (retention, staging expiry, stage drops) runs only after invocations that executed dbt-dqm work, never fails a dbt invocation, records sanitized outcomes in `dqm_maintenance_log` (migration `0005`), and is visible as `ok`/`failing`/`unknown` in `dqm_maintenance_health` and the app's Health tab (#13).
 - Requires a fresh DQM schema; 0.1 history is preserved in its original schema and is not migrated. Later upgrades use verified additive migrations.
 - Replaces checkpoint replay and whole-row merges with frozen inputs, transactional lifecycle-only apply, receipts and generation fencing. Reviewer annotations and versions are preserved; closure workflow is captured atomically.
 - Adds row owners, conflict warnings, priority/criticality, visible tags, independent review verdicts, recurrence context, timeline and durable payload-change events.

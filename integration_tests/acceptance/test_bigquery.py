@@ -691,7 +691,7 @@ def test_bigquery_0002_upgrades_populated_schema_after_interruption(demo):
     assert demo.sql("select 1 from @dataset.dqm_app_change_staging` limit 0") == []
     control = demo.sql("select * from @dataset.dqm_reconciliation_control`")[0]
     assert control["setup_status"] == "ready" and control["migration_owner"] is None
-    assert control["schema_version"] == "0004_app_staging_safety"
+    assert control["schema_version"] == "0005_maintenance_log"
 
 
 def test_bigquery_0004_preserves_history_and_bounds_legacy_staging(demo):
@@ -820,3 +820,115 @@ def test_bigquery_annotation_concurrent_retries_and_independent_batches(demo):
     assert len(audit) == 2
     # Failed transaction attempts are retained; successful attempts clean only themselves.
     assert len(demo.sql("select * from @dataset.dqm_app_change_staging`")) <= 2
+
+
+def _bq_health(demo):
+    return {
+        row["step"]: row
+        for row in demo.sql("select * from @dataset.dqm_maintenance_health` order by step")
+    }
+
+
+def test_bigquery_maintenance_failures_are_logged_safely_and_never_fail_the_invocation(demo):
+    demo.capture("initial")
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    assert {row["step"] for row in demo.sql("select * from @dataset.dqm_maintenance_log`")} >= {
+        "staging_expiry",
+        "stage_drops",
+        "log_pruning",
+    }
+
+    marker = "dqm-secret-" + uuid.uuid4().hex
+    demo.capture("initial", fail_step="staging_expiry", fail_marker=marker)
+    rows = demo.sql("select * from @dataset.dqm_maintenance_log`")
+    failed = [row for row in rows if row["outcome"] == "failed"]
+    assert [row["step"] for row in failed] == ["staging_expiry"]
+    assert failed[0]["description"] == "staging expiry failed"
+    assert failed[0]["diagnostic_id"]  # the script job ID, never the error text
+    assert all(marker not in json.dumps(row, default=str) for row in rows)
+    assert _bq_health(demo)["staging_expiry"]["state"] == "failing"
+
+    demo.capture("initial")
+    assert _bq_health(demo)["staging_expiry"]["state"] == "ok"
+
+    # A failing transactional step is rolled back as a whole.
+    retention = {"dbt_dqm_retention_days": 1}
+    demo.sql(
+        "update @dataset.dqm_test_executions` set captured_at=timestamp_sub(captured_at, interval 400 day) "
+        "where invocation_id in (select invocation_id from @dataset.dqm_reconciliation_receipts`)"
+    )
+    receipts = demo.sql("select count(*) n from @dataset.dqm_reconciliation_receipts`")[0]["n"]
+    control = demo.sql("select raw_pruned_before from @dataset.dqm_reconciliation_control`")
+    demo.capture("initial", fail_step="raw_pruning", **retention)
+    assert (
+        demo.sql("select count(*) n from @dataset.dqm_reconciliation_receipts`")[0]["n"] == receipts
+    )
+    assert demo.sql("select raw_pruned_before from @dataset.dqm_reconciliation_control`") == control
+
+    demo.capture("initial", fail_step="log_pruning")
+    newest = demo.sql(
+        "select step, outcome from @dataset.dqm_maintenance_log` where invocation_id=("
+        "select invocation_id from @dataset.dqm_maintenance_log` order by logged_at desc limit 1)"
+    )
+    assert {row["step"] for row in newest} >= {"staging_expiry", "stage_drops", "log_pruning"}
+    assert {row["outcome"] for row in newest if row["step"] == "log_pruning"} == {"failed"}
+
+    demo.capture("initial", fail_log=True)
+    assert {row["state"] for row in _bq_health(demo).values()} == {"unknown"}
+
+    # Unrelated runs perform no maintenance; reconciliation failures still fail the run.
+    logged = len(demo.sql("select * from @dataset.dqm_maintenance_log`"))
+    demo.dbt("run", "--select", "demo_records")
+    assert len(demo.sql("select * from @dataset.dqm_maintenance_log`")) == logged
+
+
+def test_bigquery_reviewer_apply_during_maintenance_never_fails_dbt(demo):
+    import threading
+
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.errors import WarehouseBusy, classify
+    from dbt_dqm_app.store import Patch
+    from dbt_dqm_app.warehouse import apply_patches
+
+    demo.capture("initial")
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    config = load_config(demo.path, demo.profiles, "dev")
+    target = demo.snapshot()[0]["occurrence_id"]
+    done = threading.Event()
+    outcomes = []
+
+    def keep_applying():
+        attempt = 0
+        while not done.is_set():
+            row = demo.sql(
+                "select notes, annotation_version from @dataset.dqm_issue_occurrences` "
+                f"where occurrence_id='{target}'"
+            )[0]
+            patch = Patch(
+                target,
+                "notes",
+                row["notes"],
+                f"overlap edit {attempt}",
+                1,
+                datetime.now(UTC).isoformat(),
+                row["annotation_version"],
+            )
+            try:
+                apply_patches(config, [patch])
+                outcomes.append("applied")
+            except Exception as error:  # noqa: BLE001 - only "busy" is an acceptable failure
+                failure = classify(error)
+                outcomes.append("busy" if isinstance(failure, WarehouseBusy) else repr(error))
+            attempt += 1
+
+    with ThreadPoolExecutor(1) as pool:
+        reviewer = pool.submit(keep_applying)
+        try:
+            # Capture plus the maintenance hook run while the reviewer keeps applying edits;
+            # the dbt invocation must succeed regardless.
+            demo.capture("initial")
+        finally:
+            done.set()
+            reviewer.result()
+    assert outcomes, "the reviewer never applied an edit during the run"
+    assert set(outcomes) <= {"applied", "busy"}, outcomes

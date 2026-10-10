@@ -18,6 +18,7 @@ from dbt_dqm_app.display import (
     calendar_date,
     column_value_pairs,
     format_timestamp,
+    maintenance_table,
     owner_editor_options,
     owner_label,
     owner_value_from_selection,
@@ -635,6 +636,18 @@ def _render_health(workspace) -> None:
     st.caption(
         "Area totals overlap: a test belongs to each direct model/source dependency. Known misses are reported observations, not a false-negative rate."
     )
+    st.subheader("Maintenance")
+    maintenance = maintenance_table(health.get("maintenance"))
+    if maintenance is None:
+        st.info("Maintenance health needs the current package. Build package:dbt_dqm, then sync.")
+    elif not maintenance:
+        st.info("No optional maintenance is configured for this warehouse.")
+    else:
+        st.dataframe(pd.DataFrame(maintenance), hide_index=True)
+        st.caption(
+            "Maintenance never fails a dbt run. Failed steps are retried automatically; look up "
+            "a diagnostic id in BigQuery job history or as a Postgres SQLSTATE code."
+        )
 
 
 def _render_missed_form(config) -> None:

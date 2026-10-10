@@ -531,6 +531,14 @@ def fetch_health(config: AppConfig) -> dict[str, Any]:
     health: dict[str, Any] = {"synced_at": datetime.now(UTC).isoformat()}
     for kind, table in (("tests", "dqm_test_health"), ("areas", "dqm_area_health")):
         health[kind] = _query_rows(config, f"select * from {_table(config, table)}")
+    # Maintenance health arrives with migration 0005. A reviewer app that is newer than the
+    # deployed package reports it as unavailable instead of failing the whole sync.
+    try:
+        health["maintenance"] = _query_rows(
+            config, f"select * from {_table(config, 'dqm_maintenance_health')} order by step"
+        )
+    except (NotFound, psycopg2.errors.UndefinedTable):
+        health["maintenance"] = None
     return health
 
 

@@ -11,6 +11,7 @@
   {% endif %}
 
   {% set statement %}
+    drop view if exists `{{ target.database }}.{{ target.schema }}.dqm_maintenance_health`;
     drop view if exists `{{ target.database }}.{{ target.schema }}.dqm_area_health`;
     drop view if exists `{{ target.database }}.{{ target.schema }}.dqm_test_health`;
     drop view if exists `{{ target.database }}.{{ target.schema }}.dqm_issue_timeline`;
@@ -31,6 +32,7 @@
     drop table if exists `{{ target.database }}.{{ target.schema }}.dqm_reconciliation_state`;
     drop table if exists `{{ target.database }}.{{ target.schema }}.dqm_schema_migrations`;
     drop table if exists `{{ target.database }}.{{ target.schema }}.dqm_app_change_staging`;
+    drop table if exists `{{ target.database }}.{{ target.schema }}.dqm_maintenance_log`;
     drop table if exists `{{ target.database }}.{{ target.schema }}.demo_customer_email_invalid`;
     drop table if exists `{{ target.database }}.{{ target.schema }}.demo_order_amount_invalid`;
     drop table if exists `{{ target.database }}.{{ target.schema }}.demo_order_line_invalid`;

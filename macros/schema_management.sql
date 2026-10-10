@@ -21,7 +21,8 @@
     {'id': '0001_initial', 'description': 'Fresh 0.2 schema', 'apply': 'initial_schema_apply', 'verify': 'initial_schema_verify'},
     {'id': '0002_event_payload_mode', 'description': 'Event payload mode, changed columns and digests', 'apply': 'event_payload_mode_apply', 'backfill': 'event_payload_mode_backfill', 'verify': 'event_payload_mode_verify'},
     {'id': '0003_app_change_staging', 'description': 'Package-owned staging table for BigQuery app edits', 'apply': 'app_change_staging_apply', 'verify': 'app_change_staging_verify'},
-    {'id': '0004_app_staging_safety', 'description': 'Isolated app uploads with bounded lifetime', 'apply': 'app_staging_safety_apply', 'backfill': 'app_staging_safety_backfill', 'verify': 'app_staging_safety_verify'}
+    {'id': '0004_app_staging_safety', 'description': 'Isolated app uploads with bounded lifetime', 'apply': 'app_staging_safety_apply', 'backfill': 'app_staging_safety_backfill', 'verify': 'app_staging_safety_verify'},
+    {'id': '0005_maintenance_log', 'description': 'Outcome log for optional maintenance', 'apply': 'maintenance_log_apply', 'verify': 'maintenance_log_verify'}
   ]) }}
 {% endmacro %}
 
@@ -107,6 +108,23 @@
     {{ dbt_dqm.assert_sql('not exists(select 1 from ' ~ dbt_dqm.dqm_relation('dqm_app_change_staging') ~ ' where staged_at is null)',
       "'App staging timestamp backfill is incomplete. Rerun setup.'") }}
   {% endif %}
+{% endmacro %}
+
+{#- 0005: append-only outcomes of optional maintenance (macros/maintenance.sql). Not part of
+    table_schemas(), so fresh installs get it here too. No warehouse error text is stored. #}
+{% macro default__maintenance_log_apply() %}
+  create table if not exists {{ dbt_dqm.dqm_relation('dqm_maintenance_log') }} (
+    logged_at {{ dbt.type_timestamp() }} not null,
+    invocation_id {{ dbt.type_string() }} not null,
+    step {{ dbt.type_string() }} not null,
+    outcome {{ dbt.type_string() }} not null,
+    description {{ dbt.type_string() }},
+    diagnostic_id {{ dbt.type_string() }}
+  );
+{% endmacro %}
+{% macro default__maintenance_log_verify() %}
+  {{ dbt_dqm.assert_sql(dbt_dqm.table_exists_sql('dqm_maintenance_log'),
+    dbt_dqm.sql_string('dqm_maintenance_log is missing. Rerun setup with the current package.')) }}
 {% endmacro %}
 
 {#- Event payload retention: full before/after values (default), only changed column names plus
@@ -235,7 +253,7 @@
       The control and app staging tables are created by setup rather than table_schemas(), but
       the review app reads control to verify syncs and writes staging rows, so they're grantable. #}
   {% for name, table_grant in (var('dbt_dqm_table_grants', {}).items() if grants else []) %}
-    {% if name not in dbt_dqm.table_schemas() and name not in ['dqm_reconciliation_control', 'dqm_app_change_staging'] %}
+    {% if name not in dbt_dqm.table_schemas() and name not in ['dqm_reconciliation_control', 'dqm_app_change_staging', 'dqm_maintenance_log'] %}
       {{ exceptions.raise_compiler_error('Unknown DQM grant table: ' ~ name) }}
     {% endif %}
     {% if name not in ['dqm_annotation_changes','dqm_missed_issues'] %}{{ dbt_dqm.table_grants_sql(name, table_grant) }}{% endif %}
