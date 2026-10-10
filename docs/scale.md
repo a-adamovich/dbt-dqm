@@ -9,8 +9,8 @@ The figures to use today; everything below is the method and the dated measureme
   435–585 MiB** on 2026-10-10, where the single 420.8 MiB figure from 2026-10-09 sits at the low
   end. A running Streamlit server adds its own baseline. See
   [Repeated memory measurements](#repeated-memory-measurements-across-revisions-2026-10-10).
-  With PyArrow 23, about half the runs reach the top of that range, likely because of its default
-  allocator.
+  Many runs reach the top of that range whichever PyArrow memory pool is used; the cause is not
+  identified ([allocator A/B](#allocator-ab-2026-10-10)).
 - **Postgres reconciliation at 1M occurrences:** about 2.4 s steady and 19 s for a 100k mass pass;
   the occurrence lock is held for that time. See [Reconciliation](#reconciliation).
 - **BigQuery reconciliation at 1M occurrences:** about 1.5 GB processed steady and 1.8 GB for a
@@ -186,12 +186,26 @@ What this shows, and what it doesn't:
 - **PyArrow 23 is the one interval with a pattern.** About half its runs land at 450–474 MiB, like
   PyArrow 19, and half at 531–583 MiB, a level only one PyArrow 19 run reached (Mann-Whitney
   U = 84/121, about p ≈ 0.12, so not statistically settled).
-- **The likely mechanism is PyArrow's default allocator** (mimalloc on this platform). With the system
-  pool forced, the high cluster didn't appear in six runs. That is suggestive, not proof.
+- *Superseded:* six runs with the system pool suggested the default allocator (mimalloc) caused the
+  high cluster. The larger A/B below does not support that.
 - The cache ceilings are unchanged: they bound serialized data, not RSS. Plan for about 435–585 MiB
-  at the 50,000-issue boundary. Switching the app to the system allocator is a candidate follow-up.
+  at the 50,000-issue boundary.
 
 Raw results: [`memory-interval-2026-10-10.json`](scale-results/memory-interval-2026-10-10.json).
+
+### Allocator A/B (2026-10-10)
+
+PyArrow 23.0.1, same harness and Postgres 16.11, 12 rounds alternating which pool ran first:
+
+| PyArrow memory pool | Runs | Peak RSS median | Mean | Runs at or above 520 MiB |
+| --- | ---: | ---: | ---: | ---: |
+| default (mimalloc) | 12 | 575 MiB | 536 MiB | 8 |
+| system (`ARROW_DEFAULT_MEMORY_POOL=system`) | 12 | 563 MiB | 536 MiB | 8 |
+
+No difference (Mann-Whitney z = 0.72). The high cluster is not caused by the allocator, so the app
+keeps PyArrow's default pool. Both pools show the same two levels (about 450–470 and 560–580 MiB);
+what selects between them is not identified. Raw results:
+[`allocator-ab-2026-10-10.json`](scale-results/allocator-ab-2026-10-10.json).
 
 ```bash
 DBT_DQM_TEST_DSN='host=... port=... dbname=... user=... password=...' \

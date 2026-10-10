@@ -39,7 +39,8 @@ assessment and intentionally keeps its original findings.
 - Enable the scheduled credentialed BigQuery workflow (`bigquery-scheduled.yml`) against dedicated
   test resources; it exists but is not yet provisioned.
 - Validate dbt 1.12 and pandas 3 as separate compatibility upgrades (#11).
-- Investigate the app's sync memory above the 2026-10-09 baseline (see [scale](scale.md)).
+- Identify what puts the app's sync peak at about 560–580 MiB in many runs (independent of the
+  PyArrow memory pool; see [scale](scale.md)).
 - Publish relation/column stability guarantees and remove the deprecated `test_status` alias only
   in a clearly announced release.
 
