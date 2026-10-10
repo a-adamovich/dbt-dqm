@@ -22,7 +22,8 @@
     {'id': '0002_event_payload_mode', 'description': 'Event payload mode, changed columns and digests', 'apply': 'event_payload_mode_apply', 'backfill': 'event_payload_mode_backfill', 'verify': 'event_payload_mode_verify'},
     {'id': '0003_app_change_staging', 'description': 'Package-owned staging table for BigQuery app edits', 'apply': 'app_change_staging_apply', 'verify': 'app_change_staging_verify'},
     {'id': '0004_app_staging_safety', 'description': 'Isolated app uploads with bounded lifetime', 'apply': 'app_staging_safety_apply', 'backfill': 'app_staging_safety_backfill', 'verify': 'app_staging_safety_verify'},
-    {'id': '0005_maintenance_log', 'description': 'Outcome log for optional maintenance', 'apply': 'maintenance_log_apply', 'verify': 'maintenance_log_verify'}
+    {'id': '0005_maintenance_log', 'description': 'Outcome log for optional maintenance', 'apply': 'maintenance_log_apply', 'verify': 'maintenance_log_verify'},
+    {'id': '0006_maintenance_attribution', 'description': 'Trigger attribution for maintenance outcomes', 'apply': 'maintenance_attribution_apply', 'verify': 'maintenance_attribution_verify'}
   ]) }}
 {% endmacro %}
 
@@ -125,6 +126,23 @@
 {% macro default__maintenance_log_verify() %}
   {{ dbt_dqm.assert_sql(dbt_dqm.table_exists_sql('dqm_maintenance_log'),
     dbt_dqm.sql_string('dqm_maintenance_log is missing. Rerun setup with the current package.')) }}
+{% endmacro %}
+
+{#- 0006: additive attribution for maintenance outcomes. Each row records the trigger marker of
+    the invocation that ran maintenance (read once before any step) and whether it ran
+    automatically or manually, so dqm_maintenance_health can order outcomes after raw history is
+    pruned. Existing rows keep null attribution and are assessed conservatively. #}
+{% macro default__maintenance_attribution_apply() %}
+  alter table {{ dbt_dqm.dqm_relation('dqm_maintenance_log') }} add column if not exists trigger_marker_at {{ dbt.type_timestamp() }};
+  alter table {{ dbt_dqm.dqm_relation('dqm_maintenance_log') }} add column if not exists trigger_kind {{ dbt.type_string() }};
+{% endmacro %}
+{% macro default__maintenance_attribution_verify() %}
+  {% set timestamp_types = "('timestamp','timestamp without time zone')" %}
+  {% set string_types = "('string','character varying','text')" %}
+  {{ dbt_dqm.assert_sql('(select count(*) from ' ~ dbt_dqm.columns_catalog() ~ ' where table_schema=' ~ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_maintenance_log').schema)
+      ~ " and table_name='dqm_maintenance_log' and ((lower(column_name)='trigger_marker_at' and lower(data_type) in " ~ timestamp_types
+      ~ ") or (lower(column_name)='trigger_kind' and lower(data_type) in " ~ string_types ~ '))) = 2',
+    dbt_dqm.sql_string('Maintenance attribution columns are missing or have the wrong type. Rerun setup with the current package.')) }}
 {% endmacro %}
 
 {#- Event payload retention: full before/after values (default), only changed column names plus

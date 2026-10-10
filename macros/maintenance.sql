@@ -2,15 +2,24 @@
   Optional maintenance (#13): raw-log pruning, event retention, BigQuery staging expiry and stage
   drops, run-ledger pruning and maintenance-log pruning.
 
-  None of it may fail an otherwise successful dbt invocation. Each step runs in its own protected
-  block, rolls back its own transaction on error, and records its outcome in
-  dqm_maintenance_log through a separately protected insert. A step that fails is retried the
-  next time maintenance runs. Capture, reconciliation, migrations and setup are not wrapped:
-  their failures stay visible.
+  Guarantee: a SQL error inside a maintenance step never fails an otherwise successful dbt
+  invocation. The failing step rolls back its own work, its outcome is logged, and it's retried
+  the next time maintenance runs. This doesn't cover connection loss, cancellation, compilation
+  or quota errors, or failing to acquire the Postgres advisory lock. Capture, reconciliation,
+  migrations and setup are never wrapped: their failures stay visible.
+
+  Execution (maintenance_run):
+    - BigQuery: one job reads this invocation's trigger marker; then each step is its own job
+      that ends by selecting its outcome and job ID, and a separate protected job logs that
+      outcome. A transaction a step leaves open ends with its own job (BigQuery rolls it back),
+      so it can't absorb the outcome row or affect the next step.
+    - Postgres: one transaction holds the advisory lock (serialized with reconciliation and
+      migrations); each step and each outcome insert is a protected PL/pgSQL subtransaction.
 
   The log never stores warehouse error text, which can contain captured values. A row holds a
-  fixed description for the step and outcome plus a safe diagnostic identifier: the BigQuery
-  script job ID (look it up in job history) or the Postgres SQLSTATE code.
+  fixed description, a safe diagnostic ID (the BigQuery step job ID, or the Postgres SQLSTATE),
+  and attribution: the invocation's trigger marker, read once before any step runs, and whether
+  maintenance ran automatically (after dbt run/build/test) or manually (cleanup_dqm_logs).
 
   Each step's SQL comes from a dispatched macro, so acceptance projects can inject faults into a
   single step without test switches in the package.
@@ -71,15 +80,41 @@
   delete from {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} where staged_at <= timestamp_sub(current_timestamp(), interval 24 hour);
 {% endmacro %}
 
+{#- One stage drop. `stage_relation` is a SQL expression for the stage's relation name. Used by
+    both maintenance and the tolerant recovery path (dqm_cleanup_stages). #}
+{% macro maintenance_stage_drop_sql(stage_relation) %}{{ return(adapter.dispatch('maintenance_stage_drop_sql', 'dbt_dqm')(stage_relation)) }}{% endmacro %}
+{% macro default__maintenance_stage_drop_sql(stage_relation) %}
+  execute immediate concat('drop table if exists ', {{ stage_relation }});
+{% endmacro %}
+
 {% macro maintenance_stage_drops() %}{{ return(adapter.dispatch('maintenance_stage_drops', 'dbt_dqm')()) }}{% endmacro %}
-{% macro default__maintenance_stage_drops() %}{{ dbt_dqm.cleanup_stages_sql() }}{% endmacro %}
+{% macro default__maintenance_stage_drops() %}{{ dbt_dqm.cleanup_stages_sql(fail_on_error=true) }}{% endmacro %}
+
+{#- BigQuery stage tables live in the DQM dataset as dqm_reconcile_stage_<run_id without dashes>
+    (stage_relation in reconciliation.sql). Run pruning keeps every run whose stage still exists,
+    so a stage whose drop failed stays retryable. The list is read before the pruning
+    transaction; if the lookup fails, the step fails before deleting anything. A stage that
+    disappears after the snapshot only keeps its run for one more cycle. #}
+{% macro maintenance_live_stages_sql() %}
+  create or replace temp table dqm_live_stages as
+    select table_name from {{ dbt_dqm.tables_catalog() }}
+    where starts_with(table_name, 'dqm_reconcile_stage_');
+{% endmacro %}
+{% macro maintenance_run_retained_sql(run_alias) %}
+  {% if target.type == 'bigquery' %}
+    and not exists(select 1 from dqm_live_stages live
+      where live.table_name = concat('dqm_reconcile_stage_', replace({{ run_alias }}.run_id, '-', '')))
+  {% endif %}
+{% endmacro %}
 
 {% macro maintenance_run_pruning(days) %}{{ return(adapter.dispatch('maintenance_run_pruning', 'dbt_dqm')(days)) }}{% endmacro %}
 {% macro default__maintenance_run_pruning(days) %}
   {% set cutoff = dbt_dqm.timestamp_add('day', -days, dbt.current_timestamp()) %}
   delete from {{ dbt_dqm.dqm_relation('dqm_reconciliation_inputs') }} input where exists(select 1 from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }} run
-    where run.run_id=input.run_id and run.status!='started' and run.completed_at < {{ cutoff }});
-  delete from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }} where status!='started' and completed_at < {{ cutoff }};
+    where run.run_id=input.run_id and run.status!='started' and run.completed_at < {{ cutoff }}
+    {{ dbt_dqm.maintenance_run_retained_sql('run') }});
+  delete from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }} run where run.status!='started' and run.completed_at < {{ cutoff }}
+    {{ dbt_dqm.maintenance_run_retained_sql('run') }};
 {% endmacro %}
 
 {# Only rows older than 30 days, so this step can never remove an outcome just written. #}
@@ -97,69 +132,105 @@
   {% else %}{{ return(dbt_dqm.maintenance_log_pruning()) }}{% endif %}
 {% endmacro %}
 
+{#- Work that must run before a step's transaction opens. #}
+{% macro maintenance_step_prelude_sql(step) %}
+  {% if target.type == 'bigquery' and step.name == 'run_pruning' %}{{ return(dbt_dqm.maintenance_live_stages_sql()) }}{% endif %}
+  {{ return('') }}
+{% endmacro %}
+
+{# --- Attribution: the invocation's trigger marker, read once before any step --- #}
+
+{#- The same combined marker dqm_maintenance_health uses: the latest of this invocation's captured
+    executions and its completed reconciliation run. #}
+{% macro maintenance_trigger_marker_sql(invocation) %}
+  (select max(marker_at) from (
+    select max(captured_at) as marker_at from {{ dbt_dqm.dqm_relation('dqm_test_executions') }}
+      where invocation_id={{ dbt_dqm.sql_string(invocation) }}
+    union all
+    select max(started_at) as marker_at from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }}
+      where run_id={{ dbt_dqm.sql_string(invocation) }} and status='completed'
+  ) markers)
+{% endmacro %}
+
+{#- BigQuery: returns the marker as a fixed-format UTC string, or null when it can't be read. #}
+{% macro bigquery__maintenance_attribution_script() %}
+  declare dqm_trigger_marker timestamp default null;
+  begin
+    set dqm_trigger_marker = {{ dbt_dqm.maintenance_trigger_marker_sql(invocation_id) }};
+  exception when error then
+    set dqm_trigger_marker = null;
+  end;
+  select format_timestamp('%Y-%m-%dT%H:%M:%E6SZ', dqm_trigger_marker, 'UTC') as trigger_marker_at;
+{% endmacro %}
+
 {# --- Outcome logging: fixed descriptions, safe identifiers only --- #}
 
-{% macro maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression) %}
-  {{ return(adapter.dispatch('maintenance_log_insert_sql', 'dbt_dqm')(step_name, ok_expression, diagnostic_expression)) }}
+{#- `marker` is a SQL expression for the trigger marker (null when unknown or manual); `kind` is
+    'automatic' or 'manual'. #}
+{% macro maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression, marker, kind) %}
+  {{ return(adapter.dispatch('maintenance_log_insert_sql', 'dbt_dqm')(step_name, ok_expression, diagnostic_expression, marker, kind)) }}
 {% endmacro %}
-{% macro default__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression) %}
+{% macro default__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression, marker, kind) %}
   insert into {{ dbt_dqm.dqm_relation('dqm_maintenance_log') }}
-    (logged_at,invocation_id,step,outcome,description,diagnostic_id)
+    (logged_at,invocation_id,step,outcome,description,diagnostic_id,trigger_marker_at,trigger_kind)
   values ({{ dbt.current_timestamp() }}, {{ dbt_dqm.sql_string(invocation_id) }}, {{ dbt_dqm.sql_string(step_name) }},
     case when {{ ok_expression }} then 'succeeded' else 'failed' end,
     case when {{ ok_expression }} then {{ dbt_dqm.sql_string(step_name | replace('_', ' ') ~ ' succeeded') }}
       else {{ dbt_dqm.sql_string(step_name | replace('_', ' ') ~ ' failed') }} end,
-    case when {{ ok_expression }} then cast(null as {{ dbt.type_string() }}) else {{ diagnostic_expression }} end);
+    case when {{ ok_expression }} then cast(null as {{ dbt.type_string() }}) else {{ diagnostic_expression }} end,
+    {{ marker }}, {{ dbt_dqm.sql_string(kind) }});
 {% endmacro %}
 
-{# --- The protected maintenance script --- #}
+{# --- Script generator, shared by execution and the render tests --- #}
 
-{% macro maintenance_sql(days, events_days) %}
-  {% set steps = dbt_dqm.maintenance_steps(days, events_days) %}
-  {% if target.type == 'bigquery' %}
-    {{ dbt_dqm.bigquery__maintenance_script(steps, days, events_days) }}
-  {% else %}
-    {{ dbt_dqm.postgres__maintenance_script(steps, days, events_days) }}
-  {% endif %}
-{% endmacro %}
-
-{% macro bigquery__maintenance_script(steps, days, events_days) %}
+{#- BigQuery: one step as its own job. The final select reports the outcome to the executor. #}
+{% macro bigquery__maintenance_step_script(step, days, events_days) %}
   declare dqm_step_ok bool default false;
   declare dqm_step_txn bool default false;
-  declare dqm_step_job string default @@script.job_id;
-  {% for step in steps %}
-    set dqm_step_ok = false;
-    set dqm_step_txn = false;
-    begin
-      {% if step.transactional %}begin transaction; set dqm_step_txn = true;{% endif %}
-      {{ dbt_dqm.ready_sql() }}
-      {{ dbt_dqm.maintenance_step_sql(step, days, events_days) }}
-      {% if step.transactional %}set dqm_step_txn = false; commit transaction;{% endif %}
-      set dqm_step_ok = true;
-    exception when error then
-      {#- Close this step's transaction before anything else runs. BigQuery raises an error that
-          no exception handler can catch when ROLLBACK runs without an open transaction, so roll
-          back only while this step's transaction is known to be open. The flag is cleared just
-          before COMMIT: a failed commit leaves nothing to roll back here, and a transaction
-          still open when the script ends is discarded by BigQuery without failing the job. #}
-      if dqm_step_txn then
-        rollback transaction;
-      end if;
-    end;
-    begin
-      {{ dbt_dqm.maintenance_log_insert_sql(step.name, 'dqm_step_ok', 'dqm_step_job') }}
-    exception when error then
-      select 'maintenance outcome not logged' as maintenance_note;
-    end;
-  {% endfor %}
+  declare dqm_stage_failed bool default false;
+  begin
+    {{ dbt_dqm.ready_sql() }}
+    {{ dbt_dqm.maintenance_step_prelude_sql(step) }}
+    {% if step.transactional %}begin transaction; set dqm_step_txn = true;{% endif %}
+    {{ dbt_dqm.maintenance_step_sql(step, days, events_days) }}
+    {% if step.transactional %}set dqm_step_txn = false; commit transaction;{% endif %}
+    set dqm_step_ok = true;
+  exception when error then
+    {#- BigQuery raises an error no handler can catch when ROLLBACK runs without an open
+        transaction, so roll back only while this step's transaction is known to be open. The
+        flag is cleared just before COMMIT: whatever a failed commit leaves open ends with this
+        job, and the outcome is logged by a separate job. #}
+    if dqm_step_txn then
+      rollback transaction;
+    end if;
+  end;
+  select dqm_step_ok as ok, @@script.job_id as job_id;
 {% endmacro %}
 
-{% macro postgres__maintenance_script(steps, days, events_days) %}
-  {#- The outer transaction holds the advisory lock (serialized with reconciliation and
-      migrations). Each step is a PL/pgSQL block whose EXCEPTION clause rolls back to its own
-      savepoint, so a failed step leaves no partial changes and the next step still runs. #}
+{#- BigQuery: the separate, protected job that records one step's outcome. #}
+{% macro bigquery__maintenance_log_script(step_name, ok, job_id, marker, kind) %}
+  begin
+    {{ dbt_dqm.maintenance_log_insert_sql(step_name, 'true' if ok else 'false', dbt_dqm.sql_string(job_id) if job_id else 'cast(null as string)', marker, kind) }}
+  exception when error then
+    select 'maintenance outcome not logged' as maintenance_note;
+  end;
+{% endmacro %}
+
+{#- Postgres: the whole run as one locked transaction. The marker is read once into a temporary
+    table before any step, so pruning can't change the attribution of later outcome rows. #}
+{% macro postgres__maintenance_script(steps, days, events_days, kind) %}
   begin;
   {{ dbt_dqm.reconcile_lock() }}
+  create temporary table dqm_maintenance_attribution (trigger_marker_at {{ dbt.type_timestamp() }}) on commit drop;
+  do $dqm_attribution$ begin
+    {% if kind == 'automatic' %}
+      insert into dqm_maintenance_attribution select {{ dbt_dqm.maintenance_trigger_marker_sql(invocation_id) }};
+    {% else %}
+      insert into dqm_maintenance_attribution values (null);
+    {% endif %}
+  exception when others then
+    insert into dqm_maintenance_attribution values (null);
+  end $dqm_attribution$;
   {% for step in steps %}
     do $dqm_maintenance$
     declare
@@ -174,11 +245,44 @@
         get stacked diagnostics dqm_step_state = returned_sqlstate;
       end;
       begin
-        {{ dbt_dqm.maintenance_log_insert_sql(step.name, 'dqm_step_ok', 'dqm_step_state') }}
+        {{ dbt_dqm.maintenance_log_insert_sql(step.name, 'dqm_step_ok', 'dqm_step_state',
+          '(select trigger_marker_at from dqm_maintenance_attribution)', kind) }}
       exception when others then
         null;
       end;
     end $dqm_maintenance$;
   {% endfor %}
   commit;
+{% endmacro %}
+
+{# --- Executor --- #}
+
+{#- Runs optional maintenance and returns what it observed: a list of {step, ok}. `ok` is the
+    step job's own result on BigQuery, and none on Postgres, where outcomes are only known from
+    the log. `kind` is 'automatic' or 'manual'. #}
+{% macro maintenance_run(days, events_days, kind) %}
+  {% set observed = [] %}
+  {% set steps = dbt_dqm.maintenance_steps(days, events_days) %}
+  {% if not execute or dbt_dqm.empty_mode() or not steps %}{{ return(observed) }}{% endif %}
+  {% if target.type == 'bigquery' %}
+    {% set marker = 'cast(null as timestamp)' %}
+    {% if kind == 'automatic' %}
+      {% set value = run_query(dbt_dqm.bigquery__maintenance_attribution_script()).columns[0].values()[0] %}
+      {% if value is not none and modules.re.match('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{6}Z$', value | string) %}
+        {% set marker = "timestamp '" ~ value ~ "'" %}
+      {% endif %}
+    {% endif %}
+    {% for step in steps %}
+      {% set result = run_query(dbt_dqm.bigquery__maintenance_step_script(step, days, events_days)) %}
+      {% set ok = result.rows | length == 1 and result.rows[0][0] == true %}
+      {% set job_id = result.rows[0][1] if result.rows | length == 1 else none %}
+      {% if job_id is not none and not modules.re.match('^[A-Za-z0-9_.:-]+$', job_id | string) %}{% set job_id = none %}{% endif %}
+      {% do run_query(dbt_dqm.bigquery__maintenance_log_script(step.name, ok, job_id, marker, kind)) %}
+      {% do observed.append({'step': step.name, 'ok': ok}) %}
+    {% endfor %}
+  {% else %}
+    {% do run_query(dbt_dqm.postgres__maintenance_script(steps, days, events_days, kind)) %}
+    {% for step in steps %}{% do observed.append({'step': step.name, 'ok': none}) %}{% endfor %}
+  {% endif %}
+  {{ return(observed) }}
 {% endmacro %}

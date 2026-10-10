@@ -105,9 +105,83 @@ def test_app_staging_migration_and_cleanup_render_without_raw_retention(protocol
     assert "0004_app_staging_safety" in sql
     assert "alter column staged_at set default current_timestamp()" in sql
     assert "set staged_at=current_timestamp() where staged_at is null" in sql
-    cleanup = render(protocol_project, monkeypatch, "cleanup_dqm_logs_sql")
-    assert "dqm_app_change_staging" in cleanup and "interval 24 hour" in cleanup
-    assert "delete from `compile-only`.`dqm`.`dqm_test_executions`" not in cleanup
+    steps = render(protocol_project, monkeypatch, "maintenance_steps", "none, none")
+    assert "staging_expiry" in steps and "raw_pruning" not in steps
+    expiry = render(
+        protocol_project,
+        monkeypatch,
+        "bigquery__maintenance_step_script",
+        "{'name': 'staging_expiry', 'transactional': false}, none, none",
+    )
+    assert "dqm_app_change_staging" in expiry and "interval 24 hour" in expiry
+    assert "delete from `compile-only`.`dqm`.`dqm_test_executions`" not in expiry
+
+
+def step_script(protocol_project, monkeypatch, name, transactional, days="30"):
+    return render(
+        protocol_project,
+        monkeypatch,
+        "bigquery__maintenance_step_script",
+        f"{{'name': '{name}', 'transactional': {str(transactional).lower()}}}, {days}, 365",
+    )
+
+
+def test_bigquery_maintenance_steps_report_outcomes_and_log_separately(
+    protocol_project, monkeypatch
+):
+    raw = step_script(protocol_project, monkeypatch, "raw_pruning", True)
+    # Each step job reports its own outcome; the log row is written by a separate job.
+    assert raw.rstrip().endswith("select dqm_step_ok as ok, @@script.job_id as job_id;")
+    assert "dqm_maintenance_log" not in raw
+    assert "begin transaction; set dqm_step_txn = true;" in raw
+    assert "set dqm_step_txn = false; commit transaction;" in raw
+    assert "if dqm_step_txn then\n      rollback transaction;" in raw
+    log = render(
+        protocol_project,
+        monkeypatch,
+        "bigquery__maintenance_log_script",
+        "'raw_pruning', false, 'job_1', \"timestamp '2026-10-10T00:00:00.000000Z'\", 'automatic'",
+    )
+    assert "insert into `compile-only`.`dqm`.`dqm_maintenance_log`" in log
+    assert "trigger_marker_at,trigger_kind" in log and "'automatic'" in log
+    assert "exception when error then" in log
+    attribution = render(protocol_project, monkeypatch, "bigquery__maintenance_attribution_script")
+    assert "status='completed'" in attribution and "format_timestamp" in attribution
+    assert "exception when error then" in attribution
+
+
+def test_bigquery_stage_drops_fail_the_step_but_recovery_stays_tolerant(
+    protocol_project, monkeypatch
+):
+    drops = step_script(protocol_project, monkeypatch, "stage_drops", False)
+    assert "set dqm_stage_failed = true;" in drops
+    assert "raise using message = 'DQM stage drop failed'" in drops
+    tolerant = render(protocol_project, monkeypatch, "cleanup_stages_sql")
+    assert "Warning: DQM stage cleanup failed" in tolerant
+    assert "raise" not in tolerant and "dqm_stage_failed" not in tolerant
+
+
+def test_bigquery_run_pruning_keeps_runs_whose_stage_still_exists(protocol_project, monkeypatch):
+    pruning = step_script(protocol_project, monkeypatch, "run_pruning", True)
+    snapshot = pruning.index("create or replace temp table dqm_live_stages")
+    assert "INFORMATION_SCHEMA.TABLES" in pruning
+    # The stage list is read before the transaction opens; both deletes use it.
+    assert snapshot < pruning.index("begin transaction")
+    assert pruning.count("from dqm_live_stages live") == 2
+    assert "concat('dqm_reconcile_stage_', replace(run.run_id, '-', ''))" in pruning
+
+
+def test_bigquery_stage_is_created_by_the_freezing_job_with_an_expiry(
+    protocol_project, monkeypatch
+):
+    # A run row becomes visible only when freeze commits. The stage DDL is in the same script, and
+    # a script runs for at most 18 hours (with retries), so it always precedes the earliest
+    # possible pruning of its run (at least a day after the run completes or is abandoned).
+    sql = render(protocol_project, monkeypatch, "reconcile_pre")
+    freeze = sql.index("commit transaction;")
+    stage = re.search(r"create table .*dqm_reconcile_stage_[a-f0-9]+", sql).start()
+    assert freeze < stage
+    assert "expiration_timestamp=timestamp_add(current_timestamp(), interval 24 hour)" in sql
 
 
 def test_bigquery_runtime_stages_and_manifest_stay_stable(protocol_project, monkeypatch):
