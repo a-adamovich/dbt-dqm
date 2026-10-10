@@ -1,0 +1,38 @@
+{
+  "candidate": "613e0897bc2174641a1d8ef4a5706a30f860f4b6",
+  "date": "2026-10-10",
+  "postgres": "16.11",
+  "harness": "integration_tests/scale/cache_boundary.py",
+  "runs": [
+    {
+      "issues": 50000,
+      "mean_payload_bytes": 408,
+      "warehouse_read_seconds": 2.6,
+      "total_seconds": 6.63,
+      "baseline_rss_mb": 144.5,
+      "peak_rss_mb": 439.4,
+      "scenario": "supported-cache-boundary-real-postgres-sync",
+      "synthetic_processed_history": true
+    },
+    {
+      "issues": 50000,
+      "mean_payload_bytes": 408,
+      "warehouse_read_seconds": 2.08,
+      "total_seconds": 4.8,
+      "baseline_rss_mb": 156.6,
+      "peak_rss_mb": 574.9,
+      "scenario": "supported-cache-boundary-real-postgres-sync",
+      "synthetic_processed_history": true
+    },
+    {
+      "issues": 50000,
+      "mean_payload_bytes": 408,
+      "warehouse_read_seconds": 2.09,
+      "total_seconds": 4.82,
+      "baseline_rss_mb": 150.5,
+      "peak_rss_mb": 518.3,
+      "scenario": "supported-cache-boundary-real-postgres-sync",
+      "synthetic_processed_history": true
+    }
+  ]
+}

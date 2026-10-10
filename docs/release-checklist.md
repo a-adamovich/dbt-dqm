@@ -29,7 +29,19 @@ Tagging and publishing remain the maintainer's decision after every gate passes.
 
 | Gate | Candidate commit | Result | Evidence |
 | --- | --- | --- | --- |
-| — | — | Not yet run for 0.2.0 | — |
+| 1 | `613e089` | Passed 5/5 | [CI run 38075091531](https://github.com/a-adamovich/dbt-dqm/actions/runs/38075091531) |
+| 2 | `613e089` | Postgres 14.20: 30/30 (657 s); Postgres 16.11: 30/30 (676 s) | Local, each run alone; server transaction counters confirm each server was exercised |
+| 3 | `613e089` | 24/24 in one run, no skips (2 h 19 m) | Local credentialed run, project `dbt-dqm`, disposable datasets |
+| 4 | `613e089` | Passed (4 m 48 s) | Local, run serially after 3 against `dbt_dqm_qa` (now at migration 0006) |
+| 5 | `613e089` | Passed | Sync; Apply under a held table lock shows "busy" and keeps the edit; retry applied batch `6dedb185…`; Health shows Maintenance (all `ok`) with the corrected caption |
+| 6 | `613e089` | Peak RSS 439 / 575 / 518 MiB | Inside the documented 435–585 MiB range; [`candidate-613e089-cache-boundary.json`](scale-results/candidate-613e089-cache-boundary.json) |
+| 7 | `613e089` | Versions agree (0.2.0); the release workflow refuses a mismatched tag | Unit tests run the release step script |
+| 8 | 2026-10-10 | No open Dependabot alerts | GitHub Dependabot alerts |
+| 9 | — | **Waiting for the maintainer** | [#12](https://github.com/a-adamovich/dbt-dqm/issues/12) |
+| 10 | — | Not yet observed (no tag pushed) | Observed on the first `v0.2.0` tag |
+
+This table was added by a later documentation-only commit; the warehouse suites ran on `613e089`,
+not on that commit.
 
 ## Operating limits that stay true after release
 
