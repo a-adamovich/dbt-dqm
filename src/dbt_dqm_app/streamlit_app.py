@@ -645,8 +645,9 @@ def _render_health(workspace) -> None:
     else:
         st.dataframe(pd.DataFrame(maintenance), hide_index=True)
         st.caption(
-            "Maintenance never fails a dbt run. Failed steps are retried automatically; look up "
-            "a diagnostic id in BigQuery job history or as a Postgres SQLSTATE code."
+            "A SQL error in a maintenance step doesn't fail the dbt run; the step is retried next "
+            "time. OK means the latest assessed run succeeded; unknown means an outcome is "
+            "missing. Look up a diagnostic id in BigQuery job history or as a Postgres SQLSTATE."
         )
 
 
