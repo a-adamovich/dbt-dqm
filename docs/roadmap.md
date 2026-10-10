@@ -10,11 +10,16 @@ assessment and intentionally keeps its original findings.
 - Identity uses the adapter-independent `dqm-id-v1` byte contract with golden SHA-256 vectors.
   `identity_scheme_signature` combines the algorithm version and ordered grain, so future identity
   changes archive honestly as `IDENTITY_CHANGED`.
-- Reconciliation checkpoints each test and deterministically replays every unprocessed conclusive
-  execution, retaining fail/pass and fail/pass/fail episodes between builds.
+- Reconciliation freezes the exact unprocessed conclusive executions, rejects late evidence, and
+  applies occurrences, events, receipts and state atomically under a generation fence, retaining
+  fail/pass and fail/pass/fail episodes between builds. On Postgres the reconcile view is replaced
+  in place after the lock is taken (#17).
 - Capture supports `identity_only` (default), allowlisted context, and explicit full-row modes.
-  Retention variables are validated, portable log cleanup exists, migrations are recorded, and
-  Postgres query-support indexes are installed.
+  Retention variables are validated, migrations are recorded and verified, and Postgres
+  query-support indexes are installed.
+- Optional maintenance (retention, BigQuery staging expiry and stage drops, log pruning) runs only
+  after capture or reconciliation, never fails the dbt run on a SQL error, logs sanitized and
+  attributed outcomes, and reports per-step health (#13).
 - Local workspaces are owner-only and can be inspected or purged. Drift requires an explicit
   discard/overwrite choice; warehouse writes use annotation compare-and-set versions.
 - The local app supports BigQuery and Postgres, renders `env_var()` profile values, and discovers
@@ -31,7 +36,10 @@ assessment and intentionally keeps its original findings.
 - Add representative scale fixtures and automated `EXPLAIN` budget checks on Postgres and dry-run
   byte budgets on BigQuery.
 - Expand the tested Python/dbt compatibility matrix only from observed demand.
-- Automate credentialed scheduled BigQuery fault-injection and lifecycle runs in the public repo.
+- Enable the scheduled credentialed BigQuery workflow (`bigquery-scheduled.yml`) against dedicated
+  test resources; it exists but is not yet provisioned.
+- Validate dbt 1.12 and pandas 3 as separate compatibility upgrades (#11).
+- Investigate the app's sync memory above the 2026-10-09 baseline (see [scale](scale.md)).
 - Publish relation/column stability guarantees and remove the deprecated `test_status` alias only
   in a clearly announced release.
 
@@ -45,6 +53,6 @@ integrations, managed operation, and support—not failure-row volume.
 
 ## 0.2 delivery
 
-Implemented: transactional tracking and recovery, fresh installation and additive migrations, row owners, metadata and verdicts, durable history and missed reports, and warehouse health with local caching. Credentialed BigQuery fault/concurrency verification is a release gate.
+Implemented: transactional tracking and recovery, fresh installation and additive migrations, row owners, metadata and verdicts, durable history and missed reports, warehouse health with local caching, and isolated optional maintenance with its own health. The remaining release gates are in the [release checklist](release-checklist.md).
 
 Deferred: VCG adoption/migration and warehouse-side issue filtering, search and cursor pagination. Pending local edits must remain accessible as that pagination work proceeds.

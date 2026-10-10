@@ -5,8 +5,10 @@
 - The dbt package supports BigQuery and Postgres. Behavior described below (identity hashing,
   lifecycle transitions, granularity handling) is a functional requirement, not an
   implementation detail, and must hold identically on every supported adapter — a warehouse-specific
-  divergence in observable behavior is a bug. Adapter differences are confined to
-  `macros/adapters.sql`.
+  divergence in observable behavior is a bug. Adapter differences live in dispatched macros and
+  `target.type` branches across `macros/` (portable helpers in `macros/adapters.sql`; transaction,
+  locking, migration and maintenance protocols in their own macro files) and in the Postgres-only
+  `dqm_entry_view` materialization.
 - The local review app supports BigQuery and Postgres and resolves package relations from dbt's
   generated manifest.
 
@@ -50,11 +52,13 @@
   collected, rather than deferring every test's write to one shared batch at the end. A collection
   error partway through an invocation only leaves the test being processed (and any after it in
   that invocation) at `pending`, instead of losing already-collected evidence for tests processed
-  earlier in the same run. A `pending` execution is excluded from reconciliation and is picked up by
-  a future successful invocation of the same test.
-- Reconciliation processes every unprocessed conclusive execution in `captured_at, invocation_id`
-  order and checkpoints only after a successful model write. Deterministic occurrence IDs make
-  retries idempotent and preserve brief fail/pass episodes between package builds.
+  earlier in the same run. A `pending` execution is excluded from reconciliation. A later
+  invocation of the same test produces new evidence, but the rows that weren't collected are not
+  reconstructed.
+- Reconciliation freezes every unprocessed conclusive execution, processes them in
+  `captured_at, invocation_id` order, and records receipts in the same transaction as the lifecycle
+  changes, under a generation fence. Deterministic occurrence IDs make retries idempotent and
+  preserve brief fail/pass episodes between package builds.
 
 ## Review application
 

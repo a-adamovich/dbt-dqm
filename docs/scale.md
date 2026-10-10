@@ -1,5 +1,20 @@
 # Scale measurements
 
+## Current figures
+
+The figures to use today; everything below is the method and the dated measurements behind them.
+
+- **Review app cache ceiling:** 50,000 issues and 128 MiB of serialized issue data (enforced).
+  At that boundary the sync path's peak RSS varies widely between identical runs: **about
+  435–585 MiB** on 2026-10-10, where the single 420.8 MiB figure from 2026-10-09 sits at the low
+  end. A running Streamlit server adds its own baseline. See
+  [PyArrow 23 rerun](#pyarrow-23-rerun-2026-10-10).
+- **Postgres reconciliation at 1M occurrences:** about 2.4 s steady and 19 s for a 100k mass pass;
+  the occurrence lock is held for that time. See [Reconciliation](#reconciliation).
+- **BigQuery reconciliation at 1M occurrences:** about 1.5 GB processed steady and 1.8 GB for a
+  mass pass. See [BigQuery](#bigquery).
+- Measurements of 100,000+ cached issues predate the enforced ceiling and are historical.
+
 Two harnesses build a disposable consumer project, initialize the DQM schema through the
 package, bulk-load synthetic *processed* history (occurrences, executions, observations and
 receipts, all older than any real run), and then measure real dbt runs against it. Raw results
@@ -88,6 +103,8 @@ steady-state difference. That is a possible refinement, not implemented.
 
 ### App sync memory
 
+*Historical (2026-10-07), before the enforced 50,000-issue ceiling; kept for the per-issue cost.*
+
 PostgreSQL 16.11, ~408-byte payloads, the default 90-day archive cache window.
 
 | Cached issues (Active + 90-day archive) | Peak RSS | Sync wall time |
@@ -163,7 +180,7 @@ stable signal.
 | Steady reconcile, 100k occurrences | 0.41 | 0.16 | 0.16 | 36–71 s |
 | Steady reconcile, 1M occurrences | 4.09 | 1.52 | **1.47** | 41–52 s |
 | Mass pass, 1M occurrences | 4.39 | 1.79 | **1.77** | 55–64 s |
-| App sync, 100,007 issues | 1.12 | 1.23 | 1.12 | 68–72 s (peak RSS 911 MB) |
+| App sync, 100,007 issues (historical: above today's 50,000 ceiling) | 1.12 | 1.23 | 1.12 | 68–72 s (peak RSS 911 MB) |
 
 **Observation floor.** The baseline's stage build read the whole `dqm_issue_observations`
 table, 3.3 of its 4.1 GB, because nothing filtered its partition column.

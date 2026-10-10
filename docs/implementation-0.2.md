@@ -1,5 +1,9 @@
 # 0.2 implementation and verification
 
+> **Historical record (2026-10-07).** Preserved as written; statuses, gates and limitations below
+> may since have changed. The current release gates are in the
+> [release checklist](release-checklist.md).
+
 For the subsequent permissions and cache/staging safeguards, see the
 [current verification record](qa-release-safeguards.md). That record supersedes older app-memory
 and staging limitations below; restricted BigQuery permissions remain a separate live gate.

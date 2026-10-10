@@ -3,7 +3,7 @@
 ## 0.2.0 (unreleased)
 
 - Requires `sqlparse>=0.6.0`, `urllib3>=2.8.0` and `oauthlib>=4.0.0` directly, the first versions without the advisories resolved in #24. The lockfile already used them, but a wheel installed without the lockfile could keep older, vulnerable versions that still satisfied the upstream ranges.
-- Requires PyArrow 23.x (`>=23.0.1,<24`). Sync memory at the 50,000-issue boundary is unchanged within run-to-run variation (`docs/scale.md`).
+- Requires PyArrow 23.x (`>=23.0.1,<24`). In repeated runs at the 50,000-issue boundary, peak sync memory is sometimes higher than with PyArrow 19 (`docs/scale.md`).
 - Postgres reconciliation replaces the `dqm_reconcile` view in place after taking its lock (`dqm_entry_view` materialization), so overlapping runs no longer act on each other's temporary relations (#17).
 - Optional maintenance (retention, staging expiry, stage drops) runs only after invocations that captured tracked tests or completed a reconciliation. A SQL error inside a step never fails the dbt invocation (connection, cancellation and lock failures still do). Outcomes go to `dqm_maintenance_log` (migration `0005`) with sanitized descriptions and safe diagnostic IDs, and appear as `ok`/`failing`/`unknown` in `dqm_maintenance_health` and the app's Health tab (#13).
 - Maintenance outcomes are now trustworthy: on BigQuery each step and its outcome log run as separate jobs; a failed stage drop fails `stage_drops` and keeps its run for a retry; `cleanup_dqm_logs` requires a recorded success for every scheduled step; and migration `0006_maintenance_attribution` records each outcome's trigger, so Health compares outcomes with the invocations that should have produced them (contract in `docs/warehouse-interfaces.md`).
@@ -31,7 +31,7 @@
 - Reconciliation planning no longer degrades to nested loops on Postgres, and the replay reads only Active rows plus the history of affected identities (see `docs/scale.md`).
 
 
-## 0.1.1 - Unreleased
+## 0.1.1 (development history, never released; incorporated into 0.2.0)
 
 ### Package
 
