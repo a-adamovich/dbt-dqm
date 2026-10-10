@@ -35,6 +35,21 @@ def test_every_model_is_in_the_catalog():
     assert models - documented == set()
 
 
+def test_every_cataloged_macro_exists():
+    """A documented macro may be defined directly or only through adapter dispatch."""
+    catalog = yaml.safe_load((ROOT / "macros/schema.yml").read_text())
+    defined = set()
+    for path in (ROOT / "macros").glob("*.sql"):
+        defined |= set(re.findall(r"\{%-?\s*macro\s+(\w+)\s*\(", path.read_text()))
+    prefixes = ("", "default__", "bigquery__", "postgres__")
+    missing = [
+        macro["name"]
+        for macro in catalog["macros"]
+        if not any(prefix + macro["name"] in defined for prefix in prefixes)
+    ]
+    assert missing == []
+
+
 @pytest.mark.parametrize("document", DOCS, ids=lambda path: path.name)
 def test_relative_links_resolve(document):
     broken = []
