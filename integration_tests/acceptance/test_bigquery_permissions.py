@@ -105,11 +105,20 @@ def test_restricted_bigquery_runner_and_reviewer(tmp_path):
     assert "0003_app_change_staging" in migrations
     assert "0004_app_staging_safety" in migrations
     assert "0005_maintenance_log" in migrations
+    assert "0006_maintenance_attribution" in migrations
 
     dbt("seed", "--select", fixture)
     dbt("run", "--select", fixture + "_records")
     dbt("test", "--select", test_name, test_failure=True)
-    dbt("run", "--select", "package:dbt_dqm")
+    # A ten-year retention schedules raw and run pruning without deleting shared QA history; run
+    # pruning reads the dataset's INFORMATION_SCHEMA.TABLES as the runner.
+    dbt("run", "--select", "package:dbt_dqm", "--vars", '{"dbt_dqm_retention_days": 3650}')
+    invocation = json.loads((path / "target/run_results.json").read_text())["metadata"]["invocation_id"]
+    pruning = {r.step: r.outcome for r in runner.query(
+        f"select step, outcome from `{PROJECT}.{DATASET}.dqm_maintenance_log` "
+        f"where invocation_id='{invocation}'"
+    ).result()}
+    assert pruning.get("run_pruning") == "succeeded" and pruning.get("raw_pruning") == "succeeded"
     dbt("test", "--select", "package:dbt_dqm", "--exclude", "assert_scenario_outcomes")
 
     config = replace(load_config(path, profiles, "qa"), credentials_file=Path(REVIEWER_FILE))

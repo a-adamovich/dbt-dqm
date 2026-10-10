@@ -67,7 +67,10 @@ macros:
     description: Validates an optional dbt variable as a strictly positive YAML integer.
 
   - name: cleanup_dqm_logs
-    description: Deletes execution and observation log rows older than a positive retention window.
+    description: >
+      Runs optional maintenance manually (receipt-aware raw pruning, event retention, BigQuery
+      staging expiry and stage drops, run-ledger and log pruning) and fails unless every scheduled
+      step recorded a succeeded outcome.
 
   - name: capture_test_results
     description: >

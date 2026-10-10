@@ -155,3 +155,9 @@ models:
     description: Test health with explicit populations and rate denominators.
   - name: dqm_area_health
     description: Root-project models and sources; test totals overlap across direct dependencies.
+  - name: dqm_maintenance_health
+    description: >
+      Per-step state of optional maintenance (ok, failing, unknown), assessed against the
+      invocations that ran it, ordered by trigger marker. ok means the latest assessed trigger
+      succeeded; it is a monitoring approximation, and missing outcomes are never healthy.
+      Contract: docs/warehouse-interfaces.md, "Optional maintenance".

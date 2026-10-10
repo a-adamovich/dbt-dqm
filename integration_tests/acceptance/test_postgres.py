@@ -111,6 +111,9 @@ def demo(tmp_path):
     # Fault injection is confined to this temporary consumer project.
     config = yaml.safe_load((project / "dbt_project.yml").read_text())
     config["models"] = {
+        "dbt_dqm_demo_postgres": {
+            "demo_records": {"+pre-hook": "{{ acceptance_records_fault() }}"},
+        },
         "dbt_dqm": {
             "dqm_reconcile": {
                 "+pre-hook": "{{ acceptance_pause() }}",
@@ -118,7 +121,7 @@ def demo(tmp_path):
                 "+persist_docs": {"relation": True, "columns": True},
                 "+grants": {"select": [p["user"]]},
             }
-        }
+        },
     }
     (project / "dbt_project.yml").write_text(yaml.safe_dump(config, sort_keys=False))
     (project / "macros/acceptance_hooks.sql").write_text("""
@@ -133,7 +136,9 @@ def demo(tmp_path):
 {% macro postgres__maintenance_raw_pruning(days) %}{{ dbt_dqm.default__maintenance_raw_pruning(days) }}{% if var('fail_step','')=='raw_pruning' %} raise exception '{{ var("fail_marker","injected") }}';{% endif %}{% endmacro %}
 {% macro postgres__maintenance_event_retention(events_days) %}{{ dbt_dqm.default__maintenance_event_retention(events_days) }}{% if var('fail_step','')=='event_retention' %} raise exception '{{ var("fail_marker","injected") }}';{% endif %}{% endmacro %}
 {% macro postgres__maintenance_log_pruning() %}{{ dbt_dqm.default__maintenance_log_pruning() }}{% if var('fail_step','')=='log_pruning' %} raise exception '{{ var("fail_marker","injected") }}';{% endif %}{% endmacro %}
-{% macro postgres__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression) %}{% if var('fail_log',false) %} raise exception 'maintenance log unavailable';{% else %}{{ dbt_dqm.default__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression) }}{% endif %}{% endmacro %}
+{% macro postgres__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression, marker, kind) %}{% if var('fail_log',false) %} raise exception 'maintenance log unavailable';{% else %}{{ dbt_dqm.default__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression, marker, kind) }}{% endif %}{% endmacro %}
+{% macro acceptance_records_fault() %}{% if execute and var('fail_records',false) %}do $$ begin raise exception 'injected model failure'; end $$;{% endif %}{% endmacro %}
+{% macro postgres__maintenance_attribution_verify() %}{{ dbt_dqm.default__maintenance_attribution_verify() }}{% if var('interrupt_0006',false) %} raise exception 'injected 0006 interruption';{% endif %}{% endmacro %}
 {% macro postgres__maintenance_log_verify() %}{{ dbt_dqm.default__maintenance_log_verify() }}{% if var('interrupt_0005',false) %} raise exception 'injected 0005 interruption';{% endif %}{% endmacro %}
 {% macro postgres__event_payload_mode_backfill() %}{{ dbt_dqm.default__event_payload_mode_backfill() }}{% if var('interrupt_0002',false) %} raise exception 'injected 0002 interruption';{% endif %}{% endmacro %}
 {% macro default__acceptance_verify() %}{{ dbt_dqm.assert_sql('not exists(select 1 from ' ~ dbt_dqm.dqm_relation('dqm_issue_occurrences') ~ ' where future_field is null)',"'backfill incomplete'") }}{% endmacro %}
@@ -838,10 +843,12 @@ def test_event_payload_migration_upgrades_an_existing_02_schema(demo):
         "0003_app_change_staging",
         "0004_app_staging_safety",
         "0005_maintenance_log",
+        "0006_maintenance_attribution",
     }
     control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
     assert (
-        control["schema_version"] == "0005_maintenance_log" and control["setup_status"] == "ready"
+        control["schema_version"] == "0006_maintenance_attribution"
+        and control["setup_status"] == "ready"
     )
 
 
@@ -943,7 +950,10 @@ def test_migration_0005_upgrades_a_populated_schema_after_interruption(demo):
     demo.capture()
     demo.dbt("build", "--select", "package:dbt_dqm")
     demo.sql("drop table @schema.dqm_maintenance_log cascade")  # a 0004 schema has neither
-    demo.sql("delete from @schema.dqm_schema_migrations where migration_id='0005_maintenance_log'")
+    demo.sql(
+        "delete from @schema.dqm_schema_migrations "
+        "where migration_id in ('0005_maintenance_log', '0006_maintenance_attribution')"
+    )
     demo.sql(
         "update @schema.dqm_reconciliation_control set schema_version='0004_app_staging_safety'"
     )
@@ -959,8 +969,273 @@ def test_migration_0005_upgrades_a_populated_schema_after_interruption(demo):
     assert demo.sql("select count(*) n from @schema.dqm_maintenance_log")[0]["n"] == 0
     control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
     assert (
-        control["schema_version"] == "0005_maintenance_log" and control["setup_status"] == "ready"
+        control["schema_version"] == "0006_maintenance_attribution"
+        and control["setup_status"] == "ready"
     )
+
+
+def _run_row(demo, run_id, at):
+    demo.sql(
+        "insert into @schema.dqm_reconciliation_runs "
+        "(run_id, generation_at_freeze, stage_relation, status, started_at, completed_at) "
+        "values (%s, 0, 'pg_temp.dqm_stage', 'completed', %s, %s)",
+        [run_id, at, at],
+    )
+
+
+def _outcome(demo, invocation, outcome, marker, kind="automatic", logged=None, step="raw_pruning"):
+    demo.sql(
+        "insert into @schema.dqm_maintenance_log (logged_at, invocation_id, step, outcome, "
+        "description, diagnostic_id, trigger_marker_at, trigger_kind) "
+        "values (%s, %s, %s, %s, 'fixture', null, %s, %s)",
+        [logged or marker or "2026-01-01 12:00", invocation, step, outcome, marker, kind],
+    )
+
+
+def test_maintenance_health_contract(demo):
+    """Health states from controlled triggers and outcomes (one step, raw_pruning)."""
+    demo.capture(**RETENTION)
+    demo.dbt("build", "--select", "package:dbt_dqm", variables=RETENTION)
+
+    def scenario(build):
+        for table in (
+            "dqm_maintenance_log",
+            "dqm_reconciliation_inputs",
+            "dqm_reconciliation_runs",
+            "dqm_test_executions",
+        ):
+            demo.sql(f"delete from @schema.{table}")
+        build()
+        return _health(demo)["raw_pruning"]["state"]
+
+    t = {n: f"2026-01-01 0{n}:00" for n in range(1, 6)}
+
+    def no_outcome():
+        _run_row(demo, "a", t[1])
+
+    def success():
+        _run_row(demo, "a", t[1])
+        _outcome(demo, "a", "succeeded", t[1])
+
+    def earlier_success_newer_missing():
+        _run_row(demo, "a", t[1])
+        _run_row(demo, "b", t[2])
+        _outcome(demo, "a", "succeeded", t[1], logged=t[3])
+
+    def later_success_supersedes_older_missing():
+        # Accepted approximation: the older-marker trigger may still be running.
+        _run_row(demo, "a", t[1])
+        _run_row(demo, "b", t[2])
+        _outcome(demo, "b", "succeeded", t[2])
+
+    def tie_with_missing():
+        _run_row(demo, "a", t[1])
+        _run_row(demo, "b", t[1])
+        _outcome(demo, "a", "succeeded", t[1])
+
+    def tie_with_failure():
+        tie_with_missing()
+        _outcome(demo, "b", "failed", t[1])
+
+    def conflicting_outcomes():
+        _run_row(demo, "a", t[1])
+        _outcome(demo, "a", "succeeded", t[1])
+        _outcome(demo, "a", "failed", t[1])
+
+    def failure_without_success():
+        _run_row(demo, "a", t[1])
+        _outcome(demo, "a", "failed", t[1])
+
+    def failure_then_missing():
+        failure_without_success()
+        _run_row(demo, "b", t[2])
+
+    def out_of_order_logging():
+        # The later-marker success is logged first; the older failure logged later can't move
+        # the baseline back.
+        _run_row(demo, "a", t[1])
+        _run_row(demo, "b", t[2])
+        _outcome(demo, "b", "succeeded", t[2], logged=t[3])
+        _outcome(demo, "a", "failed", t[1], logged=t[4])
+
+    def legacy_only():
+        _outcome(demo, "legacy", "succeeded", None, kind=None, logged=t[1])
+
+    def legacy_superseded():
+        legacy_only()
+        _run_row(demo, "a", t[2])
+        _outcome(demo, "a", "succeeded", t[2], logged=t[3])
+
+    def unattributed_after_success():
+        success()
+        _outcome(demo, "b", "succeeded", None, logged=t[3])
+
+    def manual_success_then_new_trigger():
+        _run_row(demo, "a", t[1])
+        _outcome(demo, "manual", "succeeded", None, kind="manual", logged=t[2])
+        _run_row(demo, "b", t[3])
+
+    def manual_success_after_triggers():
+        _run_row(demo, "a", t[1])
+        _outcome(demo, "manual", "succeeded", None, kind="manual", logged=t[2])
+
+    def pruned_trigger_history():
+        _outcome(demo, "a", "succeeded", t[1])  # its run row is gone; the log keeps the marker
+
+    expected = {
+        no_outcome: "unknown",
+        success: "ok",
+        earlier_success_newer_missing: "unknown",
+        later_success_supersedes_older_missing: "ok",
+        tie_with_missing: "unknown",
+        tie_with_failure: "failing",
+        conflicting_outcomes: "unknown",
+        failure_without_success: "failing",
+        failure_then_missing: "unknown",
+        out_of_order_logging: "ok",
+        legacy_only: "unknown",
+        legacy_superseded: "ok",
+        unattributed_after_success: "unknown",
+        manual_success_then_new_trigger: "unknown",
+        manual_success_after_triggers: "ok",
+        pruned_trigger_history: "ok",
+    }
+    actual = {case.__name__: scenario(case) for case in expected}
+    assert actual == {case.__name__: state for case, state in expected.items()}
+
+
+def test_maintenance_attribution_and_reconcile_only_recovery(demo):
+    demo.capture(**RETENTION)
+    demo.dbt("build", "--select", "package:dbt_dqm", variables=RETENTION)
+    demo.capture(**RETENTION)
+    invocation = demo.sql(
+        "select invocation_id, max(captured_at) as marker from @schema.dqm_test_executions "
+        "group by invocation_id order by marker desc limit 1"
+    )[0]
+    rows = _maintenance(demo, f"where invocation_id='{invocation['invocation_id']}'")
+    # Every outcome of the invocation carries the same marker, read before any step ran.
+    assert {row["trigger_kind"] for row in rows} == {"automatic"}
+    assert {row["trigger_marker_at"] for row in rows} == {invocation["marker"]}
+    assert {row["state"] for row in _health(demo).values()} == {"ok"}
+
+    # A reconciliation-only run is a trigger. If it can't log, health is unknown, not ok...
+    demo.dbt("run", "--select", "dqm_reconcile", variables={**RETENTION, "fail_log": True})
+    assert {row["state"] for row in _health(demo).values()} == {"unknown"}
+    # ...and the next successful run restores it.
+    demo.dbt("run", "--select", "dqm_reconcile", variables=RETENTION)
+    assert {row["state"] for row in _health(demo).values()} == {"ok"}
+    run = demo.sql(
+        "select run_id, started_at from @schema.dqm_reconciliation_runs "
+        "order by started_at desc limit 1"
+    )[0]
+    latest = _maintenance(demo, f"where invocation_id='{run['run_id']}'")
+    assert latest and {row["trigger_marker_at"] for row in latest} == {run["started_at"]}
+
+
+def test_explicit_cleanup_requires_a_recorded_success_for_every_step(demo):
+    demo.capture(**RETENTION)
+    # Postgres without retention settings schedules nothing: a valid no-op.
+    before = len(_maintenance(demo))
+    demo.dbt("run-operation", "cleanup_dqm_logs")
+    assert len(_maintenance(demo)) == before
+
+    result = demo.dbt(
+        "run-operation",
+        "cleanup_dqm_logs",
+        variables={**RETENTION, "fail_log": True},
+        success=False,
+    )
+    assert "raw_pruning (outcome not recorded)" in result.stdout
+    result = demo.dbt(
+        "run-operation",
+        "cleanup_dqm_logs",
+        variables={**RETENTION, "fail_step": "event_retention"},
+        success=False,
+    )
+    assert "event_retention (failed, diagnostic P0001)" in result.stdout
+    demo.dbt("run-operation", "cleanup_dqm_logs", variables=RETENTION)
+    manual = _maintenance(demo, "where trigger_kind='manual'")
+    assert manual and {row["trigger_marker_at"] for row in manual} == {None}
+
+
+def test_maintenance_triggers(demo):
+    demo.capture(**RETENTION)
+    demo.dbt("build", "--select", "package:dbt_dqm", variables=RETENTION)
+
+    def new_rows(*args, success=True, **variables):
+        before = {row["invocation_id"] for row in _maintenance(demo)}
+        demo.dbt(*args, variables={**RETENTION, **variables}, success=success)
+        return [row for row in _maintenance(demo) if row["invocation_id"] not in before]
+
+    steps = {"raw_pruning", "event_retention", "run_pruning", "log_pruning"}
+    # Package views without reconciliation, unrelated models and --empty: no maintenance.
+    assert new_rows("run", "--select", "dqm_current_issues") == []
+    assert new_rows("run", "--select", "demo_records") == []
+    assert new_rows("build", "--select", "package:dbt_dqm", "--empty") == []
+    # A failed reconciliation is not a trigger (and still fails the invocation).
+    assert new_rows("run", "--select", "dqm_reconcile", success=False, fault=True) == []
+    # Mixed build: models, tracked tests and reconciliation run maintenance once.
+    mixed = new_rows("build", "--select", "demo_records", "tag:dqm", "package:dbt_dqm")
+    assert sorted(row["step"] for row in mixed) == sorted(steps)
+    # Skipped tracked tests are still captured, so they are a trigger with a recorded marker.
+    skipped = new_rows(
+        "build", "--select", "demo_records", "tag:dqm", success=False, fail_records=True
+    )
+    assert sorted(row["step"] for row in skipped) == sorted(steps)
+    invocation = skipped[0]["invocation_id"]
+    executions = demo.sql(
+        "select test_status, captured_at from @schema.dqm_test_executions where invocation_id=%s",
+        [invocation],
+    )
+    assert executions and {row["test_status"] for row in executions} == {"skipped"}
+    assert {row["trigger_marker_at"] for row in skipped} == {
+        max(row["captured_at"] for row in executions)
+    }
+
+
+def test_migration_0006_adds_attribution_to_a_populated_log(demo):
+    demo.capture(**RETENTION)
+    demo.dbt("build", "--select", "package:dbt_dqm", variables=RETENTION)
+    # A 0005 schema: the health view (which reads the new columns) is rebuilt by the package.
+    demo.sql("drop view @schema.dqm_maintenance_health")
+    demo.sql(
+        "alter table @schema.dqm_maintenance_log "
+        "drop column trigger_marker_at, drop column trigger_kind"
+    )
+    demo.sql(
+        "delete from @schema.dqm_schema_migrations where migration_id='0006_maintenance_attribution'"
+    )
+    demo.sql("update @schema.dqm_reconciliation_control set schema_version='0005_maintenance_log'")
+    legacy = _maintenance(demo)
+    before = demo.occurrences()
+    # Migrations are not optional maintenance: an interrupted one fails visibly and rolls back.
+    demo.dbt("run", "--select", "dqm_reconcile", variables={"interrupt_0006": True}, success=False)
+    columns = demo.sql(
+        "select column_name, data_type from information_schema.columns "
+        "where table_schema=%s and table_name='dqm_maintenance_log'",
+        [demo.schema],
+    )
+    assert {"trigger_marker_at", "trigger_kind"}.isdisjoint(row["column_name"] for row in columns)
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    columns = {
+        row["column_name"]: row["data_type"]
+        for row in demo.sql(
+            "select column_name, data_type from information_schema.columns "
+            "where table_schema=%s and table_name='dqm_maintenance_log'",
+            [demo.schema],
+        )
+    }
+    assert columns["trigger_marker_at"] == "timestamp without time zone"
+    assert columns["trigger_kind"] == "text"
+    assert demo.occurrences() == before
+    preserved = demo.sql(
+        "select * from @schema.dqm_maintenance_log where invocation_id = any(%s)",
+        [[row["invocation_id"] for row in legacy]],
+    )
+    assert len(preserved) == len(legacy)
+    assert {row["trigger_kind"] for row in preserved} == {None}
+    control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
+    assert control["schema_version"] == "0006_maintenance_attribution"
 
 
 RACE_PROBE = """{{{{ config(materialized='{materialization}',

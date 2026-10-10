@@ -691,7 +691,7 @@ def test_bigquery_0002_upgrades_populated_schema_after_interruption(demo):
     assert demo.sql("select 1 from @dataset.dqm_app_change_staging` limit 0") == []
     control = demo.sql("select * from @dataset.dqm_reconciliation_control`")[0]
     assert control["setup_status"] == "ready" and control["migration_owner"] is None
-    assert control["schema_version"] == "0005_maintenance_log"
+    assert control["schema_version"] == "0006_maintenance_attribution"
 
 
 def test_bigquery_0004_preserves_history_and_bounds_legacy_staging(demo):
@@ -937,3 +937,226 @@ def test_bigquery_reviewer_apply_during_maintenance_never_fails_dbt(demo):
             reviewer.result()
     assert outcomes, "the reviewer never applied an edit during the run"
     assert set(outcomes) <= {"applied", "busy"}, outcomes
+
+
+RETAIN_ONE_DAY = {"dbt_dqm_retention_days": 1}
+
+
+def _outcomes(demo, invocation):
+    return {
+        row["step"]: row
+        for row in demo.sql(
+            f"select * from @dataset.dqm_maintenance_log` where invocation_id='{invocation}'"
+        )
+    }
+
+
+def _test_invocation(demo, **variables):
+    variables = {"demo_scenario": "initial", **variables}
+    demo.dbt("run", "--select", "demo_records", variables=variables)
+    return demo.dbt(
+        "test", "--select", "tag:dqm", "--exclude", "tag:guardrail", variables=variables
+    )
+
+
+def test_bigquery_failed_stage_drop_keeps_its_run_for_retry(demo):
+    from google.api_core.exceptions import NotFound
+
+    demo.capture("initial")
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    runs = [demo.freeze(), None]
+    demo.apply(runs[0])
+    runs[1] = demo.freeze()
+    demo.apply(runs[1])
+    kept, pruned = runs
+    stages = {
+        run: demo.sql(
+            f"select stage_relation from @dataset.dqm_reconciliation_runs` where run_id='{run}'"
+        )[0]["stage_relation"].replace("`", "")
+        for run in runs
+    }
+    # Both runs are old enough for stage drops (24 h) and for run pruning (1 day).
+    demo.sql(
+        "update @dataset.dqm_reconciliation_runs` set "
+        "started_at=timestamp_sub(current_timestamp(), interval 3 day), "
+        "completed_at=timestamp_sub(current_timestamp(), interval 3 day) "
+        f"where run_id in ('{kept}', '{pruned}')"
+    )
+    fragment = kept.replace("-", "")
+
+    # The recovery path stays tolerant: the failed drop is skipped and the operation succeeds.
+    demo.dbt("run-operation", "dqm_cleanup_stages", variables={"fail_stage_drop": fragment})
+    assert demo.client.get_table(stages[kept])
+    with pytest.raises(NotFound):
+        demo.client.get_table(stages[pruned])
+
+    # Maintenance attempts every stage, logs the step as failed and keeps the failed stage's run,
+    # while the run whose stage is gone is pruned normally.
+    invocation = _test_invocation(demo, fail_stage_drop=fragment, **RETAIN_ONE_DAY)
+    outcomes = _outcomes(demo, invocation)
+    assert outcomes["stage_drops"]["outcome"] == "failed"
+    assert outcomes["run_pruning"]["outcome"] == "succeeded"
+    assert outcomes["stage_drops"]["diagnostic_id"]
+    assert demo.client.get_table(stages[kept])
+    remaining = {
+        row["run_id"] for row in demo.sql("select run_id from @dataset.dqm_reconciliation_runs`")
+    }
+    assert kept in remaining and pruned not in remaining
+    assert _bq_health(demo)["stage_drops"]["state"] == "failing"
+
+    # Without the fault, the retry drops the stage, and its run is then pruned.
+    invocation = _test_invocation(demo, **RETAIN_ONE_DAY)
+    assert {row["outcome"] for row in _outcomes(demo, invocation).values()} == {"succeeded"}
+    with pytest.raises(NotFound):
+        demo.client.get_table(stages[kept])
+    remaining = {
+        row["run_id"] for row in demo.sql("select run_id from @dataset.dqm_reconciliation_runs`")
+    }
+    assert kept not in remaining
+    assert _bq_health(demo)["stage_drops"]["state"] == "ok"
+
+
+def test_bigquery_open_transaction_ends_with_its_step_job(demo):
+    """Simulates the state after a failed COMMIT: the step leaves its transaction open.
+
+    This shows rollback at job end, independent outcome logging and isolation of the next step.
+    It doesn't show what every real COMMIT failure leaves behind.
+    """
+    demo.capture("initial")
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    demo.sql(
+        "update @dataset.dqm_test_executions` set captured_at=timestamp_sub(captured_at, interval 400 day) "
+        "where invocation_id in (select invocation_id from @dataset.dqm_reconciliation_receipts`)"
+    )
+    counts = {
+        name: demo.sql(f"select count(*) n from @dataset.{name}`")[0]["n"]
+        for name in ("dqm_reconciliation_receipts", "dqm_test_executions")
+    }
+    control = demo.sql("select raw_pruned_before from @dataset.dqm_reconciliation_control`")
+    invocation = _test_invocation(demo, fail_step="raw_pruning_open_transaction", **RETAIN_ONE_DAY)
+    assert (
+        demo.sql("select count(*) n from @dataset.dqm_reconciliation_receipts`")[0]["n"]
+        == counts["dqm_reconciliation_receipts"]
+    )
+    assert demo.sql("select raw_pruned_before from @dataset.dqm_reconciliation_control`") == control
+    outcomes = _outcomes(demo, invocation)
+    assert outcomes["raw_pruning"]["outcome"] == "failed"
+    assert {name: row["outcome"] for name, row in outcomes.items() if name != "raw_pruning"} == {
+        "staging_expiry": "succeeded",
+        "stage_drops": "succeeded",
+        "run_pruning": "succeeded",
+        "log_pruning": "succeeded",
+    }
+    assert {row["trigger_kind"] for row in outcomes.values()} == {"automatic"}
+    markers = {row["trigger_marker_at"] for row in outcomes.values()}
+    assert len(markers) == 1 and None not in markers
+
+
+def test_bigquery_explicit_cleanup_requires_recorded_outcomes(demo):
+    demo.capture("initial")
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    demo.dbt("run-operation", "cleanup_dqm_logs", variables={"fail_log": True}, success=False)
+    assert "staging_expiry (outcome not recorded)" in demo.last_output
+    demo.dbt(
+        "run-operation",
+        "cleanup_dqm_logs",
+        variables={"fail_step": "staging_expiry"},
+        success=False,
+    )
+    assert "staging_expiry (failed, diagnostic" in demo.last_output
+    invocation = demo.dbt("run-operation", "cleanup_dqm_logs")
+    manual = _outcomes(demo, invocation)
+    assert {row["outcome"] for row in manual.values()} == {"succeeded"}
+    assert {row["trigger_kind"] for row in manual.values()} == {"manual"}
+    assert {row["trigger_marker_at"] for row in manual.values()} == {None}
+
+
+def test_bigquery_orphan_stage_from_a_stale_runner_expires_and_never_blocks_maintenance(demo):
+    """The bounded fallback for a stage created after its run was pruned (a stale runner).
+
+    A runner resuming after that would still be fenced from applying lifecycle changes
+    (test_bigquery_stale_generation_annotations_and_abandoned_runner); its scratch stage has no
+    run row, so maintenance never drops it, and BigQuery expires it within 24 hours.
+    """
+    demo.capture("initial")
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    name = f"{PROJECT}.{demo.dataset}.dqm_reconcile_stage_{uuid.uuid4().hex}"
+    demo.sql(
+        f"create table `{name}` options(expiration_timestamp="
+        "timestamp_add(current_timestamp(), interval 24 hour)) as select 1 as orphan"
+    )
+    invocation = _test_invocation(demo, **RETAIN_ONE_DAY)
+    assert {row["outcome"] for row in _outcomes(demo, invocation).values()} == {"succeeded"}
+    table = demo.client.get_table(name)
+    assert table.expires is not None
+    assert (table.expires - table.created).total_seconds() <= 24 * 60 * 60
+
+
+def test_bigquery_maintenance_health_overlap_and_legacy_rows(demo):
+    demo.capture("initial")
+    demo.dbt("build", "--select", "package:dbt_dqm")
+
+    def scenario(rows):
+        for table in (
+            "dqm_maintenance_log",
+            "dqm_reconciliation_inputs",
+            "dqm_reconciliation_runs",
+            "dqm_test_executions",
+        ):
+            demo.sql(f"delete from @dataset.{table}` where true")
+        for kind, values in rows:
+            if kind == "run":
+                run_id, at = values
+                demo.sql(
+                    "insert into @dataset.dqm_reconciliation_runs` "
+                    "(run_id, generation_at_freeze, stage_relation, status, started_at, completed_at) "
+                    f"values ('{run_id}', 0, '', 'completed', timestamp '{at}', timestamp '{at}')"
+                )
+            else:
+                invocation, outcome, marker, trigger_kind, logged = values
+                marker_sql = f"timestamp '{marker}'" if marker else "cast(null as timestamp)"
+                kind_sql = f"'{trigger_kind}'" if trigger_kind else "cast(null as string)"
+                demo.sql(
+                    "insert into @dataset.dqm_maintenance_log` (logged_at, invocation_id, step, "
+                    "outcome, description, diagnostic_id, trigger_marker_at, trigger_kind) values "
+                    f"(timestamp '{logged}', '{invocation}', 'staging_expiry', '{outcome}', "
+                    f"'fixture', null, {marker_sql}, {kind_sql})"
+                )
+        return _bq_health(demo)["staging_expiry"]["state"]
+
+    t1, t2, t3 = "2026-01-01 01:00:00", "2026-01-01 02:00:00", "2026-01-01 03:00:00"
+    # An earlier success can't mask a newer trigger's missing outcome...
+    assert (
+        scenario(
+            [
+                ("run", ("a", t1)),
+                ("run", ("b", t2)),
+                ("log", ("a", "succeeded", t1, "automatic", t3)),
+            ]
+        )
+        == "unknown"
+    )
+    # ...while a later-marker success supersedes an older trigger's (accepted approximation).
+    assert (
+        scenario(
+            [
+                ("run", ("a", t1)),
+                ("run", ("b", t2)),
+                ("log", ("b", "succeeded", t2, "automatic", t2)),
+            ]
+        )
+        == "ok"
+    )
+    # A tie never hides a failure; a legacy row needs a later attributed outcome.
+    assert (
+        scenario(
+            [
+                ("run", ("a", t1)),
+                ("run", ("b", t1)),
+                ("log", ("a", "succeeded", t1, "automatic", t1)),
+                ("log", ("b", "failed", t1, "automatic", t2)),
+            ]
+        )
+        == "failing"
+    )
+    assert scenario([("log", ("legacy", "succeeded", None, None, t1))]) == "unknown"

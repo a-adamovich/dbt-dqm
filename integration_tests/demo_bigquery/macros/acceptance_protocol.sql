@@ -67,12 +67,24 @@
 {% macro bigquery__maintenance_raw_pruning(days) %}
   {{ dbt_dqm.default__maintenance_raw_pruning(days) }}
   {% if var('fail_step', '') == 'raw_pruning' %}select error('{{ var("fail_marker", "injected") }}');{% endif %}
+  {#- Simulates the state after a failed COMMIT: the transaction is still open but the step's
+      flag says there's nothing to roll back. The open transaction must end with the step job. #}
+  {% if var('fail_step', '') == 'raw_pruning_open_transaction' %}set dqm_step_txn = false; select error('injected open transaction');{% endif %}
+{% endmacro %}
+{#- Fails the inner drop of one existing stage, chosen by a fragment of its relation name. #}
+{% macro bigquery__maintenance_stage_drop_sql(stage_relation) %}
+  {% if var('fail_stage_drop', '') %}
+    if strpos({{ stage_relation }}, {{ dbt_dqm.sql_string(var('fail_stage_drop')) }}) > 0 then
+      select error('injected stage drop failure');
+    end if;
+  {% endif %}
+  {{ dbt_dqm.default__maintenance_stage_drop_sql(stage_relation) }}
 {% endmacro %}
 {% macro bigquery__maintenance_log_pruning() %}
   {{ dbt_dqm.default__maintenance_log_pruning() }}
   {% if var('fail_step', '') == 'log_pruning' %}select error('{{ var("fail_marker", "injected") }}');{% endif %}
 {% endmacro %}
-{% macro bigquery__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression) %}
+{% macro bigquery__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression, marker, kind) %}
   {% if var('fail_log', false) %}select error('maintenance log unavailable');
-  {% else %}{{ dbt_dqm.default__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression) }}{% endif %}
+  {% else %}{{ dbt_dqm.default__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression, marker, kind) }}{% endif %}
 {% endmacro %}
