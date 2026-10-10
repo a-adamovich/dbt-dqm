@@ -73,9 +73,48 @@ jobs:
             uv run dbt test --select assert_scenario_outcomes --vars "{demo_scenario: $scenario}"
           done
       - name: Attest distribution provenance
-        uses: actions/attest-build-provenance@00014ed6ed5efc5b1ab7f7f34a39eb55d41aa4f8 # v3.1.0
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*
+      - name: Verify distribution provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          sdists=(dist/*.tar.gz)
+          files=(dist/* dist/.[!.]* dist/..?*)
+          if (( ${#wheels[@]} != 1 || ${#sdists[@]} != 1 || ${#files[@]} != 2 )); then
+            echo 'Expected exactly one wheel and one source archive, with no other distribution files.' >&2
+            exit 1
+          fi
+          for artifact in "${wheels[@]}" "${sdists[@]}"; do
+            if [[ ! -f "$artifact" || -L "$artifact" ]]; then
+              echo "Expected a regular distribution file: $artifact" >&2
+              exit 1
+            fi
+            verified=false
+            for attempt in 1 2 3; do
+              if gh attestation verify "$artifact" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+                --source-digest "$GITHUB_SHA" \
+                --source-ref "$GITHUB_REF" \
+                --deny-self-hosted-runners; then
+                verified=true
+                break
+              fi
+              if (( attempt < 3 )); then
+                sleep 5
+              fi
+            done
+            if [[ "$verified" != true ]]; then
+              echo "Provenance verification failed after three attempts: $artifact" >&2
+              exit 1
+            fi
+          done
       - name: Publish to PyPI through trusted publishing
         run: uv publish
       - name: Create GitHub release
