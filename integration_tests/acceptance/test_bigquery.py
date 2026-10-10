@@ -804,6 +804,7 @@ def test_bigquery_annotation_concurrent_retries_and_independent_batches(demo):
 
     first = edit(rows[0], "duplicate retries")
     second = edit(rows[1], "independent batch")
+    busy = []
     with ThreadPoolExecutor(max_workers=3) as pool:
         futures = [(pool.submit(apply_patches, config, patches), patches)
                    for patches in (first, first, second)]
@@ -812,7 +813,11 @@ def test_bigquery_annotation_concurrent_retries_and_independent_batches(demo):
                 future.result()
             except GoogleAPICallError as error:
                 assert isinstance(classify(error), WarehouseBusy), str(error)
-                apply_patches(config, patches)
+                busy.append(patches)
+    # Retry only after every concurrent attempt has finished, as a reviewer would after "busy";
+    # a retry overlapping a still-running attempt could legitimately conflict again.
+    for patches in busy:
+        apply_patches(config, patches)
     by_id = {r["occurrence_id"]: r for r in demo.snapshot()}
     for row in rows:
         assert by_id[row["occurrence_id"]]["annotation_version"] == row["annotation_version"] + 1
