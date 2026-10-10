@@ -43,7 +43,11 @@ Changelog = "https://github.com/a-adamovich/dbt-dqm/blob/main/CHANGELOG.md"
 dbt-dqm = "dbt_dqm_app.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8,<10", "ruff>=0.8,<1"]
+dev = [
+    "pytest>=8,<10",
+    "pytest-xdist>=3.8,<4",
+    "ruff>=0.8,<1",
+]
 
 [build-system]
 requires = ["hatchling"]
