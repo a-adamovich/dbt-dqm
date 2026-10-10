@@ -324,11 +324,14 @@ dependencies = [
     { name = "dbt-core" },
     { name = "dbt-postgres" },
     { name = "google-cloud-bigquery" },
+    { name = "oauthlib" },
     { name = "pandas" },
     { name = "platformdirs" },
     { name = "pyarrow" },
     { name = "pyyaml" },
+    { name = "sqlparse" },
     { name = "streamlit" },
+    { name = "urllib3" },
 ]
 
 [package.dev-dependencies]
@@ -343,11 +346,14 @@ requires-dist = [
     { name = "dbt-core", specifier = "==1.11.15" },
     { name = "dbt-postgres", specifier = ">=1.11,<1.12" },
     { name = "google-cloud-bigquery", specifier = ">=3.25,<4" },
+    { name = "oauthlib", specifier = ">=4.0.0,<5" },
     { name = "pandas", specifier = ">=2.2,<3" },
     { name = "platformdirs", specifier = ">=4,<5" },
     { name = "pyarrow", specifier = ">=23.0.1,<24" },
     { name = "pyyaml", specifier = ">=6,<7" },
+    { name = "sqlparse", specifier = ">=0.6.0,<0.7" },
     { name = "streamlit", specifier = ">=1.41,<2" },
+    { name = "urllib3", specifier = ">=2.8.0,<3" },
 ]
 
 [package.metadata.requires-dev]

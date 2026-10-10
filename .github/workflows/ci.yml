@@ -62,6 +62,24 @@ jobs:
           uv venv /tmp/dbt-dqm-wheel-smoke --python 3.11
           uv pip install --python /tmp/dbt-dqm-wheel-smoke/bin/python dist/*.whl
           /tmp/dbt-dqm-wheel-smoke/bin/dbt-dqm --help
+      - name: Wheel carries the security floors (#24)
+        run: DBT_DQM_WHEEL="$(ls dist/*.whl)" uv run pytest -q tests/test_dependency_floors.py
+      - name: Installing the wheel upgrades older vulnerable versions
+        run: |
+          wheel="$(pwd)/$(ls dist/*.whl)"
+          uv venv /tmp/dbt-dqm-old-deps --python 3.11
+          uv pip install --python /tmp/dbt-dqm-old-deps/bin/python sqlparse==0.5.5 urllib3==2.7.0 oauthlib==3.3.1
+          cd /tmp
+          uv pip install --python /tmp/dbt-dqm-old-deps/bin/python "$wheel"
+          uv pip check --python /tmp/dbt-dqm-old-deps/bin/python
+          /tmp/dbt-dqm-old-deps/bin/python - <<'PY'
+          from importlib.metadata import version
+          from packaging.version import Version
+          floors = {"sqlparse": "0.6.0", "urllib3": "2.8.0", "oauthlib": "4.0.0"}
+          installed = {name: version(name) for name in floors}
+          print(installed)
+          assert all(Version(installed[n]) >= Version(v) for n, v in floors.items()), installed
+          PY
 
   dbt-postgres:
     runs-on: ubuntu-latest

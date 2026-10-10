@@ -2,6 +2,7 @@
 
 ## 0.2.0 (unreleased)
 
+- Requires `sqlparse>=0.6.0`, `urllib3>=2.8.0` and `oauthlib>=4.0.0` directly, the first versions without the advisories resolved in #24. The lockfile already used them, but a wheel installed without the lockfile could keep older, vulnerable versions that still satisfied the upstream ranges.
 - Requires PyArrow 23.x (`>=23.0.1,<24`). Sync memory at the 50,000-issue boundary is unchanged within run-to-run variation (`docs/scale.md`).
 - Postgres reconciliation replaces the `dqm_reconcile` view in place after taking its lock (`dqm_entry_view` materialization), so overlapping runs no longer act on each other's temporary relations (#17).
 - Optional maintenance (retention, staging expiry, stage drops) runs only after invocations that captured tracked tests or completed a reconciliation. A SQL error inside a step never fails the dbt invocation (connection, cancellation and lock failures still do). Outcomes go to `dqm_maintenance_log` (migration `0005`) with sanitized descriptions and safe diagnostic IDs, and appear as `ok`/`failing`/`unknown` in `dqm_maintenance_health` and the app's Health tab (#13).
