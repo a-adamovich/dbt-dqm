@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 - 2026-10-10
 
 - Releases check that the tag matches the `pyproject.toml` and `dbt_project.yml` versions before anything is built, and install from the lockfile (`uv sync --locked`).
 - Requires `sqlparse>=0.6.0`, `urllib3>=2.8.0` and `oauthlib>=4.0.0` directly, the first versions without the advisories resolved in #24. The lockfile already used them, but a wheel installed without the lockfile could keep older, vulnerable versions that still satisfied the upstream ranges.
