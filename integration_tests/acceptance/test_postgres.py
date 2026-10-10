@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -837,3 +838,168 @@ def test_event_payload_migration_upgrades_an_existing_02_schema(demo):
         control["schema_version"] == "0004_app_staging_safety"
         and control["setup_status"] == "ready"
     )
+
+
+RACE_PROBE = """{{{{ config(materialized='{materialization}',
+    pre_hook=["select pg_advisory_xact_lock(hashtext('dqm-race-probe'))"]) }}}}
+select 1 as probe
+"""
+# Test-only: pause dbt's backup-relation drop on an advisory-lock barrier held by the test.
+RACE_BARRIER = """
+{% macro postgres__drop_relation(relation) -%}
+  {% if var('race_barrier', false) and relation.identifier.endswith('__dbt_backup') %}
+    {% call statement('race_barrier', auto_begin=False) -%}
+      select pg_advisory_lock(hashtext('dqm-race-barrier')); select pg_advisory_unlock(hashtext('dqm-race-barrier'));
+    {%- endcall %}
+  {% endif %}
+  {{ return(dbt.default__drop_relation(relation)) }}
+{%- endmacro %}
+"""
+
+
+def _race_project(demo):
+    for name, materialization in (
+        ("race_probe_default", "view"),
+        ("race_probe_entry", "dqm_entry_view"),
+    ):
+        (demo.project / f"models/{name}.sql").write_text(
+            RACE_PROBE.format(materialization=materialization)
+        )
+    (demo.project / "macros/race_barrier.sql").write_text(RACE_BARRIER)
+
+
+def _dbt_logged(demo, model, log_dir, variables=None):
+    demo.dbt(
+        "run",
+        "--select",
+        model,
+        "--log-path",
+        str(log_dir),
+        "--target-path",
+        str(log_dir / "target"),
+        variables=variables,
+    )
+    return (log_dir / "dbt.log").read_text()
+
+
+def _probe_relations(demo):
+    return {
+        row["relname"]
+        for row in demo.sql(
+            "select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace "
+            "where n.nspname=%s and c.relname like 'race_probe%%'",
+            [demo.schema],
+        )
+    }
+
+
+def test_default_view_materialization_drops_another_runs_backup_before_its_lock(demo):
+    """Demonstrates the unsafe pre-lock interleaving behind #17 with dbt's default view
+    materialization: session B drops session A's committed backup relation before B takes
+    the lock, using its own relation cache. The exact `drop external` path is not reproduced."""
+    _race_project(demo)
+    demo.dbt("run", "--select", "race_probe_default")  # The view exists before the race.
+    with psycopg2.connect(DSN) as barrier, barrier.cursor() as cursor:
+        barrier.autocommit = True
+        cursor.execute("select pg_advisory_lock(hashtext('dqm-race-barrier'))")
+        with ThreadPoolExecutor(1) as pool:
+            first = pool.submit(
+                _dbt_logged,
+                demo,
+                "race_probe_default",
+                demo.project / "logs-a",
+                {"race_barrier": True},
+            )
+            # A commits, then waits at the barrier before dropping its own backup relation.
+            for _ in range(300):
+                if "race_probe_default__dbt_backup" in _probe_relations(demo):
+                    break
+                time.sleep(0.1)
+            assert "race_probe_default__dbt_backup" in _probe_relations(demo)
+            second = _dbt_logged(demo, "race_probe_default", demo.project / "logs-b")
+            cursor.execute("select pg_advisory_unlock(hashtext('dqm-race-barrier'))")
+            first.result()
+    drop = re.search(
+        r'drop view if exists "[^"]+"\."[^"]+"\."race_probe_default__dbt_backup"', second
+    )
+    lock_at = second.find("pg_advisory_xact_lock(hashtext('dqm-race-probe'))")
+    assert drop is not None and 0 <= drop.start() < lock_at, (
+        "session B dropped A's backup relation before taking the lock"
+    )
+
+
+def test_entry_view_performs_no_ddl_before_the_lock(demo):
+    _race_project(demo)
+    demo.dbt("run", "--select", "race_probe_entry")
+    with psycopg2.connect(DSN) as holder, holder.cursor() as cursor:
+        holder.autocommit = True
+        cursor.execute("select pg_advisory_lock(hashtext('dqm-race-probe'))")
+        with ThreadPoolExecutor(1) as pool:
+            waiting = pool.submit(_dbt_logged, demo, "race_probe_entry", demo.project / "logs-b")
+            time.sleep(5)
+            assert not waiting.done(), "the run must wait for the lock"
+            assert _probe_relations(demo) == {"race_probe_entry"}
+            cursor.execute("select pg_advisory_unlock(hashtext('dqm-race-probe'))")
+            log = waiting.result()
+    lock_at = log.find("pg_advisory_xact_lock(hashtext('dqm-race-probe'))")
+    assert lock_at >= 0
+    before_lock = log[:lock_at].lower()
+    assert "drop view" not in before_lock and "drop table" not in before_lock
+    assert "rename to" not in before_lock and "create or replace view" not in before_lock
+    assert "create or replace view" in log[lock_at:].lower()
+    assert _probe_relations(demo) == {"race_probe_entry"}
+
+
+def test_entry_view_overlapping_reconciliations_repeat(demo):
+    demo.capture()
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    for attempt in range(20):
+        with ThreadPoolExecutor(2) as pool:
+            runs = [
+                pool.submit(
+                    demo.dbt,
+                    "run",
+                    "--select",
+                    "dqm_reconcile",
+                    "--target-path",
+                    f"target-{attempt}-{index}",
+                    "--log-path",
+                    str(demo.project / f"logs-{attempt}-{index}"),
+                )
+                for index in range(2)
+            ]
+            for run in runs:
+                run.result()
+    assert not demo.sql(
+        "select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace "
+        "where n.nspname=%s and c.relname like 'dqm_reconcile__dbt%%'",
+        [demo.schema],
+    )
+
+
+def test_entry_view_appends_migrated_columns_and_keeps_public_views(demo):
+    demo.capture()
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    issues = demo.sql("select count(*) n from @schema.dqm_all_issues")[0]["n"]
+    demo.dbt("run", "--select", "dqm_reconcile", variables={"future": True})
+    columns = [
+        row["column_name"]
+        for row in demo.sql(
+            "select column_name from information_schema.columns where table_schema=%s "
+            "and table_name='dqm_reconcile' order by ordinal_position",
+            [demo.schema],
+        )
+    ]
+    assert columns[-1] == "future_field"
+    assert demo.sql("select count(*) n from @schema.dqm_all_issues")[0]["n"] == issues
+    assert demo.sql("select count(*) n from @schema.dqm_reconcile")[0]["n"] >= issues
+
+
+def test_entry_view_refuses_to_replace_a_table(demo):
+    demo.dbt("run", "--select", "dqm_reconcile")
+    demo.sql("drop view @schema.dqm_reconcile")
+    demo.sql("create table @schema.dqm_reconcile (kept text)")
+    demo.sql("insert into @schema.dqm_reconcile values ('untouched')")
+    failed = demo.dbt("run", "--select", "dqm_reconcile", success=False)
+    assert "expected" in failed.stdout and "to be a view" in failed.stdout
+    assert demo.sql("select kept from @schema.dqm_reconcile") == [{"kept": "untouched"}]
