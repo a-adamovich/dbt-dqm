@@ -16,6 +16,8 @@ updates:
         update-types: ["version-update:semver-minor"]
       - dependency-name: pandas
         update-types: ["version-update:semver-major"]
+      # pyarrow majors are adopted deliberately, with the app memory benchmark rerun at the
+      # 50k cache boundary (pinned to 23.x; see #11 and docs/scale.md).
       - dependency-name: pyarrow
         update-types: ["version-update:semver-major"]
     groups:

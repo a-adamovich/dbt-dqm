@@ -1,0 +1,43 @@
+{
+  "scenario": "supported-cache-boundary-real-postgres-sync",
+  "harness": "integration_tests/scale/cache_boundary.py",
+  "postgres": "16.11",
+  "issues": 50000,
+  "mean_payload_bytes": 408,
+  "synthetic_processed_history": true,
+  "method": "Alternating runs (19.0.1, 23.0.1, 19.0.1, 23.0.1) on an otherwise idle machine; identical code and lock except pyarrow.",
+  "runs": [
+    {
+      "pyarrow": "19.0.1",
+      "round": 1,
+      "warehouse_read_seconds": 2.27,
+      "total_seconds": 5.45,
+      "baseline_rss_mb": 160.2,
+      "peak_rss_mb": 457.6
+    },
+    {
+      "pyarrow": "23.0.1",
+      "round": 1,
+      "warehouse_read_seconds": 2.24,
+      "total_seconds": 5.38,
+      "baseline_rss_mb": 162.9,
+      "peak_rss_mb": 445.2
+    },
+    {
+      "pyarrow": "19.0.1",
+      "round": 2,
+      "warehouse_read_seconds": 2.12,
+      "total_seconds": 4.98,
+      "baseline_rss_mb": 160.8,
+      "peak_rss_mb": 461.8
+    },
+    {
+      "pyarrow": "23.0.1",
+      "round": 2,
+      "warehouse_read_seconds": 2.21,
+      "total_seconds": 5.04,
+      "baseline_rss_mb": 164.0,
+      "peak_rss_mb": 458.4
+    }
+  ]
+}

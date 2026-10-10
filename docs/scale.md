@@ -131,6 +131,21 @@ the same machine, so timings are indicative rather than a regression threshold. 
 Streamlit server adds framework overhead; this is not an end-to-end server-memory guarantee.
 Raw results: [`cache-boundary-safeguards.json`](scale-results/cache-boundary-safeguards.json).
 
+### PyArrow 23 rerun (2026-10-10)
+
+The same harness at 50,000 issues compared PyArrow 19.0.1 and 23.0.1, with identical code and lock otherwise
+(dbt-core 1.11.15, pandas 2.3.3, Streamlit 1.65.0). Runs alternated on an otherwise idle machine:
+
+| PyArrow | Peak RSS (2 runs) | Mean peak | Mean baseline |
+| --- | --- | --- | --- |
+| 19.0.1 | 457.6 / 461.8 MiB | 459.7 MiB | 160.5 MiB |
+| 23.0.1 | 445.2 / 458.4 MiB | 451.8 MiB | 163.4 MiB |
+
+PyArrow 23 changes peak RSS by about −8 MiB, which is within run-to-run variation, and the baseline by
+about +3 MiB. Both are about 40 MiB above the 420.8 MiB recorded on 2026-10-09; the 19.0.1 control
+shows the same rise, so it comes from other changes since then (including the dependency updates), not
+from PyArrow. Raw results: [`pyarrow-23-cache-boundary.json`](scale-results/pyarrow-23-cache-boundary.json).
+
 ```bash
 DBT_DQM_TEST_DSN='host=... port=... dbname=... user=... password=...' \
 uv run python integration_tests/scale/cache_boundary.py --output /tmp/cache-boundary.json
