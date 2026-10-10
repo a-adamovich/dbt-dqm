@@ -146,6 +146,15 @@ On BigQuery use native IAM privilege maps, e.g. `roles/bigquery.dataViewer: ["us
 
 Setup creates `dqm_app_change_staging` (migration `0003_app_change_staging`), so reviewers never need table-create rights on the dataset; the app only loads rows into it. The Postgres reviewer grant set above is proven by an acceptance test with separate restricted roles. The BigQuery matrix has not yet been proven with separate restricted service accounts (the BigQuery suite runs as one elevated identity); see the verification record.
 
+**Credential-file overrides in the review app.** When the app is given an explicit credentials
+file for a BigQuery `oauth` profile (as the restricted gate does for its reviewer), it accepts only
+a service-account key or authorized-user (gcloud) credentials. The file is validated before dbt or
+any BigQuery client runs, and rejections use fixed messages that never quote the file. Other
+credential types, such as workload identity federation, work through Application Default
+Credentials without a file override. dbt's own `debug` and `parse` reread the same path, so the
+file must stay under the user's control for the whole operation. Live interactive OAuth sign-in is
+not exercised by the automated suites.
+
 ### Restricted BigQuery QA gate
 
 The dedicated gate uses the pre-created `dbt-dqm.dbt_dqm_qa` dataset and exactly
