@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The scheduled BigQuery workflow is keyless (Workload Identity Federation, no stored key), runs only from `main` when enabled, checks that its identity can't read the shared QA dataset, runs the parallel acceptance suite, and reports failures in an issue. One-time setup: `docs/scheduled-bigquery.md`.
 - The credentialed BigQuery acceptance suite runs in parallel (`pytest -n 6`, about 25 minutes instead of 2 h 19 m). Every disposable dataset is labelled with its run, and leftovers from killed workers or stopped runs are swept automatically (`integration_tests/acceptance/bigquery_datasets.py`).
 
 ## 0.2.0 - 2026-10-10
