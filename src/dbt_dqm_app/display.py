@@ -207,3 +207,26 @@ def tag_list(value: Any) -> list[str]:
 
 def priority_rank(value: Any) -> int:
     return {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(str(value).lower(), 4)
+
+
+MAINTENANCE_STATES = {
+    "ok": "OK",
+    "failing": "Failing — retried on the next maintenance run",
+    "unknown": "Unknown — no outcome recorded since the latest DQM run",
+}
+
+
+def maintenance_table(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Label maintenance states for display; anything unrecognized is shown as unknown."""
+    if rows is None:
+        return None
+    return [
+        {
+            "step": str(row.get("step") or "").replace("_", " "),
+            "state": MAINTENANCE_STATES.get(str(row.get("state")), MAINTENANCE_STATES["unknown"]),
+            "last success": row.get("last_success_at"),
+            "last failure": row.get("last_failure_at"),
+            "diagnostic id": row.get("last_failure_diagnostic_id"),
+        }
+        for row in rows
+    ]

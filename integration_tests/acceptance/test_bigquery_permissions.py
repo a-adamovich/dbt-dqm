@@ -104,6 +104,7 @@ def test_restricted_bigquery_runner_and_reviewer(tmp_path):
     ).result()}
     assert "0003_app_change_staging" in migrations
     assert "0004_app_staging_safety" in migrations
+    assert "0005_maintenance_log" in migrations
 
     dbt("seed", "--select", fixture)
     dbt("run", "--select", fixture + "_records")
@@ -118,6 +119,9 @@ def test_restricted_bigquery_runner_and_reviewer(tmp_path):
     assert len(owned) == 1
     row = owned[0]
     assert "tests" in snapshot["health"]
+    # Reviewers read maintenance health (the view reads dqm_maintenance_log with their access).
+    maintenance = snapshot["health"]["maintenance"]
+    assert maintenance is not None and {m["step"] for m in maintenance} >= {"staging_expiry"}
     patches = [Patch(row["occurrence_id"], field, row.get(field), value, 1,
                      datetime.now(UTC).isoformat(), row["annotation_version"])
                for field, value in (("notes", "Permissions QA " + token),
@@ -146,7 +150,8 @@ def test_restricted_bigquery_runner_and_reviewer(tmp_path):
     assert next(iter(report_count)).n == 1
     for table, column in (("dqm_reconciliation_control", "generation"),
                           ("dqm_test_executions", "invocation_id"),
-                          ("dqm_reconciliation_receipts", "invocation_id")):
+                          ("dqm_reconciliation_receipts", "invocation_id"),
+                          ("dqm_maintenance_log", "step")):
         with pytest.raises(Forbidden):
             reviewer.query(
                 f"update `{PROJECT}.{DATASET}.{table}` set {column}={column} where false"

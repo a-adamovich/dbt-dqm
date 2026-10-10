@@ -9,7 +9,7 @@ clean-targets: ["target", "dbt_packages", "logs"]
 
 on-run-end:
   - "{{ dbt_dqm.capture_test_results(results) }}"
-  - "{{ dbt_dqm.retention_hook() }}"
+  - "{{ dbt_dqm.retention_hook(results) }}"
 
 on-run-start:
   - "{{ dbt_dqm.empty_preflight() }}"

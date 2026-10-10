@@ -130,6 +130,11 @@ def demo(tmp_path):
 {{ return(registry) }}{% endmacro %}
 {% macro default__acceptance_add() %}alter table {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} add column if not exists future_field text;{% endmacro %}
 {% macro default__acceptance_backfill() %}update {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} set future_field='preserved' where future_field is null;{% endmacro %}
+{% macro postgres__maintenance_raw_pruning(days) %}{{ dbt_dqm.default__maintenance_raw_pruning(days) }}{% if var('fail_step','')=='raw_pruning' %} raise exception '{{ var("fail_marker","injected") }}';{% endif %}{% endmacro %}
+{% macro postgres__maintenance_event_retention(events_days) %}{{ dbt_dqm.default__maintenance_event_retention(events_days) }}{% if var('fail_step','')=='event_retention' %} raise exception '{{ var("fail_marker","injected") }}';{% endif %}{% endmacro %}
+{% macro postgres__maintenance_log_pruning() %}{{ dbt_dqm.default__maintenance_log_pruning() }}{% if var('fail_step','')=='log_pruning' %} raise exception '{{ var("fail_marker","injected") }}';{% endif %}{% endmacro %}
+{% macro postgres__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression) %}{% if var('fail_log',false) %} raise exception 'maintenance log unavailable';{% else %}{{ dbt_dqm.default__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression) }}{% endif %}{% endmacro %}
+{% macro postgres__maintenance_log_verify() %}{{ dbt_dqm.default__maintenance_log_verify() }}{% if var('interrupt_0005',false) %} raise exception 'injected 0005 interruption';{% endif %}{% endmacro %}
 {% macro postgres__event_payload_mode_backfill() %}{{ dbt_dqm.default__event_payload_mode_backfill() }}{% if var('interrupt_0002',false) %} raise exception 'injected 0002 interruption';{% endif %}{% endmacro %}
 {% macro default__acceptance_verify() %}{{ dbt_dqm.assert_sql('not exists(select 1 from ' ~ dbt_dqm.dqm_relation('dqm_issue_occurrences') ~ ' where future_field is null)',"'backfill incomplete'") }}{% endmacro %}
 """)
@@ -832,11 +837,129 @@ def test_event_payload_migration_upgrades_an_existing_02_schema(demo):
         "0002_event_payload_mode",
         "0003_app_change_staging",
         "0004_app_staging_safety",
+        "0005_maintenance_log",
     }
     control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
     assert (
-        control["schema_version"] == "0004_app_staging_safety"
-        and control["setup_status"] == "ready"
+        control["schema_version"] == "0005_maintenance_log" and control["setup_status"] == "ready"
+    )
+
+
+RETENTION = {"dbt_dqm_retention_days": 30, "dbt_dqm_event_retention_days": 365}
+
+
+def _maintenance(demo, invocation_filter=""):
+    return demo.sql(
+        "select * from @schema.dqm_maintenance_log "
+        + invocation_filter
+        + " order by logged_at, step"
+    )
+
+
+def _health(demo):
+    return {
+        row["step"]: row
+        for row in demo.sql("select * from @schema.dqm_maintenance_health order by step")
+    }
+
+
+def test_maintenance_failures_are_logged_safely_and_never_fail_the_invocation(demo):
+    demo.capture(**RETENTION)
+    demo.dbt("build", "--select", "package:dbt_dqm", variables=RETENTION)
+    assert {row["step"] for row in _maintenance(demo)} >= {"raw_pruning", "event_retention"}
+
+    # A failing step: the invocation still succeeds, the other steps run, and nothing from the
+    # warehouse error text (which here carries a secret marker) reaches the log.
+    marker = "dqm-secret-" + uuid.uuid4().hex
+    demo.capture(**RETENTION, fail_step="event_retention", fail_marker=marker)
+    rows = demo.sql("select * from @schema.dqm_maintenance_log")
+    failed = [row for row in rows if row["outcome"] == "failed"]
+    assert [row["step"] for row in failed] == ["event_retention"]
+    assert failed[0]["diagnostic_id"] == "P0001"  # SQLSTATE raise_exception, not message text
+    assert failed[0]["description"] == "event retention failed"
+    assert all(marker not in json.dumps(row, default=str) for row in rows)
+    # The health view already exists from the build; re-running a package model would itself
+    # trigger maintenance (and recover the step).
+    assert _health(demo)["event_retention"]["state"] == "failing"
+    assert _health(demo)["raw_pruning"]["state"] == "ok"
+
+    # The next run retries and recovers.
+    demo.capture(**RETENTION)
+    assert _health(demo)["event_retention"]["state"] == "ok"
+
+    # Raw pruning fails after its deletes: everything in that step is rolled back.
+    demo.sql(
+        "update @schema.dqm_test_executions set captured_at=captured_at - interval '400 day' "
+        "where invocation_id in (select invocation_id from @schema.dqm_reconciliation_receipts)"
+    )
+    before = {
+        name: demo.sql(f"select count(*) n from @schema.{name}")[0]["n"]
+        for name in ("dqm_issue_observations", "dqm_reconciliation_receipts", "dqm_test_executions")
+    }
+    control = demo.sql(
+        "select generation, raw_pruned_before from @schema.dqm_reconciliation_control"
+    )
+    demo.capture(**RETENTION, fail_step="raw_pruning")
+    after = {name: demo.sql(f"select count(*) n from @schema.{name}")[0]["n"] for name in before}
+    assert after["dqm_reconciliation_receipts"] == before["dqm_reconciliation_receipts"]
+    assert after["dqm_issue_observations"] >= before["dqm_issue_observations"]
+    assert (
+        demo.sql("select raw_pruned_before from @schema.dqm_reconciliation_control")[0][
+            "raw_pruned_before"
+        ]
+        == control[0]["raw_pruned_before"]
+    )
+    assert _health(demo)["raw_pruning"]["state"] == "failing"
+
+    # A log-pruning failure can't remove the outcome rows just written.
+    demo.capture(**RETENTION, fail_step="log_pruning")
+    latest = demo.sql(
+        "select step, outcome from @schema.dqm_maintenance_log where invocation_id="
+        "(select invocation_id from @schema.dqm_maintenance_log order by logged_at desc limit 1)"
+    )
+    assert {row["step"] for row in latest} >= {"raw_pruning", "event_retention", "log_pruning"}
+    assert {row["outcome"] for row in latest if row["step"] == "log_pruning"} == {"failed"}
+
+    # If outcomes can't be logged, the run still succeeds and health is unknown, never ok.
+    demo.capture(**RETENTION, fail_log=True)
+    assert {row["state"] for row in _health(demo).values()} == {"unknown"}
+
+
+def test_maintenance_scope_and_failure_boundary(demo):
+    demo.capture(**RETENTION)
+    demo.dbt("build", "--select", "package:dbt_dqm", variables=RETENTION)
+    logged = len(_maintenance(demo))
+    # A run that touches no dbt-dqm models or tracked tests performs no maintenance.
+    demo.dbt("run", "--select", "demo_records", variables=RETENTION)
+    assert len(_maintenance(demo)) == logged
+    # Reconciliation failures are not maintenance: they still fail the invocation.
+    demo.capture(**RETENTION)
+    demo.dbt(
+        "run", "--select", "dqm_reconcile", variables={**RETENTION, "fault": True}, success=False
+    )
+
+
+def test_migration_0005_upgrades_a_populated_schema_after_interruption(demo):
+    demo.capture()
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    demo.sql("drop table @schema.dqm_maintenance_log cascade")  # a 0004 schema has neither
+    demo.sql("delete from @schema.dqm_schema_migrations where migration_id='0005_maintenance_log'")
+    demo.sql(
+        "update @schema.dqm_reconciliation_control set schema_version='0004_app_staging_safety'"
+    )
+    before = demo.occurrences()
+    # Migrations are not optional maintenance: an interrupted one fails visibly and rolls back.
+    demo.dbt("run", "--select", "dqm_reconcile", variables={"interrupt_0005": True}, success=False)
+    assert not demo.sql(
+        "select 1 from information_schema.tables where table_schema=%s and table_name='dqm_maintenance_log'",
+        [demo.schema],
+    )
+    demo.dbt("run", "--select", "dqm_reconcile")
+    assert demo.occurrences() == before
+    assert demo.sql("select count(*) n from @schema.dqm_maintenance_log")[0]["n"] == 0
+    control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
+    assert (
+        control["schema_version"] == "0005_maintenance_log" and control["setup_status"] == "ready"
     )
 
 

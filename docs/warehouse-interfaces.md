@@ -68,6 +68,36 @@ Skip validates conclusive, late, unreceipted inputs and atomically writes receip
 
 Raw-log retention is opt-in, receipt-aware and portable. Observations, executions and receipts are pruned together only after processing and outside unfinished runs. High-water state is never pruned. Unconditional BigQuery partition expiration is removed. `dbt_dqm_reconcile_lookback_days` is deprecated, warns and is ignored. Events persist indefinitely unless `dbt_dqm_event_retention_days` is configured. Health exposes the raw retention boundary separately from zero observed activity.
 
+### Optional maintenance
+
+After `dbt run`, `build` or `test`, the package runs optional maintenance, but **only when the invocation executed dbt-dqm models or tracked tests**; unrelated runs never touch DQM tables. The steps are:
+- receipt-aware raw pruning and run-ledger pruning, when `dbt_dqm_retention_days` is set;
+- event retention, when `dbt_dqm_event_retention_days` is set;
+- on BigQuery, expiry of app uploads older than 24 hours and drops of stale reconcile stages;
+- pruning of maintenance-log rows older than 30 days, whenever any other step is scheduled.
+
+On Postgres without retention settings, nothing is scheduled.
+
+**Maintenance never fails a dbt invocation.** Each step runs in its own protected block:
+- On BigQuery, a failing step's open transaction is rolled back before anything else. The rollback is skipped when no transaction is open (BigQuery raises an uncatchable error for that), including after a failed commit; a transaction still open when the script ends is discarded by BigQuery.
+- On Postgres, each step is a PL/pgSQL subtransaction inside one transaction that holds the advisory lock.
+- A failed step is retried the next time maintenance runs.
+- Capture, reconciliation, migrations and setup are **not** wrapped; their failures still fail the run.
+- `dbt run-operation cleanup_dqm_logs` runs the same protected steps, then raises if any step failed.
+
+Every step records its outcome in `dqm_maintenance_log` (migration `0005_maintenance_log`):
+- The row holds `logged_at`, `invocation_id`, `step`, `outcome` (`succeeded`/`failed`), a fixed `description`, and a `diagnostic_id`.
+- The `diagnostic_id` is the BigQuery script job ID (look it up in job history) or the Postgres `SQLSTATE` code.
+- **Warehouse error text is never stored**, because it can quote captured values.
+- Writing the log is itself protected: if the log can't be written, the run still succeeds.
+
+dbt doesn't display rows returned by hook queries, so the log and the `dqm_maintenance_health` view are the way to observe maintenance. The view (and the app's Health tab) reports each scheduled step as:
+- `ok`;
+- `failing`, when the latest outcome is a failure;
+- `unknown`, when no outcome is recorded or none since the latest DQM execution. A missing observation is never reported as healthy.
+
+On BigQuery, a standalone staging delete can still conflict with a reviewer's Apply at the same moment. Such a conflict is now logged and retried, never fatal to dbt, and the app reports the warehouse as busy for its own retry.
+
 `run --empty` and `build --empty` require initialized current tracking tables. They skip capture, reconciliation, migrations, table grants and cleanup, so no DQM tracking data changes. The public views keep their normal definitions and keep returning real data; ordinary dbt relation DDL (recreating those views) still occurs.
 
 ## Capture concurrency
@@ -104,7 +134,7 @@ On BigQuery use native IAM privilege maps, e.g. `roles/bigquery.dataViewer: ["us
 | Identity | Project | DQM dataset | Tables |
 | --- | --- | --- | --- |
 | Runner (dbt test/build) | `roles/bigquery.jobUser` | `roles/bigquery.dataEditor`; `roles/bigquery.dataOwner` instead if `dbt_dqm_table_grants` or view `+grants` are configured, because issuing GRANT needs `setIamPolicy`. Plus `dataViewer` on the datasets the tests read. | — |
-| Reviewer (review app) | `roles/bigquery.jobUser` | `roles/bigquery.dataViewer`: BigQuery views run with the caller's access to their source tables, and the Health views read executions, receipts and events | `roles/bigquery.dataEditor` on `dqm_issue_occurrences`, `dqm_annotation_changes`, `dqm_missed_issues` and `dqm_app_change_staging` |
+| Reviewer (review app) | `roles/bigquery.jobUser` | `roles/bigquery.dataViewer`: BigQuery views run with the caller's access to their source tables, and the Health views read executions, receipts, events and `dqm_maintenance_log` | `roles/bigquery.dataEditor` on `dqm_issue_occurrences`, `dqm_annotation_changes`, `dqm_missed_issues` and `dqm_app_change_staging` |
 
 Setup creates `dqm_app_change_staging` (migration `0003_app_change_staging`), so reviewers never need table-create rights on the dataset; the app only loads rows into it. The Postgres reviewer grant set above is proven by an acceptance test with separate restricted roles. The BigQuery matrix has not yet been proven with separate restricted service accounts (the BigQuery suite runs as one elevated identity); see the verification record.
 

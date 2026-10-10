@@ -59,3 +59,20 @@
   {{ dbt_dqm.default__app_staging_safety_backfill() }}
   {% if var('interrupt_0004', false) %}select error('injected 0004 interruption');{% endif %}
 {% endmacro %}
+{# Optional-maintenance fault injection (#13). #}
+{% macro bigquery__maintenance_staging_expiry() %}
+  {{ dbt_dqm.default__maintenance_staging_expiry() }}
+  {% if var('fail_step', '') == 'staging_expiry' %}select error('{{ var("fail_marker", "injected") }}');{% endif %}
+{% endmacro %}
+{% macro bigquery__maintenance_raw_pruning(days) %}
+  {{ dbt_dqm.default__maintenance_raw_pruning(days) }}
+  {% if var('fail_step', '') == 'raw_pruning' %}select error('{{ var("fail_marker", "injected") }}');{% endif %}
+{% endmacro %}
+{% macro bigquery__maintenance_log_pruning() %}
+  {{ dbt_dqm.default__maintenance_log_pruning() }}
+  {% if var('fail_step', '') == 'log_pruning' %}select error('{{ var("fail_marker", "injected") }}');{% endif %}
+{% endmacro %}
+{% macro bigquery__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression) %}
+  {% if var('fail_log', false) %}select error('maintenance log unavailable');
+  {% else %}{{ dbt_dqm.default__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression) }}{% endif %}
+{% endmacro %}
