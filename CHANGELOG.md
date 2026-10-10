@@ -2,6 +2,7 @@
 
 ## 0.2.0 (unreleased)
 
+- Releases check that the tag matches the `pyproject.toml` and `dbt_project.yml` versions before anything is built, and install from the lockfile (`uv sync --locked`).
 - Requires `sqlparse>=0.6.0`, `urllib3>=2.8.0` and `oauthlib>=4.0.0` directly, the first versions without the advisories resolved in #24. The lockfile already used them, but a wheel installed without the lockfile could keep older, vulnerable versions that still satisfied the upstream ranges.
 - Requires PyArrow 23.x (`>=23.0.1,<24`). In repeated runs at the 50,000-issue boundary, peak sync memory is sometimes higher than with PyArrow 19 (`docs/scale.md`).
 - Postgres reconciliation replaces the `dqm_reconcile` view in place after taking its lock (`dqm_entry_view` materialization), so overlapping runs no longer act on each other's temporary relations (#17).

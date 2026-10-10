@@ -130,3 +130,43 @@ def test_release_recovers_after_attestation_visibility_delay(verify):
     assert result.returncode == 0, result.stderr
     assert len(calls) == 4
     assert sleeps == ["5", "5"]
+
+
+def _tag_check(tmp_path, tag, python_version="0.2.0", dbt_version="0.2.0"):
+    workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+    steps = workflow["jobs"]["release"]["steps"]
+    names = [s.get("name") for s in steps]
+    step = steps[names.index("Check the tag matches the package versions")]
+    # It runs before anything is installed, built or published.
+    assert names.index(step["name"]) < names.index("Verify, build, and inspect distributions")
+    assert step["shell"] == "bash"
+    (tmp_path / "pyproject.toml").write_text(f'[project]\nname = "dbt-dqm"\nversion = "{python_version}"\n')
+    (tmp_path / "dbt_project.yml").write_text(f"name: 'dbt_dqm'\nversion: {dbt_version}\n")
+    script = tmp_path / "check.sh"
+    script.write_text(step["run"])
+    return subprocess.run(
+        ["bash", str(script)],
+        cwd=tmp_path,
+        env={**os.environ, "GITHUB_REF_NAME": tag},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_release_tag_must_match_both_package_versions(tmp_path):
+    assert _tag_check(tmp_path, "v0.2.0").returncode == 0
+    mismatch = _tag_check(tmp_path, "v0.2.1")
+    assert mismatch.returncode != 0 and "doesn't match package version v0.2.0" in mismatch.stderr
+    differ = _tag_check(tmp_path, "v0.2.0", dbt_version="0.2.1")
+    assert differ.returncode != 0 and "versions differ" in differ.stderr
+
+
+def test_repository_versions_agree_and_release_installs_locked():
+    import tomllib
+
+    python_version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+    dbt_version = str(yaml.safe_load((ROOT / "dbt_project.yml").read_text())["version"])
+    assert python_version == dbt_version
+    workflow = (ROOT / ".github/workflows/release.yml").read_text()
+    assert "uv sync --locked --all-groups" in workflow

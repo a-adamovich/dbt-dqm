@@ -8,7 +8,9 @@ The figures to use today; everything below is the method and the dated measureme
   At that boundary the sync path's peak RSS varies widely between identical runs: **about
   435–585 MiB** on 2026-10-10, where the single 420.8 MiB figure from 2026-10-09 sits at the low
   end. A running Streamlit server adds its own baseline. See
-  [PyArrow 23 rerun](#pyarrow-23-rerun-2026-10-10).
+  [Repeated memory measurements](#repeated-memory-measurements-across-revisions-2026-10-10).
+  With PyArrow 23, about half the runs reach the top of that range, likely because of its default
+  allocator.
 - **Postgres reconciliation at 1M occurrences:** about 2.4 s steady and 19 s for a 100k mass pass;
   the occurrence lock is held for that time. See [Reconciliation](#reconciliation).
 - **BigQuery reconciliation at 1M occurrences:** about 1.5 GB processed steady and 1.8 GB for a
@@ -158,10 +160,38 @@ The same harness at 50,000 issues compared PyArrow 19.0.1 and 23.0.1, with ident
 | 19.0.1 | 457.6 / 461.8 MiB | 459.7 MiB | 160.5 MiB |
 | 23.0.1 | 445.2 / 458.4 MiB | 451.8 MiB | 163.4 MiB |
 
-PyArrow 23 changes peak RSS by about −8 MiB, which is within run-to-run variation, and the baseline by
-about +3 MiB. Both are about 40 MiB above the 420.8 MiB recorded on 2026-10-09; the 19.0.1 control
-shows the same rise, so it comes from other changes since then (including the dependency updates), not
-from PyArrow. Raw results: [`pyarrow-23-cache-boundary.json`](scale-results/pyarrow-23-cache-boundary.json).
+*Superseded by the repeated measurements below:* two runs per version were too few. The original
+conclusion ("PyArrow 23 changes peak RSS by about −8 MiB, within run-to-run variation; the rise above
+420.8 MiB comes from other changes") does not hold. Raw results:
+[`pyarrow-23-cache-boundary.json`](scale-results/pyarrow-23-cache-boundary.json).
+
+### Repeated memory measurements across revisions (2026-10-10)
+
+Same harness, workload and Postgres 16.11 server. Each revision ran in its own worktree with
+`uv sync --locked --all-groups`; runs alternated between revisions on an otherwise idle machine. The
+harness files are identical across these revisions.
+
+| Revision | Environment | Runs | Peak RSS median | Range |
+| --- | --- | ---: | ---: | --- |
+| `52d474f` (420.8 MiB recorded here) | dbt-core 1.11.11, PyArrow 19.0.1, Streamlit 1.61.1 | 5 | 453 MiB | 424–521 |
+| `29e14f6` | same | 5 | 486 MiB | 455–506 |
+| `956dc97` (#25) | dbt-core 1.11.15, PyArrow 19.0.1, Streamlit 1.65.0 | 11 | 465 MiB | 436–542 |
+| `0f08cff` (#32) | as #25, PyArrow 23.0.1 | 11 | **531 MiB** | 450–583 |
+| `0f08cff`, `ARROW_DEFAULT_MEMORY_POOL=system` | as #32 | 6 | 459 MiB | 435–513 |
+
+What this shows, and what it doesn't:
+- **Run-to-run variation is large.** The same revision spans up to about 100 MiB. The single
+  420.8 MiB figure sits at the low end of `52d474f`'s own range, so the earlier "+40 MiB" was mostly
+  noise.
+- **PyArrow 23 is the one interval with a pattern.** About half its runs land at 450–474 MiB, like
+  PyArrow 19, and half at 531–583 MiB, a level only one PyArrow 19 run reached (Mann-Whitney
+  U = 84/121, about p ≈ 0.12, so not statistically settled).
+- **The likely mechanism is PyArrow's default allocator** (mimalloc on this platform). With the system
+  pool forced, the high cluster didn't appear in six runs. That is suggestive, not proof.
+- The cache ceilings are unchanged: they bound serialized data, not RSS. Plan for about 435–585 MiB
+  at the 50,000-issue boundary. Switching the app to the system allocator is a candidate follow-up.
+
+Raw results: [`memory-interval-2026-10-10.json`](scale-results/memory-interval-2026-10-10.json).
 
 ```bash
 DBT_DQM_TEST_DSN='host=... port=... dbname=... user=... password=...' \

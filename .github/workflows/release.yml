@@ -28,13 +28,27 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check the tag matches the package versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python_version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          dbt_version="$(python3 -c 'import re; print(re.search(r"^version:\s*[\x27\x22]?([^\x27\x22\s]+)", open("dbt_project.yml").read(), re.M).group(1))')"
+          if [[ "$python_version" != "$dbt_version" ]]; then
+            echo "pyproject.toml ($python_version) and dbt_project.yml ($dbt_version) versions differ." >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF_NAME" != "v$python_version" ]]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match package version v$python_version." >&2
+            exit 1
+          fi
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: "3.11"
       - name: Verify, build, and inspect distributions
         run: |
-          uv sync --all-groups
+          uv sync --locked --all-groups
           uv run ruff check .
           uv run pytest -q
           uv build

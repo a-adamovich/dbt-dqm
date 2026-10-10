@@ -1,0 +1,463 @@
+{
+  "scenario": "supported-cache-boundary-real-postgres-sync",
+  "harness": "integration_tests/scale/cache_boundary.py (unchanged across these revisions)",
+  "date": "2026-10-10",
+  "postgres": "16.11",
+  "issues": 50000,
+  "mean_payload_bytes": 408,
+  "method": "Each revision in its own worktree with `uv sync --locked --all-groups`; runs alternated between revisions on an otherwise idle Apple-silicon laptop.",
+  "environments": {
+    "52d474f": {
+      "dbt-core": "1.11.11",
+      "pandas": "2.3.3",
+      "pyarrow": "19.0.1",
+      "streamlit": "1.61.1",
+      "google-cloud-bigquery": "3.43.0"
+    },
+    "29e14f6": {
+      "dbt-core": "1.11.11",
+      "pandas": "2.3.3",
+      "pyarrow": "19.0.1",
+      "streamlit": "1.61.1",
+      "google-cloud-bigquery": "3.43.0"
+    },
+    "956dc97": {
+      "dbt-core": "1.11.15",
+      "pandas": "2.3.3",
+      "pyarrow": "19.0.1",
+      "streamlit": "1.65.0",
+      "google-cloud-bigquery": "3.46.1"
+    },
+    "0f08cff": {
+      "dbt-core": "1.11.15",
+      "pandas": "2.3.3",
+      "pyarrow": "23.0.1",
+      "streamlit": "1.65.0",
+      "google-cloud-bigquery": "3.46.1"
+    }
+  },
+  "summary": {
+    "52d474f": {
+      "runs": 5,
+      "peak_rss_mb": [
+        424.2,
+        445.8,
+        453.2,
+        455.6,
+        520.8
+      ],
+      "median": 453.2,
+      "min": 424.2,
+      "max": 520.8
+    },
+    "29e14f6": {
+      "runs": 5,
+      "peak_rss_mb": [
+        455.3,
+        455.3,
+        486.3,
+        487.8,
+        506.2
+      ],
+      "median": 486.3,
+      "min": 455.3,
+      "max": 506.2
+    },
+    "956dc97": {
+      "runs": 11,
+      "peak_rss_mb": [
+        435.6,
+        450.2,
+        452.5,
+        458.7,
+        464.7,
+        465.1,
+        469.1,
+        474.5,
+        485.2,
+        490.8,
+        541.7
+      ],
+      "median": 465.1,
+      "min": 435.6,
+      "max": 541.7
+    },
+    "0f08cff": {
+      "runs": 11,
+      "peak_rss_mb": [
+        450.0,
+        453.3,
+        458.8,
+        462.5,
+        473.9,
+        530.7,
+        558.1,
+        566.9,
+        569.6,
+        576.2,
+        583.0
+      ],
+      "median": 530.7,
+      "min": 450.0,
+      "max": 583.0
+    },
+    "0f08cff-system-pool": {
+      "runs": 6,
+      "peak_rss_mb": [
+        435.0,
+        453.4,
+        458.1,
+        459.4,
+        472.7,
+        513.0
+      ],
+      "median": 458.75,
+      "min": 435.0,
+      "max": 513.0
+    }
+  },
+  "runs": [
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 1,
+      "baseline_rss_mb": 155.3,
+      "peak_rss_mb": 462.5,
+      "warehouse_read_seconds": 2.4,
+      "total_seconds": 5.75
+    },
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 10,
+      "baseline_rss_mb": 164.2,
+      "peak_rss_mb": 450.0,
+      "warehouse_read_seconds": 2.12,
+      "total_seconds": 5.04
+    },
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 11,
+      "baseline_rss_mb": 169.5,
+      "peak_rss_mb": 583.0,
+      "warehouse_read_seconds": 2.15,
+      "total_seconds": 4.82
+    },
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 2,
+      "baseline_rss_mb": 168.7,
+      "peak_rss_mb": 558.1,
+      "warehouse_read_seconds": 2.18,
+      "total_seconds": 4.88
+    },
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 3,
+      "baseline_rss_mb": 163.6,
+      "peak_rss_mb": 530.7,
+      "warehouse_read_seconds": 2.23,
+      "total_seconds": 5.01
+    },
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 4,
+      "baseline_rss_mb": 166.8,
+      "peak_rss_mb": 576.2,
+      "warehouse_read_seconds": 2.15,
+      "total_seconds": 4.81
+    },
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 5,
+      "baseline_rss_mb": 164.1,
+      "peak_rss_mb": 458.8,
+      "warehouse_read_seconds": 2.47,
+      "total_seconds": 5.38
+    },
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 6,
+      "baseline_rss_mb": 169.7,
+      "peak_rss_mb": 569.6,
+      "warehouse_read_seconds": 2.14,
+      "total_seconds": 4.79
+    },
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 7,
+      "baseline_rss_mb": 164.5,
+      "peak_rss_mb": 453.3,
+      "warehouse_read_seconds": 2.16,
+      "total_seconds": 5.13
+    },
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 8,
+      "baseline_rss_mb": 164.1,
+      "peak_rss_mb": 473.9,
+      "warehouse_read_seconds": 2.14,
+      "total_seconds": 5.02
+    },
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 9,
+      "baseline_rss_mb": 163.9,
+      "peak_rss_mb": 566.9,
+      "warehouse_read_seconds": 2.15,
+      "total_seconds": 4.85
+    },
+    {
+      "revision": "29e14f6",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 1,
+      "baseline_rss_mb": 161.3,
+      "peak_rss_mb": 455.3,
+      "warehouse_read_seconds": 2.22,
+      "total_seconds": 5.74
+    },
+    {
+      "revision": "29e14f6",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 2,
+      "baseline_rss_mb": 165.2,
+      "peak_rss_mb": 506.2,
+      "warehouse_read_seconds": 2.22,
+      "total_seconds": 5.24
+    },
+    {
+      "revision": "29e14f6",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 3,
+      "baseline_rss_mb": 162.5,
+      "peak_rss_mb": 486.3,
+      "warehouse_read_seconds": 2.19,
+      "total_seconds": 4.9
+    },
+    {
+      "revision": "29e14f6",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 4,
+      "baseline_rss_mb": 145.8,
+      "peak_rss_mb": 455.3,
+      "warehouse_read_seconds": 2.51,
+      "total_seconds": 5.5
+    },
+    {
+      "revision": "29e14f6",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 5,
+      "baseline_rss_mb": 161.2,
+      "peak_rss_mb": 487.8,
+      "warehouse_read_seconds": 2.28,
+      "total_seconds": 5.16
+    },
+    {
+      "revision": "52d474f",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 1,
+      "baseline_rss_mb": 141.5,
+      "peak_rss_mb": 424.2,
+      "warehouse_read_seconds": 2.85,
+      "total_seconds": 7.05
+    },
+    {
+      "revision": "52d474f",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 2,
+      "baseline_rss_mb": 162.2,
+      "peak_rss_mb": 520.8,
+      "warehouse_read_seconds": 2.1,
+      "total_seconds": 4.98
+    },
+    {
+      "revision": "52d474f",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 3,
+      "baseline_rss_mb": 162.3,
+      "peak_rss_mb": 453.2,
+      "warehouse_read_seconds": 2.22,
+      "total_seconds": 5.22
+    },
+    {
+      "revision": "52d474f",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 4,
+      "baseline_rss_mb": 162.0,
+      "peak_rss_mb": 445.8,
+      "warehouse_read_seconds": 2.21,
+      "total_seconds": 5.19
+    },
+    {
+      "revision": "52d474f",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 5,
+      "baseline_rss_mb": 160.7,
+      "peak_rss_mb": 455.6,
+      "warehouse_read_seconds": 2.27,
+      "total_seconds": 5.07
+    },
+    {
+      "revision": "956dc97",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 1,
+      "baseline_rss_mb": 161.3,
+      "peak_rss_mb": 458.7,
+      "warehouse_read_seconds": 2.32,
+      "total_seconds": 5.67
+    },
+    {
+      "revision": "956dc97",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 10,
+      "baseline_rss_mb": 161.5,
+      "peak_rss_mb": 474.5,
+      "warehouse_read_seconds": 2.2,
+      "total_seconds": 5.11
+    },
+    {
+      "revision": "956dc97",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 11,
+      "baseline_rss_mb": 163.7,
+      "peak_rss_mb": 465.1,
+      "warehouse_read_seconds": 2.34,
+      "total_seconds": 5.37
+    },
+    {
+      "revision": "956dc97",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 2,
+      "baseline_rss_mb": 158.9,
+      "peak_rss_mb": 435.6,
+      "warehouse_read_seconds": 2.23,
+      "total_seconds": 5.28
+    },
+    {
+      "revision": "956dc97",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 3,
+      "baseline_rss_mb": 166.5,
+      "peak_rss_mb": 490.8,
+      "warehouse_read_seconds": 2.36,
+      "total_seconds": 5.12
+    },
+    {
+      "revision": "956dc97",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 4,
+      "baseline_rss_mb": 162.3,
+      "peak_rss_mb": 469.1,
+      "warehouse_read_seconds": 2.25,
+      "total_seconds": 5.12
+    },
+    {
+      "revision": "956dc97",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 5,
+      "baseline_rss_mb": 162.0,
+      "peak_rss_mb": 450.2,
+      "warehouse_read_seconds": 2.34,
+      "total_seconds": 5.46
+    },
+    {
+      "revision": "956dc97",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 6,
+      "baseline_rss_mb": 161.7,
+      "peak_rss_mb": 541.7,
+      "warehouse_read_seconds": 2.08,
+      "total_seconds": 4.86
+    },
+    {
+      "revision": "956dc97",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 7,
+      "baseline_rss_mb": 161.1,
+      "peak_rss_mb": 464.7,
+      "warehouse_read_seconds": 2.23,
+      "total_seconds": 5.19
+    },
+    {
+      "revision": "956dc97",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 8,
+      "baseline_rss_mb": 162.7,
+      "peak_rss_mb": 485.2,
+      "warehouse_read_seconds": 2.19,
+      "total_seconds": 4.86
+    },
+    {
+      "revision": "956dc97",
+      "arrow_memory_pool": "default (mimalloc on 0f08cff)",
+      "round": 9,
+      "baseline_rss_mb": 165.8,
+      "peak_rss_mb": 452.5,
+      "warehouse_read_seconds": 2.15,
+      "total_seconds": 5.12
+    },
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "system",
+      "round": 1,
+      "baseline_rss_mb": 163.0,
+      "peak_rss_mb": 453.4,
+      "warehouse_read_seconds": 2.19,
+      "total_seconds": 5.31
+    },
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "system",
+      "round": 2,
+      "baseline_rss_mb": 163.9,
+      "peak_rss_mb": 472.7,
+      "warehouse_read_seconds": 2.22,
+      "total_seconds": 5.02
+    },
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "system",
+      "round": 3,
+      "baseline_rss_mb": 162.9,
+      "peak_rss_mb": 435.0,
+      "warehouse_read_seconds": 2.26,
+      "total_seconds": 5.17
+    },
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "system",
+      "round": 4,
+      "baseline_rss_mb": 163.6,
+      "peak_rss_mb": 459.4,
+      "warehouse_read_seconds": 2.15,
+      "total_seconds": 5.0
+    },
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "system",
+      "round": 5,
+      "baseline_rss_mb": 163.5,
+      "peak_rss_mb": 458.1,
+      "warehouse_read_seconds": 2.15,
+      "total_seconds": 5.0
+    },
+    {
+      "revision": "0f08cff",
+      "arrow_memory_pool": "system",
+      "round": 6,
+      "baseline_rss_mb": 164.4,
+      "peak_rss_mb": 513.0,
+      "warehouse_read_seconds": 2.24,
+      "total_seconds": 4.95
+    }
+  ]
+}
