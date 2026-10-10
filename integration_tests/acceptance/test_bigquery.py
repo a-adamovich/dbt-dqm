@@ -85,12 +85,16 @@ class Demo:
 
 
 @pytest.fixture
-def demo(tmp_path):
-    dataset = "dqm_acceptance_" + uuid.uuid4().hex[:12]
+def demo(tmp_path, acceptance_run_id):
+    from bigquery_datasets import PREFIX, labels
+
+    dataset = PREFIX + uuid.uuid4().hex[:12]
     location = os.environ.get("DBT_DQM_BIGQUERY_TEST_LOCATION", "US")
     client = bigquery.Client(project=PROJECT, location=location)
     value = bigquery.Dataset(f"{PROJECT}.{dataset}")
     value.location = location
+    # Lets the session-end sweep remove it if this test's own cleanup never runs.
+    value.labels = labels(acceptance_run_id)
     client.create_dataset(value)
     path = tmp_path / "project"
     shutil.copytree(
