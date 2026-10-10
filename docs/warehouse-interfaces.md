@@ -14,6 +14,8 @@
 | `dqm_annotation_changes` | dbt-owned append-only audit ledger, with a unique batch/occurrence/field key on Postgres. |
 | `dqm_missed_issues` | dbt-owned application-written log of known missed issues. |
 | `dqm_test_health`, `dqm_area_health` | Warehouse-computed views with explicit populations and rate denominators. |
+| `dqm_maintenance_health` | Per-step state (`ok`, `failing`, `unknown`) of optional maintenance; see Optional maintenance. |
+| `dqm_maintenance_log` | Hook-owned maintenance outcome log; fixed descriptions and safe diagnostic IDs only. |
 | `dqm_test_executions`, `dqm_issue_observations` | Hook-owned raw execution and failed-identity evidence. |
 | Install, control, migration, run, input, receipt and state tables | Internal coordination interfaces; do not edit directly. |
 

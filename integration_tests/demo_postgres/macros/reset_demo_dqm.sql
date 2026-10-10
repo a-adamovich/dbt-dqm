@@ -11,6 +11,7 @@
   {% endif %}
 
   {% for identifier, relation_type in [
+    ('dqm_maintenance_health', 'view'),
     ('dqm_area_health', 'view'),
     ('dqm_test_health', 'view'),
     ('dqm_issue_timeline', 'view'),
@@ -31,6 +32,7 @@
     ('dqm_reconciliation_state', 'table'),
     ('dqm_schema_migrations', 'table'),
     ('dqm_app_change_staging', 'table'),
+    ('dqm_maintenance_log', 'table'),
     ('demo_customer_email_invalid', 'table'),
     ('demo_order_amount_invalid', 'table'),
     ('demo_order_line_invalid', 'table'),
