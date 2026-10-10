@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The credentialed BigQuery acceptance suite runs in parallel (`pytest -n 6`, about 25 minutes instead of 2 h 19 m). Every disposable dataset is labelled with its run, and leftovers from killed workers or stopped runs are swept automatically (`integration_tests/acceptance/bigquery_datasets.py`).
+
 ## 0.2.0 - 2026-10-10
 
 - Releases check that the tag matches the `pyproject.toml` and `dbt_project.yml` versions before anything is built, and install from the lockfile (`uv sync --locked`).
