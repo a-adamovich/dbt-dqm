@@ -24,6 +24,11 @@ No runtime patch or schema-validation bypass has been introduced.
 Then update the declarations/checks/docs, freeze a new candidate, and run every remaining gate
 against it. This candidate must not be merged or tagged.
 
+**Resolution (2026-10-11):** the maintainer approved `0.2.0-a1` in `dbt_project.yml`. The release
+check accepts only the exact SemVer spelling of the Python version, and the GitHub release step
+marks only pre-release tags as pre-releases. The results below remain those of the superseded
+candidate `d0385e6`; a new candidate replaces them.
+
 ## Results for the candidate
 
 | Gate or check | Result | Evidence / limitation |

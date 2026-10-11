@@ -34,8 +34,10 @@ jobs:
           set -euo pipefail
           python_version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           dbt_version="$(python3 -c 'import re; print(re.search(r"^version:\s*[\x27\x22]?([^\x27\x22\s]+)", open("dbt_project.yml").read(), re.M).group(1))')"
-          if [[ "$python_version" != "$dbt_version" ]]; then
-            echo "pyproject.toml ($python_version) and dbt_project.yml ($dbt_version) versions differ." >&2
+          # dbt only accepts SemVer, so a Python pre-release 0.2.0a1 is spelled 0.2.0-a1 there.
+          expected_dbt_version="$(python3 -c 'import re, sys; print(re.sub(r"^(\d+\.\d+\.\d+)((?:a|b|rc)\d+)$", r"\1-\2", sys.argv[1]))' "$python_version")"
+          if [[ "$dbt_version" != "$expected_dbt_version" ]]; then
+            echo "pyproject.toml ($python_version) and dbt_project.yml ($dbt_version) versions differ; expected dbt version $expected_dbt_version." >&2
             exit 1
           fi
           if [[ "$GITHUB_REF_NAME" != "v$python_version" ]]; then
@@ -133,8 +135,15 @@ jobs:
         run: uv publish
       - name: Create GitHub release
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes --verify-tag \
-            --prerelease --title "dbt-dqm ${GITHUB_REF_NAME} (alpha)" \
-            --notes "Alpha release: interfaces may change. Install the Python app with pip install dbt-dqm==0.2.0a1 and install the dbt package separately using Git revision v0.2.0a1. Upgrades from 0.1 require a fresh DQM schema. See README.md and CHANGELOG.md at this tag for supported versions and operating limits."
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if [[ "$version" =~ (a|b|rc)[0-9]+$ ]]; then
+            dbt_version="$(python3 -c 'import re, sys; print(re.sub(r"^(\d+\.\d+\.\d+)((?:a|b|rc)\d+)$", r"\1-\2", sys.argv[1]))' "$version")"
+            gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes --verify-tag \
+              --prerelease --title "dbt-dqm ${GITHUB_REF_NAME} (pre-release)" \
+              --notes "Pre-release: interfaces may change. Install the Python app with pip install dbt-dqm==${version} and install the dbt package separately from Git revision ${GITHUB_REF_NAME} (its dbt_project.yml spells the version ${dbt_version}). Upgrades from 0.1 require a fresh DQM schema. See README.md and CHANGELOG.md at this tag for supported versions and operating limits."
+          else
+            gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes --verify-tag
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
