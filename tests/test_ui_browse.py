@@ -65,8 +65,8 @@ class FakeWarehouse:
 def harness(tmp_path, monkeypatch):
     import dbt_dqm_app.streamlit_app as ui
 
-    def start(browse_mode="warehouse", futures=None):
-        config = AppConfig(tmp_path, tmp_path, "dev", "demo", "postgres", "db", "schema", "US",
+    def start(browse_mode="warehouse", futures=None, adapter="postgres", issues=60):
+        config = AppConfig(tmp_path, tmp_path, "dev", "demo", adapter, "db", "schema", "US",
                            "oauth", None, browse_mode=browse_mode)
         path = tmp_path / "workspace.sqlite"
         monkeypatch.setattr(AppConfig, "workspace_path", property(lambda self: path))
@@ -74,7 +74,8 @@ def harness(tmp_path, monkeypatch):
         monkeypatch.setattr(ui, "manifest_nodes", lambda _: {})
         for name in ("PROJECT_DIR", "PROFILES_DIR", "TARGET"):
             monkeypatch.setenv("DBT_DQM_" + name, "dev" if name == "TARGET" else str(tmp_path))
-        warehouse = FakeWarehouse([issue(i, "BLOCKED" if i % 3 == 0 else "NEW") for i in range(60)])
+        warehouse = FakeWarehouse(
+            [issue(i, "BLOCKED" if i % 3 == 0 else "NEW") for i in range(issues)])
         monkeypatch.setattr(ui, "browse_page", warehouse.page)
         monkeypatch.setattr(ui, "browse_summary", warehouse.summary)
         monkeypatch.setattr(ui, "browse_options", warehouse.options)
@@ -231,3 +232,32 @@ def test_an_unreachable_warehouse_shows_the_cached_pages_offline(harness, monkey
     click(app, "Retry the warehouse")
     assert not any("Offline" in warning.value for warning in app.warning)
     assert not next(b for b in app.button if b.label == "Apply and sync").disabled
+
+
+def test_bigquery_reads_a_chunk_and_pages_through_it_locally(harness):
+    app, warehouse, _, workspace = harness(adapter="bigquery", issues=2_100)
+    assert card_titles(app)[0] == "test 0"
+    assert [(cursor, len(warehouse.reads)) for _, cursor in warehouse.reads] == [(None, 1)]
+    for _ in range(79):  # pages 2..80 come from the first chunk of 2,000
+        click(app, "Next")
+    assert card_titles(app)[-1] == "test 1999" and len(warehouse.reads) == 1
+    click(app, "Next")  # page 81 starts the second chunk
+    assert card_titles(app)[0] == "test 2000" and warehouse.reads[-1][1] == 2_000
+    assert any("Page 81" in caption.value for caption in app.caption)
+    for _ in range(3):
+        click(app, "Next")
+    assert card_titles(app)[-1] == "test 2099" and len(warehouse.reads) == 2
+    assert next(b for b in app.button if b.label == "Next").disabled
+    for _ in range(4):  # back into the first chunk, still listed
+        click(app, "Previous")
+    assert card_titles(app)[-1] == "test 1999"
+    # Rows trimmed from the local cache since the chunk was read are read again, not dropped.
+    reads = len(warehouse.reads)
+    with workspace.connect() as connection:
+        connection.execute("delete from snapshot where occurrence_id='id1999'")
+    click(app, "First")
+    click(app, "Next")
+    assert card_titles(app)[1] == "test 26"
+    for _ in range(78):
+        click(app, "Next")
+    assert card_titles(app)[-1] == "test 1999" and len(warehouse.reads) == reads + 1
