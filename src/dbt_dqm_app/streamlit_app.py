@@ -6,12 +6,19 @@ import os
 import time
 import uuid
 from concurrent.futures import Future, ProcessPoolExecutor
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import pandas as pd
 import streamlit as st
 
-from dbt_dqm_app.browse import PAGE_SIZES, Filters, InvalidSearch, normalized_search
+from dbt_dqm_app.browse import (
+    CHUNK_ISSUES,
+    PAGE_SIZES,
+    Filters,
+    InvalidSearch,
+    normalized_search,
+)
 from dbt_dqm_app.config import load_config
 from dbt_dqm_app.display import (
     REVIEW_VERDICTS,
@@ -291,6 +298,13 @@ def _submit_apply(executor, config, patches) -> None:
 BROWSE_STATE = ("browse_options", "browse_summaries", "browse_pages")
 
 
+@dataclass
+class Chunk:
+    ids: list[str]
+    next_cursor: object
+    generation: object
+
+
 def _reset_browse_cache(restart: bool = False) -> None:
     """Forget warehouse reads so the next render re-reads them. A restart (Sync, or the
     generation-change banner) also returns to the first page and a new generation baseline."""
@@ -442,13 +456,23 @@ def _render_warehouse_issues(workspace, pending, config) -> None:
         state.browse_page_index = 0
         state.pop("browse_pages", None)
     summaries = state.setdefault("browse_summaries", {})
-    pages = state.setdefault("browse_pages", {})
+    pages = state.setdefault("browse_pages", {})  # chunk number -> Chunk (ids, cursor, generation)
     index = state.browse_page_index
+    # A chunk is what one warehouse read returns: one page on Postgres, CHUNK_ISSUES on BigQuery
+    # (where a read costs the same for 25 rows or 2,000). Pages are slices of a chunk; cursors are
+    # kept per chunk.
+    chunk_size = CHUNK_ISSUES if config.adapter_type == "bigquery" else page_size
+    chunk_number, offset = divmod(index * page_size, chunk_size)
 
+    has_next = False
     if pending_only:
         page_rows = workspace.rows_for(workspace.pending_issue_ids())
         summary = summaries.get(filters)
     else:
+        if chunk_number in pages:  # rows trimmed from the local cache since: read them again
+            listed = pages[chunk_number].ids[offset:offset + page_size]
+            if len(workspace.rows_for(listed)) != len(listed):
+                pages.pop(chunk_number)
         try:
             with st.spinner("Reading issues from the warehouse…"):
                 if filters not in summaries:
@@ -458,13 +482,16 @@ def _render_warehouse_issues(workspace, pending, config) -> None:
                         return
                     summaries[filters] = summary
                 summary = summaries[filters]
-                if index not in pages:
+                if chunk_number not in pages:
                     page = _warehouse_read(browse_page, config, population, filters,
-                                           state.browse_cursors[index], page_size)
+                                           state.browse_cursors[chunk_number], chunk_size)
                     if page is None:
                         _render_offline(workspace, pending, config)
                         return
-                    pages[index] = page
+                    workspace.upsert_pages(page.rows)
+                    pages[chunk_number] = Chunk(
+                        [str(row["occurrence_id"]) for row in page.rows], page.next_cursor,
+                        page.generation)
         except SearchTooCostly as error:
             # Refused before anything ran: go back to the previous search and its results.
             state.browse_notice = f"Search “{search}” wasn't run. {error.message}"
@@ -472,7 +499,7 @@ def _render_warehouse_issues(workspace, pending, config) -> None:
             summaries.pop(filters, None)
             st.rerun()
         state.browse_last_search = search
-        page = pages[index]
+        page = pages[chunk_number]
         if state.get("browse_generation") is None:
             state.browse_generation = page.generation
         if page.generation != state.browse_generation or summary["generation"] != page.generation:
@@ -483,10 +510,10 @@ def _render_warehouse_issues(workspace, pending, config) -> None:
             if st.button("Restart from first page"):
                 _reset_browse_cache(restart=True)
                 st.rerun()
-        workspace.upsert_pages(page.rows)
-        page_rows = workspace.rows_for(row["occurrence_id"] for row in page.rows)
-        if page.next_cursor is not None and len(state.browse_cursors) == index + 1:
+        page_rows = workspace.rows_for(page.ids[offset:offset + page_size])
+        if page.next_cursor is not None and len(state.browse_cursors) == chunk_number + 1:
             state.browse_cursors.append(page.next_cursor)
+        has_next = offset + page_size < len(page.ids) or page.next_cursor is not None
 
     with metrics_area:
         metric_active, metric_new, metric_blocked, metric_local, metric_recurring = st.columns(5)
@@ -500,7 +527,7 @@ def _render_warehouse_issues(workspace, pending, config) -> None:
     with nav_col:
         st.markdown("<div style='height: 1.6rem'></div>", unsafe_allow_html=True)
         first_col, previous_col, next_col = st.columns(3)
-        has_next = not pending_only and len(state.browse_cursors) > index + 1
+        has_next = not pending_only and has_next
         if first_col.button("First", disabled=pending_only or index == 0):
             state.browse_page_index = 0
             st.rerun()

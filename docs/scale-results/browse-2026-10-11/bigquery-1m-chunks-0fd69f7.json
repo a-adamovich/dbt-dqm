@@ -1,0 +1,606 @@
+{
+  "adapter": "bigquery",
+  "label": "browse-chunks-1m-0fd69f7",
+  "volumes": {
+    "tests": 200,
+    "first_occurrences": 100000,
+    "occurrences": 1000000,
+    "active_fraction": 0.1,
+    "executions": 50000,
+    "observations": 5000000,
+    "payload_columns": 8,
+    "label": "browse-chunks-1m-0fd69f7",
+    "output": "../scale-0fd69f7",
+    "keep": false,
+    "browse": true,
+    "skip_sync": true
+  },
+  "load_first": {
+    "seconds": 13.9,
+    "jobs": 5,
+    "gb_processed": 0.0,
+    "gb_billed": 0.031,
+    "slot_seconds": 46.1
+  },
+  "steady_first": {
+    "seconds": 63.7,
+    "jobs": 41,
+    "gb_processed": 0.163,
+    "gb_billed": 0.489,
+    "slot_seconds": 721.4
+  },
+  "load_rest": {
+    "seconds": 74.7,
+    "jobs": 5,
+    "gb_processed": 0.003,
+    "gb_billed": 0.031,
+    "slot_seconds": 516.3
+  },
+  "steady_full": {
+    "seconds": 93.4,
+    "jobs": 41,
+    "gb_processed": 1.542,
+    "gb_billed": 1.862,
+    "slot_seconds": 1564.2
+  },
+  "browse": {
+    "seconds": 300.5,
+    "jobs": 141,
+    "gb_processed": 27.75,
+    "gb_billed": 27.786,
+    "slot_seconds": 1090.7,
+    "probe": {
+      "adapter": "bigquery",
+      "label": "browse-chunks-1m-0fd69f7",
+      "cases": {
+        "all_active": {
+          "summary": {
+            "median_s": 1.45,
+            "max_s": 3.794,
+            "first_s": 3.794,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 161076407,
+                "billed": 161480704
+              }
+            ],
+            "first_call_mb_processed": 161.1,
+            "first_call_mb_billed": 161.5
+          },
+          "matching": 100007,
+          "first_page": {
+            "median_s": 2.832,
+            "max_s": 6.422,
+            "first_s": 6.422,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 202019798,
+                "billed": 202375168
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 758320688,
+                "billed": 759169024
+              }
+            ],
+            "first_call_mb_processed": 960.3,
+            "first_call_mb_billed": 961.5
+          },
+          "next_page": {
+            "median_s": 3.029,
+            "max_s": 7.15,
+            "first_s": 7.15,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 202019798,
+                "billed": 202375168
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 758320688,
+                "billed": 759169024
+              }
+            ],
+            "first_call_mb_processed": 960.3,
+            "first_call_mb_billed": 961.5
+          }
+        },
+        "status_blocked": {
+          "summary": {
+            "median_s": 1.219,
+            "max_s": 2.852,
+            "first_s": 2.852,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 161076407,
+                "billed": 161480704
+              }
+            ],
+            "first_call_mb_processed": 161.1,
+            "first_call_mb_billed": 161.5
+          },
+          "matching": 12500,
+          "first_page": {
+            "median_s": 3.211,
+            "max_s": 5.217,
+            "first_s": 5.217,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 202019798,
+                "billed": 202375168
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 758320688,
+                "billed": 759169024
+              }
+            ],
+            "first_call_mb_processed": 960.3,
+            "first_call_mb_billed": 961.5
+          },
+          "next_page": {
+            "median_s": 5.966,
+            "max_s": 6.384,
+            "first_s": 5.966,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 202019798,
+                "billed": 202375168
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 758320688,
+                "billed": 759169024
+              }
+            ],
+            "first_call_mb_processed": 960.3,
+            "first_call_mb_billed": 961.5
+          }
+        },
+        "priority_high": {
+          "summary": {
+            "median_s": 1.444,
+            "max_s": 2.902,
+            "first_s": 2.902,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 167219280,
+                "billed": 167772160
+              }
+            ],
+            "first_call_mb_processed": 167.2,
+            "first_call_mb_billed": 167.8
+          },
+          "matching": 28574,
+          "first_page": {
+            "median_s": 2.69,
+            "max_s": 5.657,
+            "first_s": 5.657,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 202019798,
+                "billed": 202375168
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 758320688,
+                "billed": 759169024
+              }
+            ],
+            "first_call_mb_processed": 960.3,
+            "first_call_mb_billed": 961.5
+          },
+          "next_page": {
+            "median_s": 2.461,
+            "max_s": 6.034,
+            "first_s": 6.034,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 202019798,
+                "billed": 202375168
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 758320688,
+                "billed": 759169024
+              }
+            ],
+            "first_call_mb_processed": 960.3,
+            "first_call_mb_billed": 961.5
+          }
+        },
+        "owner": {
+          "summary": {
+            "median_s": 1.347,
+            "max_s": 2.773,
+            "first_s": 2.773,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 169076558,
+                "billed": 169869312
+              }
+            ],
+            "first_call_mb_processed": 169.1,
+            "first_call_mb_billed": 169.9
+          },
+          "matching": 5000,
+          "first_page": {
+            "median_s": 2.646,
+            "max_s": 7.233,
+            "first_s": 7.233,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 210019949,
+                "billed": 210763776
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 758320688,
+                "billed": 759169024
+              }
+            ],
+            "first_call_mb_processed": 968.3,
+            "first_call_mb_billed": 969.9
+          },
+          "next_page": {
+            "median_s": 2.508,
+            "max_s": 6.192,
+            "first_s": 6.192,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 210019949,
+                "billed": 210763776
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 758320688,
+                "billed": 759169024
+              }
+            ],
+            "first_call_mb_processed": 968.3,
+            "first_call_mb_billed": 969.9
+          }
+        },
+        "created_last_30_days": {
+          "summary": {
+            "median_s": 1.348,
+            "max_s": 3.112,
+            "first_s": 3.112,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 169076463,
+                "billed": 169869312
+              }
+            ],
+            "first_call_mb_processed": 169.1,
+            "first_call_mb_billed": 169.9
+          },
+          "matching": 40076,
+          "first_page": {
+            "median_s": 2.438,
+            "max_s": 6.276,
+            "first_s": 6.276,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 202019798,
+                "billed": 202375168
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 758320688,
+                "billed": 759169024
+              }
+            ],
+            "first_call_mb_processed": 960.3,
+            "first_call_mb_billed": 961.5
+          },
+          "next_page": {
+            "median_s": 2.485,
+            "max_s": 5.963,
+            "first_s": 5.963,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 202019798,
+                "billed": 202375168
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 758320688,
+                "billed": 759169024
+              }
+            ],
+            "first_call_mb_processed": 960.3,
+            "first_call_mb_billed": 961.5
+          }
+        },
+        "tag": {
+          "summary": {
+            "median_s": 1.123,
+            "max_s": 3.151,
+            "first_s": 3.151,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 175409938,
+                "billed": 176160768
+              }
+            ],
+            "first_call_mb_processed": 175.4,
+            "first_call_mb_billed": 176.2
+          },
+          "matching": 33334,
+          "first_page": {
+            "median_s": 3.021,
+            "max_s": 6.937,
+            "first_s": 6.937,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 216353329,
+                "billed": 217055232
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 758320688,
+                "billed": 759169024
+              }
+            ],
+            "first_call_mb_processed": 974.7,
+            "first_call_mb_billed": 976.2
+          },
+          "next_page": {
+            "median_s": 2.655,
+            "max_s": 5.844,
+            "first_s": 5.844,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 216353329,
+                "billed": 217055232
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 758320688,
+                "billed": 759169024
+              }
+            ],
+            "first_call_mb_processed": 974.7,
+            "first_call_mb_billed": 976.2
+          }
+        },
+        "recurrences_only": {
+          "summary": {
+            "median_s": 1.249,
+            "max_s": 3.002,
+            "first_s": 3.002,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 161076407,
+                "billed": 161480704
+              }
+            ],
+            "first_call_mb_processed": 161.1,
+            "first_call_mb_billed": 161.5
+          },
+          "matching": 0,
+          "first_page": {
+            "median_s": 1.156,
+            "max_s": 3.22,
+            "first_s": 3.22,
+            "first_call_jobs": [
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 209219798,
+                "billed": 209715200
+              }
+            ],
+            "first_call_mb_processed": 209.2,
+            "first_call_mb_billed": 209.7
+          }
+        },
+        "search": {
+          "summary": {
+            "median_s": 2.034,
+            "max_s": 3.458,
+            "first_s": 3.458,
+            "first_call_jobs": [
+              {
+                "dry_run": true,
+                "processed": 618443229
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 618443229,
+                "billed": 618659840
+              }
+            ],
+            "first_call_mb_processed": 618.4,
+            "first_call_mb_billed": 618.7
+          },
+          "matching": 11,
+          "first_page": {
+            "median_s": 2.864,
+            "max_s": 5.729,
+            "first_s": 5.729,
+            "first_call_jobs": [
+              {
+                "dry_run": true,
+                "processed": 653243747
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 653243747,
+                "billed": 653262848
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 758320688,
+                "billed": 759169024
+              }
+            ],
+            "first_call_mb_processed": 1411.6,
+            "first_call_mb_billed": 1412.4
+          }
+        },
+        "search_with_status": {
+          "summary": {
+            "median_s": 1.488,
+            "max_s": 3.538,
+            "first_s": 3.538,
+            "first_call_jobs": [
+              {
+                "dry_run": true,
+                "processed": 618443229
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 618443229,
+                "billed": 618659840
+              }
+            ],
+            "first_call_mb_processed": 618.4,
+            "first_call_mb_billed": 618.7
+          },
+          "matching": 4,
+          "first_page": {
+            "median_s": 2.554,
+            "max_s": 5.16,
+            "first_s": 5.16,
+            "first_call_jobs": [
+              {
+                "dry_run": true,
+                "processed": 653243747
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 653243747,
+                "billed": 653262848
+              },
+              {
+                "dry_run": false,
+                "cache_hit": false,
+                "processed": 758320688,
+                "billed": 759169024
+              }
+            ],
+            "first_call_mb_processed": 1411.6,
+            "first_call_mb_billed": 1412.4
+          }
+        }
+      },
+      "options": {
+        "median_s": 3.609,
+        "max_s": 3.609,
+        "first_s": 3.609,
+        "first_call_jobs": [
+          {
+            "dry_run": false,
+            "cache_hit": false,
+            "processed": 184210145,
+            "billed": 184549376
+          }
+        ],
+        "first_call_mb_processed": 184.2,
+        "first_call_mb_billed": 184.5
+      },
+      "chunk_read": {
+        "median_s": 4.051,
+        "max_s": 8.005,
+        "first_s": 8.005,
+        "first_call_jobs": [
+          {
+            "dry_run": false,
+            "cache_hit": false,
+            "processed": 202019798,
+            "billed": 202375168
+          },
+          {
+            "dry_run": false,
+            "cache_hit": false,
+            "processed": 758320688,
+            "billed": 759169024
+          }
+        ],
+        "first_call_mb_processed": 960.3,
+        "first_call_mb_billed": 961.5,
+        "rows": 2000
+      },
+      "deep_paging_200_per_page_s": [
+        6.116,
+        5.074,
+        5.278,
+        5.836,
+        6.236,
+        7.556,
+        6.156,
+        5.849,
+        5.921,
+        5.456
+      ],
+      "page_cache_rows": 2000,
+      "baseline_rss_mb": 157.8,
+      "peak_rss_mb": 173.9
+    }
+  },
+  "mass_pass": {
+    "seconds": 79.7,
+    "jobs": 41,
+    "gb_processed": 1.827,
+    "gb_billed": 2.127,
+    "slot_seconds": 1336.4
+  },
+  "active_scale_after_mass_pass": 0
+}

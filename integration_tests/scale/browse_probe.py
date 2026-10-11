@@ -168,6 +168,12 @@ def main() -> None:
                     args.repeat)
                 workspace.upsert_pages(second.rows)
             report["cases"][name] = case
+        # The app's BigQuery read unit: one chunk serves CHUNK_ISSUES / 25 pages.
+        chunk, report["chunk_read"] = timed(
+            lambda: warehouse.browse_page(config, population, Filters(), None, browse.CHUNK_ISSUES),
+            args.repeat)
+        report["chunk_read"]["rows"] = len(chunk.rows)
+        workspace.upsert_pages(chunk.rows)
         deep, cursor = [], None
         for _ in range(args.deep_pages):
             started = time.perf_counter()

@@ -19,9 +19,10 @@ The figures to use today; everything below is the method and the dated measureme
 - **Warehouse browsing at 1M occurrences / 100k Active (preview, `--browse warehouse`):** app
   memory stays about 175 MiB whatever the backlog. On Postgres with migration 0007's index a
   page takes about 0.02 s unfiltered and up to 0.2 s with filters; the header summary 0.4–1.1 s
-  (a tag filter 2.5–4.8 s). On BigQuery a page costs about **0.96 GB** and 2–6 s, because the
-  page's rows are read by id and nothing prunes that read; a summary costs about 0.16 GB, a
-  searched page about 1.4 GB. See [Warehouse browsing](#warehouse-browsing-2026-10-11).
+  (a tag filter 2.5–4.8 s). On BigQuery the app reads pages in chunks of 2,000 issues (80 pages
+  of 25): a chunk costs about **0.96 GB** and 4–8 s, about 12 MB and 0.1 s per page amortized; a
+  summary costs about 0.16 GB, a searched read about 1.4 GB. See
+  [Warehouse browsing](#warehouse-browsing-2026-10-11).
 
 Two harnesses build a disposable consumer project, initialize the DQM schema through the
 package, bulk-load synthetic *processed* history (occurrences, executions, observations and
@@ -134,11 +135,12 @@ on-demand, US. Raw results and plans: [`scale-results/browse-2026-10-11/`](scale
   whether 25 or 2,000 rows come back. Clustering can't help in place (an existing table's
   clustering can't be changed with SQL, and the read would also need pruning on the history
   join), and search indexes are only populated above 10 GB.
-- **Consequence:** because phase 2 costs the same for 25 or 2,000 rows, reading BigQuery pages in
-  chunks of the page-cache size (2,000 issues, 80 pages of 25) would cut the amortized cost to
-  about 14 MB per page and the round trips by the same factor. That is the next change; until
-  then warehouse mode on BigQuery costs about one snapshot sync (~1.1 GB at 100k Active) every
-  page or two.
+- **Chunked reads (measured on `0fd69f7`):** because phase 2 costs the same for 25 or 2,000
+  rows, the app now reads BigQuery pages in chunks of the page-cache size (2,000 issues, 80 pages
+  of 25) and pages through each chunk locally. A chunk read of all Active issues cost 961.5 MB
+  billed, the same as one page of 25, and took 8.0 s uncached (4.1 s repeated): about **12 MB and
+  0.1 s per page** amortized. Paging back into an earlier chunk reuses it while its rows are still
+  in the local cache. Peak RSS stayed at 174 MiB. Postgres keeps reading one page per statement.
 - The search ceiling (`--max-search-gib`, 1 GiB) applies to the searched part of a read, which the
   dry run estimated at 653 MB here.
 - Peak RSS of the probe process: 165 MiB.

@@ -21,6 +21,10 @@ from typing import Any
 
 SEARCH_MIN, SEARCH_MAX = 3, 200
 PAGE_SIZES = (25, 50, 100, 200)
+# BigQuery bills the referenced columns of every row whether a read returns 25 rows or 2,000, so
+# the app reads BigQuery pages in chunks this size (a multiple of every page size, and the page
+# cache bound) and pages through each chunk locally.
+CHUNK_ISSUES = 2_000
 STATUS_ORDER = (
     "NEW", "BLOCKED", "IN_PROGRESS", "TRIAGED", "RESOLVED", "ACCEPTED_RISK", "FALSE_POSITIVE",
 )
@@ -210,8 +214,8 @@ def page_query(adapter: str, relation: str, population: str, filters: Filters,
                cursor: Cursor | None, page_size: int, columns: str = "*") -> Query:
     """One page in sort order. On BigQuery call it with KEY_COLUMNS first (phase 1), then read the
     full rows for the returned ids with `rows_by_id_query` (phase 2)."""
-    if page_size not in PAGE_SIZES:
-        raise ValueError(f"Page size must be one of {PAGE_SIZES}")
+    if page_size not in (*PAGE_SIZES, CHUNK_ISSUES):
+        raise ValueError(f"Page size must be one of {PAGE_SIZES} or {CHUNK_ISSUES}")
     builder = _Builder(adapter)
     _apply_filters(builder, population, filters)
     order, keyset = _order_and_keyset(builder, cursor)
