@@ -84,81 +84,97 @@ def test_pages_without_search_have_no_dry_run_or_ceiling(tmp_path, monkeypatch):
     assert len(client.calls) == 1 and client.calls[0].maximum_bytes_billed is None
 
 
-def _issue(occurrence_id, rank=0):
-    return {"occurrence_id": occurrence_id, "first_seen_at": datetime(2026, 1, 1, tzinfo=UTC),
-            "record_values_json": '{"a": 1}', "_priority_rank": rank, "_status_rank": 0}
+def _issue(occurrence_id, rank=0, generation=1, setup="ready"):
+    return {"_generation": generation, "_setup_status": setup, "occurrence_id": occurrence_id,
+            "first_seen_at": datetime(2026, 1, 1, tzinfo=UTC), "record_values_json": '{"a": 1}',
+            "_priority_rank": rank, "_status_rank": 0}
 
 
-class States:
-    def __init__(self, *generations, setup="ready"):
-        self.generations, self.setup = list(generations), setup
+class Statements:
+    """Answers each browse statement in turn; records what ran."""
 
-    def __call__(self, config, query):
-        return [{"generation": self.generations.pop(0), "setup_status": self.setup}]
+    def __init__(self, *answers):
+        self.answers, self.seen = list(answers), []
+
+    def __call__(self, config, query, searched=False):
+        self.seen.append((query, searched))
+        return self.answers.pop(0)
+
+
+def test_every_read_carries_the_control_state_in_the_same_statement(tmp_path, monkeypatch):
+    run = Statements([_issue("a")])
+    monkeypatch.setattr(warehouse, "_run_browse_query", run)
+    warehouse.browse_page(config(tmp_path, "postgres"), "true", browse.Filters(), None, 25)
+    sql = run.seen[0][0].sql
+    assert sql.startswith("select s.*, q.* from (select max(generation) as _generation")
+    assert "left join (select *" in sql and sql.endswith("q.occurrence_id")
 
 
 def test_bigquery_page_reads_keys_then_full_rows_in_key_order(tmp_path, monkeypatch):
-    monkeypatch.setattr(warehouse, "_query_rows", States(1, 1))
-    seen = []
-
-    def run(config, query, searched=False):
-        seen.append((query.sql, searched))
-        if "occurrence_id in unnest(@ids)" in query.sql:
-            assert query.params["ids"] == ["b", "a", "c"]
-            return [_issue("c"), _issue("a"), _issue("b")]  # any order; the page keeps phase-1 order
-        return [_issue("b"), _issue("a"), _issue("c")]
-
+    run = Statements([_issue("b"), _issue("a"), _issue("c")],
+                     [_issue("c"), _issue("a"), _issue("b")])
     monkeypatch.setattr(warehouse, "_run_browse_query", run)
     page = warehouse.browse_page(config(tmp_path), "true", browse.Filters(search="abc"), None, 25)
     assert [row["occurrence_id"] for row in page.rows] == ["b", "a", "c"]
     assert page.next_cursor is None and page.generation == 1
-    assert "_priority_rank" not in page.rows[0]
-    assert seen[0][1] is True and seen[1][1] is False  # only phase 1 carries the search
+    assert "_priority_rank" not in page.rows[0] and "_generation" not in page.rows[0]
+    assert run.seen[1][0].params["ids"] == ["b", "a", "c"]
+    assert [searched for _, searched in run.seen] == [True, False]  # only phase 1 searches
+
+
+def test_an_empty_page_still_reports_its_generation(tmp_path, monkeypatch):
+    empty = {"_generation": 7, "_setup_status": "ready", "occurrence_id": None}
+    monkeypatch.setattr(warehouse, "_run_browse_query", Statements([empty]))
+    page = warehouse.browse_page(config(tmp_path), "true", browse.Filters(), None, 25)
+    assert page.rows == [] and page.generation == 7 and page.next_cursor is None
 
 
 def test_page_reports_the_next_cursor(tmp_path, monkeypatch):
-    monkeypatch.setattr(warehouse, "_query_rows", States(4, 4))
     rows = [_issue(f"id{i:03}", rank=1) for i in range(26)]
-    monkeypatch.setattr(warehouse, "_run_browse_query", lambda config, query, searched=False: rows)
+    monkeypatch.setattr(warehouse, "_run_browse_query", Statements(rows))
     page = warehouse.browse_page(config(tmp_path, "postgres"), "true", browse.Filters(), None, 25)
     assert len(page.rows) == 25
     assert page.next_cursor == browse.Cursor(1, 0, datetime(2026, 1, 1, tzinfo=UTC), "id024")
 
 
-def test_a_reconciliation_during_a_page_is_retried_once(tmp_path, monkeypatch):
-    monkeypatch.setattr(warehouse, "_query_rows", States(1, 2, 2, 2))
-    monkeypatch.setattr(warehouse, "_run_browse_query",
-                        lambda config, query, searched=False: [_issue("a")])
-    page = warehouse.browse_page(config(tmp_path, "postgres"), "true", browse.Filters(), None, 25)
-    assert page.generation == 2
+def test_a_reconciliation_between_the_two_bigquery_reads_is_retried_once(tmp_path, monkeypatch):
+    run = Statements([_issue("a")], [_issue("a", generation=2)],
+                     [_issue("a", generation=2)], [_issue("a", generation=2)])
+    monkeypatch.setattr(warehouse, "_run_browse_query", run)
+    page = warehouse.browse_page(config(tmp_path), "true", browse.Filters(), None, 25)
+    assert page.generation == 2 and len(run.seen) == 4
 
 
 def test_repeated_reconciliations_are_reported(tmp_path, monkeypatch):
-    monkeypatch.setattr(warehouse, "_query_rows", States(1, 2, 2, 3))
-    monkeypatch.setattr(warehouse, "_run_browse_query",
-                        lambda config, query, searched=False: [_issue("a")])
+    run = Statements([_issue("a")], [_issue("a", generation=2)],
+                     [_issue("a", generation=2)], [_issue("a", generation=3)])
+    monkeypatch.setattr(warehouse, "_run_browse_query", run)
     with pytest.raises(SnapshotUnavailable, match="restart from the first page"):
-        warehouse.browse_page(config(tmp_path, "postgres"), "true", browse.Filters(), None, 25)
+        warehouse.browse_page(config(tmp_path), "true", browse.Filters(), None, 25)
+
+
+def test_a_row_missing_from_the_second_read_is_retried(tmp_path, monkeypatch):
+    run = Statements([_issue("a"), _issue("b")], [_issue("a")],
+                     [_issue("a")], [_issue("a")])
+    monkeypatch.setattr(warehouse, "_run_browse_query", run)
+    page = warehouse.browse_page(config(tmp_path), "true", browse.Filters(), None, 25)
+    assert [row["occurrence_id"] for row in page.rows] == ["a"]
 
 
 def test_setup_in_progress_is_reported(tmp_path, monkeypatch):
-    monkeypatch.setattr(warehouse, "_query_rows", States(1, setup="migrating"))
+    monkeypatch.setattr(warehouse, "_run_browse_query",
+                        Statements([_issue("a", setup="migrating")]))
     with pytest.raises(SnapshotUnavailable, match="setup or a migration"):
         warehouse.browse_page(config(tmp_path, "postgres"), "true", browse.Filters(), None, 25)
 
 
-def test_summary_has_global_metrics_and_the_filtered_count(tmp_path, monkeypatch):
-    monkeypatch.setattr(warehouse, "_query_rows", States(5, 5))
-    searched = []
-
-    def run(config, query, searched_flag=False, **kwargs):
-        searched.append(kwargs.get("searched", searched_flag))
-        if "matching" in query.sql:
-            return [{"matching": 3}]
-        return [{"active_count": 10, "new_count": 4, "blocked_count": None, "recurring_count": 1}]
-
+def test_summary_is_one_statement_with_global_metrics_and_the_filtered_count(tmp_path, monkeypatch):
+    run = Statements([{"_generation": 5, "_setup_status": "ready", "active_count": 10,
+                       "new_count": 4, "blocked_count": None, "recurring_count": 1,
+                       "matching": 3}])
     monkeypatch.setattr(warehouse, "_run_browse_query", run)
     summary = warehouse.browse_summary(config(tmp_path), "true", browse.Filters(search="abc"))
     assert summary == {"active_count": 10, "new_count": 4, "blocked_count": 0,
                        "recurring_count": 1, "matching": 3, "generation": 5}
-    assert searched == [False, True]
+    assert len(run.seen) == 1 and run.seen[0][1] is True
+    assert "countif" in run.seen[0][0].sql and "as matching" in run.seen[0][0].sql

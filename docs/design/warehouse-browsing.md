@@ -66,8 +66,12 @@ and `--browse warehouse` force a mode.
 
 ### 3. Consistency
 
-- Every page read is bracketed by the existing `_snapshot_state` check (generation and setup
-  status). A page read across a reconciliation is retried once, then reported as "data changed".
+- Every read carries the control generation and setup status **in the same statement** (the
+  control row is left-joined to the query), so the rows and the generation come from one
+  snapshot on both adapters. A BigQuery page's two reads must report the same generation (and
+  the second must return every id from the first); otherwise the page is read again once, then
+  reported as "data changed". (The first implementation bracketed each read with separate
+  before/after checks; measurement showed that tripled BigQuery latency.)
 - The page records its generation. If a later page sees a different generation, the app keeps
   the rows it has, shows "results changed since you started; restart from the first page", and
   offers a one-click restart. Mixing generations silently is never allowed.
