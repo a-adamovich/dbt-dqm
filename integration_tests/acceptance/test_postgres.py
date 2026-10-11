@@ -165,6 +165,12 @@ insert into "{{ target.schema }}_dbt_test__audit"."demo_customer_email_invalid" 
 values ('tamper-row', 'tamper@example.com', 'tampered');
 {% endif %}{% endmacro %}
 """)
+    # dbt 1.12 requires every installed package to be declared, so the tamper package is listed
+    # next to dbt_dqm and the demo's lock file (which names only dbt_dqm) is dropped.
+    (project / "package-lock.yml").unlink(missing_ok=True)
+    (project / "packages.yml").write_text(
+        yaml.safe_dump({"packages": [{"local": str(ROOT)}, {"local": str(tamper)}]})
+    )
     instance = Demo(project, profiles, schema)
     try:
         instance.dbt("seed")
