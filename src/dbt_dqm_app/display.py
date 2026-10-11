@@ -7,6 +7,19 @@ from datetime import date, datetime
 from html import escape
 from typing import Any
 
+
+def is_missing(value: Any) -> bool:
+    """Whether a cached or DataFrame value is missing: None, NaN, NaT or pandas.NA.
+
+    pandas 3 stores missing strings as NaN, where pandas 2's object columns held None.
+    """
+    if value is None:
+        return True
+    if isinstance(value, float):  # includes numpy.float64
+        return math.isnan(value)
+    return type(value).__name__ in {"NaTType", "NAType"}
+
+
 WORKFLOW_STATUSES = (
     "NEW",
     "TRIAGED",
@@ -77,7 +90,7 @@ def column_value_pairs(
 
 def workflow_status_options(current_value: Any) -> list[str]:
     """Return controlled statuses while retaining any value written by an older version."""
-    current = "NEW" if current_value is None else str(current_value).strip().upper()
+    current = "NEW" if is_missing(current_value) else str(current_value).strip().upper()
     options = list(WORKFLOW_STATUSES)
     if current and current not in options:
         options.append(current)
@@ -91,7 +104,7 @@ def workflow_status_help() -> str:
 
 def owner_label(value: Any) -> str:
     """Render the optional annotation owner consistently for cards and filters."""
-    if value is None or (isinstance(value, float) and math.isnan(value)):
+    if is_missing(value):
         return "Unassigned"
     owner = str(value).strip()
     return owner or "Unassigned"
@@ -105,11 +118,7 @@ def owner_editor_options(values: Any) -> list[str]:
 
 def owner_value_from_selection(value: Any) -> str | None:
     """Convert the editor's unassigned choice to the nullable warehouse annotation."""
-    if (
-        value is None
-        or value == OWNER_UNASSIGNED_OPTION
-        or (isinstance(value, float) and math.isnan(value))
-    ):
+    if is_missing(value) or value == OWNER_UNASSIGNED_OPTION:
         return None
     normalized = str(value).strip()
     return normalized or None
@@ -117,7 +126,7 @@ def owner_value_from_selection(value: Any) -> str | None:
 
 def format_timestamp(value: Any, empty_label: str = "—") -> str:
     """Render warehouse timestamps in the workstation's local timezone."""
-    if value is None or str(value).strip() in {"", "NaT", "None"}:
+    if is_missing(value) or str(value).strip() in {"", "NaT", "None"}:
         return empty_label
     try:
         parsed = datetime.fromisoformat(str(value))
@@ -131,7 +140,7 @@ def format_timestamp(value: Any, empty_label: str = "—") -> str:
 
 def calendar_date(value: Any) -> date | None:
     """Return an issue timestamp's local calendar date for inclusive review filters."""
-    if value is None or str(value).strip() in {"", "NaT", "None"}:
+    if is_missing(value) or str(value).strip() in {"", "NaT", "None"}:
         return None
     try:
         parsed = datetime.fromisoformat(str(value))
