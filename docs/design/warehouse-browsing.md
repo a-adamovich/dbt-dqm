@@ -1,6 +1,6 @@
 # Design: warehouse-side issue browsing (0.3)
 
-Status: **agreed 2026-10-11** (decisions recorded below). Implementation follows the delivery plan.
+Status: **implemented** (#53–#58 and the `--browse auto` default). Decisions recorded below; measured results in [scale](../scale.md#warehouse-browsing-2026-10-11).
 
 ## Problem
 

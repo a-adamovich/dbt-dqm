@@ -147,7 +147,8 @@ def run_app() -> None:
                 snapshot = job.result()
                 _install_snapshot(workspace, config, snapshot)
                 _reset_browse_cache(restart=True)
-                st.session_state.job_notice = ("success", (
+                switched = st.session_state.pop("browse_switch_notice", None)
+                st.session_state.job_notice = switched or ("success", (
                     "Health refreshed; issue pages are read from the warehouse."
                     if st.session_state.browsing else "Local data synchronized."), "")
         except Exception as error:  # noqa: BLE001 - patches must survive worker failures.
@@ -157,7 +158,7 @@ def run_app() -> None:
                 # Too many issues for a local snapshot: browse them in the warehouse instead.
                 st.session_state.browsing = True
                 st.session_state.browse_switch = True
-                st.session_state.job_notice = (
+                st.session_state.browse_switch_notice = st.session_state.job_notice = (
                     "info",
                     (
                         "This project has more issues than the local snapshot limits, so issues "
@@ -205,9 +206,11 @@ def run_app() -> None:
             if busy:
                 st.info(f"Background {st.session_state.job_kind} is running…")
             elif st.session_state.browsing:
+                reason = (" (above the local snapshot limits)"
+                          if config.browse_mode == "auto" else "")
                 st.write(
                     f"Pending changes: **{workspace.pending_count()}** · "
-                    "Browsing the warehouse page by page"
+                    f"Browsing the warehouse page by page{reason}"
                 )
             else:
                 st.write(
