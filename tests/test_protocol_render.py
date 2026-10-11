@@ -130,8 +130,9 @@ def test_bigquery_maintenance_steps_report_outcomes_and_log_separately(
     protocol_project, monkeypatch
 ):
     raw = step_script(protocol_project, monkeypatch, "raw_pruning", True)
-    # Each step job reports its own outcome; the log row is written by a separate job.
-    assert raw.rstrip().endswith("select dqm_step_ok as ok, @@script.job_id as job_id;")
+    # Each step job reports its own outcome; the log rows are written by a separate job.
+    assert "select dqm_step_ok as ok, @@script.job_id as job_id," in raw
+    assert raw.rstrip().endswith("as trigger_marker_at;")
     assert "dqm_maintenance_log" not in raw
     assert "begin transaction; set dqm_step_txn = true;" in raw
     assert "set dqm_step_txn = false; commit transaction;" in raw
@@ -140,14 +141,24 @@ def test_bigquery_maintenance_steps_report_outcomes_and_log_separately(
         protocol_project,
         monkeypatch,
         "bigquery__maintenance_log_script",
-        "'raw_pruning', false, 'job_1', \"timestamp '2026-10-10T00:00:00.000000Z'\", 'automatic'",
+        "[{'step': 'raw_pruning', 'ok': false, 'job_id': 'job_1'}, "
+        "{'step': 'log_pruning', 'ok': true, 'job_id': 'job_2'}], "
+        "\"timestamp '2026-10-10T00:00:00.000000Z'\", 'automatic'",
     )
-    assert "insert into `compile-only`.`dqm`.`dqm_maintenance_log`" in log
+    # One job logs every outcome after the steps; each insert is protected on its own.
+    assert log.count("insert into `compile-only`.`dqm`.`dqm_maintenance_log`") == 2
+    assert log.count("exception when error then") == 2
     assert "trigger_marker_at,trigger_kind" in log and "'automatic'" in log
-    assert "exception when error then" in log
-    attribution = render(protocol_project, monkeypatch, "bigquery__maintenance_attribution_script")
-    assert "status='completed'" in attribution and "format_timestamp" in attribution
-    assert "exception when error then" in attribution
+    # The first step's job reads the marker before its own work; later steps don't read it.
+    first = render(
+        protocol_project,
+        monkeypatch,
+        "bigquery__maintenance_step_script",
+        "{'name': 'raw_pruning', 'transactional': true}, 30, 365, true",
+    )
+    assert first.index("set dqm_trigger_marker =") < first.index("begin transaction")
+    assert "status='completed'" in first and "as trigger_marker_at;" in first
+    assert "set dqm_trigger_marker =" not in raw
 
 
 def test_bigquery_stage_drops_fail_the_step_but_recovery_stays_tolerant(
