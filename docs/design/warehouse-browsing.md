@@ -50,11 +50,15 @@ and `--browse warehouse` force a mode.
 - **Filters pushed down:** lifecycle (`record_status`), workflow status set, owner
   (`poc_responsible`, with "Unassigned" mapping to null or blank), created-date range on
   `first_seen_at`, priority (`test_priority`), tags (BigQuery
-  `exists(select 1 from unnest(json_value_array(test_tags)) t where t in unnest(@tags))`; Postgres
-  `test_tags::jsonb ?| @tags`), and "recurrences only" (`is_recurrence`).
-- **Keyset pagination:** `order by first_seen_at desc, occurrence_id`; the next page uses
-  `(first_seen_at, occurrence_id) < (@t, @id)`, expanded to an `or` form on BigQuery. Previous
-  pages come from a cursor stack in the session. No `offset`.
+  `exists(select 1 from unnest(json_value_array(test_tags)) t where trim(t) in unnest(@tags))`;
+  Postgres the same over `jsonb_array_elements_text`, so trimmed tags match as in snapshot mode),
+  and "recurrences only" (`is_recurrence`). Missing values map as in snapshot mode: no workflow
+  status is `NEW`, no priority is `unset`, a blank owner is `Unassigned`.
+- **Keyset pagination in the snapshot order:** priority rank, workflow-status rank, `first_seen_at`,
+  `occurrence_id` (the same order snapshot mode uses, minus its "pending edits first" step, which
+  is local state; see section 6). The next page continues after the previous page's last key
+  (a row comparison on Postgres, expanded to an `or` form on BigQuery). Previous pages come from
+  a cursor stack in the session. No `offset`.
 - **Two-phase read on BigQuery:** phase 1 selects only key and filter columns (`occurrence_id`,
   `first_seen_at`, status columns) to choose the page; phase 2 reads the full rows for at most
   `page_size` ids (`where occurrence_id in unnest(@ids)`). This avoids scanning payload columns for
@@ -72,8 +76,11 @@ and `--browse warehouse` force a mode.
 
 ### 4. Metrics
 
-- The header counts (Active, New, Blocked, Recurring) come from **one aggregate query** with the
-  same filters and no pagination (`countif` on BigQuery, `count(*) filter (where …)` on Postgres).
+- The header counts (Active, New, Blocked, Recurring) come from **one aggregate query** over the
+  whole browsable population, not the filtered list, exactly as in snapshot mode (`countif` on
+  BigQuery, `count(*) filter (where …)` on Postgres).
+- A second query counts the issues matching the current filters ("Showing N of M"); with a search
+  it is guarded like any other search. Both run under one verified generation.
 - The "Pending edits" count stays local.
 - Results are cached per `(filters, generation)` for the session.
 

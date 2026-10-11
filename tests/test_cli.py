@@ -13,12 +13,14 @@ def test_cache_flags_are_passed_to_the_app_environment(monkeypatch):
     monkeypatch.setattr(cli.subprocess, "run", process)
     monkeypatch.setattr(cli.sys, "argv", ["dbt-dqm", "app", "--project-dir", "/tmp/project",
                                          "--profiles-dir", "/tmp/profiles", "--target", "dev",
-                                         "--max-cache-issues", "100", "--max-cache-mib", "2"])
+                                         "--max-cache-issues", "100", "--max-cache-mib", "2",
+                                         "--max-search-gib", "0.5"])
     with pytest.raises(SystemExit) as stopped:
         cli.main()
     assert stopped.value.code == 0
     assert process.call_args.kwargs["env"]["DBT_DQM_MAX_CACHE_ISSUES"] == "100"
     assert process.call_args.kwargs["env"]["DBT_DQM_MAX_CACHE_MIB"] == "2"
+    assert process.call_args.kwargs["env"]["DBT_DQM_MAX_SEARCH_GIB"] == "0.5"
 
 
 def test_cli_rejects_limits_above_the_supported_ceiling(monkeypatch):
@@ -30,6 +32,11 @@ def test_cli_rejects_limits_above_the_supported_ceiling(monkeypatch):
                                          "--profiles-dir", "/tmp/profiles", "--target", "dev",
                                          "--max-cache-issues", "50001"])
     with pytest.raises(SystemExit, match="1 to 50000"):
+        cli.main()
+    monkeypatch.setattr(cli.sys, "argv", ["dbt-dqm", "app", "--project-dir", "/tmp/project",
+                                         "--profiles-dir", "/tmp/profiles", "--target", "dev",
+                                         "--max-search-gib", "0"])
+    with pytest.raises(SystemExit, match="max-search-gib"):
         cli.main()
 
 

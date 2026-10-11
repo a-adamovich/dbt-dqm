@@ -8,21 +8,22 @@ import subprocess
 import sys
 import uuid
 from collections.abc import Iterable
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import psycopg2
-from google.api_core.exceptions import Conflict, NotFound
+from google.api_core.exceptions import Conflict, GoogleAPICallError, NotFound
 from google.cloud import bigquery
 from google.oauth2 import credentials as user_credentials
 from google.oauth2 import service_account
 from psycopg2.extras import RealDictCursor
 
+from . import browse
 from .config import AppConfig
-from .errors import AppError, SnapshotUnavailable, classify
+from .errors import AppError, SearchTooCostly, SnapshotUnavailable, classify
 from .limits import check_cache_size, issue_json
 from .store import EDITABLE_FIELDS, Patch
 
@@ -250,6 +251,159 @@ def fetch_issues(config: AppConfig) -> list[dict[str, Any]]:
         )
     _validate_issue_rows(rows)
     return rows
+
+
+SEARCH_TOO_COSTLY = (
+    "This search would process about {estimate:.2f} GiB in BigQuery, above the {limit:g} GiB "
+    "limit (--max-search-gib). Your current results are kept. Narrow the search with a "
+    "lifecycle, created-date, status, owner or tag filter, or raise the limit."
+)
+GENERATION_CHANGED = (
+    "The warehouse changed while reading (a reconciliation finished). Your current results are "
+    "kept; restart from the first page."
+)
+
+
+def browse_population(config: AppConfig) -> str:
+    """The issues warehouse browsing can show; fix it once per session so pages agree."""
+    return _issue_predicate(config)
+
+
+def _bigquery_parameters(params: dict[str, Any]) -> list:
+    parameters = []
+    for name, value in params.items():
+        if isinstance(value, list):
+            parameters.append(bigquery.ArrayQueryParameter(name, "STRING", value))
+        elif isinstance(value, bool):
+            parameters.append(bigquery.ScalarQueryParameter(name, "BOOL", value))
+        elif isinstance(value, int):
+            parameters.append(bigquery.ScalarQueryParameter(name, "INT64", value))
+        elif isinstance(value, datetime):
+            parameters.append(bigquery.ScalarQueryParameter(name, "TIMESTAMP", value))
+        else:
+            parameters.append(bigquery.ScalarQueryParameter(name, "STRING", value))
+    return parameters
+
+
+def _run_browse_query(config: AppConfig, query: browse.Query, *, searched: bool = False
+                      ) -> list[dict[str, Any]]:
+    """Run one parameterized browse query. A BigQuery search is estimated with a dry run first and
+    then runs with maximum_bytes_billed, so the ceiling holds even if the estimate was low."""
+    if config.adapter_type != "bigquery":
+        with (
+            _postgres_connection(config) as connection,
+            connection.cursor(cursor_factory=RealDictCursor) as cursor,
+        ):
+            cursor.execute(query.sql, query.params)
+            return [dict(row) for row in cursor.fetchall()]
+    client = client_for(config)
+    parameters = _bigquery_parameters(query.params)
+    limit = None
+    if searched:
+        limit = config.max_search_bytes
+        estimate = client.query(query.sql, job_config=bigquery.QueryJobConfig(
+            query_parameters=parameters, dry_run=True, use_query_cache=False,
+        )).total_bytes_processed or 0
+        if estimate > limit:
+            raise SearchTooCostly(SEARCH_TOO_COSTLY.format(
+                estimate=estimate / 2**30, limit=config.max_search_gib))
+    job_config = bigquery.QueryJobConfig(query_parameters=parameters)
+    if limit is not None:
+        job_config.maximum_bytes_billed = limit
+    try:
+        return [dict(row.items()) for row in client.query(query.sql, job_config=job_config).result()]
+    except GoogleAPICallError as error:
+        if limit is not None and "bytesBilledLimitExceeded" in str(getattr(error, "errors", "")) + str(error):
+            raise SearchTooCostly(SEARCH_TOO_COSTLY.format(
+                estimate=limit / 2**30, limit=config.max_search_gib), str(error)) from error
+        raise
+
+
+def _control_state(config: AppConfig) -> dict[str, Any]:
+    control = _table(config, "dqm_reconciliation_control")
+    state = _query_rows(
+        config,
+        f"select (select max(generation) from {control}) as generation, "
+        f"(select max(setup_status) from {control}) as setup_status",
+    )[0]
+    if state["setup_status"] != "ready":
+        raise SnapshotUnavailable(
+            "dbt-dqm setup or a migration is in progress, so warehouse data isn't ready yet. "
+            "Try again shortly."
+        )
+    return state
+
+
+def _verified(config: AppConfig, read):
+    """Run `read` between two control-state checks; retry once if a reconciliation intervened."""
+    for _attempt in range(2):
+        before = _control_state(config)
+        result = read()
+        if _control_state(config)["generation"] == before["generation"]:
+            return result, before["generation"]
+    raise SnapshotUnavailable(GENERATION_CHANGED)
+
+
+@dataclass
+class Page:
+    rows: list[dict[str, Any]]
+    next_cursor: browse.Cursor | None
+    generation: Any
+
+
+def browse_page(config: AppConfig, population: str, filters: browse.Filters,
+                cursor: browse.Cursor | None, page_size: int) -> Page:
+    """One verified page in snapshot sort order, plus the cursor for the next one.
+
+    BigQuery reads in two phases: the key columns choose the page, then only that page's full
+    rows are read by id. Postgres reads the page in one query.
+    """
+    relation = _table(config, "dqm_all_issues")
+    searched = browse.normalized_search(filters.search) is not None
+    adapter = config.adapter_type
+
+    def read():
+        if adapter == "bigquery":
+            keys = _run_browse_query(config, browse.page_query(
+                adapter, relation, population, filters, cursor, page_size,
+                columns=", ".join(browse.KEY_COLUMNS)), searched=searched)
+            ids = [str(row["occurrence_id"]) for row in keys[:page_size]]
+            full = {}
+            if ids:
+                full = {str(row["occurrence_id"]): row for row in _run_browse_query(
+                    config, browse.rows_by_id_query(adapter, relation, ids))}
+            if set(full) != set(ids):
+                raise SnapshotUnavailable(GENERATION_CHANGED)
+            return [full[occurrence_id] for occurrence_id in ids], len(keys) > page_size, keys
+        rows = _run_browse_query(config, browse.page_query(
+            adapter, relation, population, filters, cursor, page_size), searched=searched)
+        return rows[:page_size], len(rows) > page_size, rows
+
+    (rows, more, keys), generation = _verified(config, read)
+    next_cursor = browse.cursor_from_row(keys[page_size - 1]) if more else None
+    for row in rows:
+        row.pop("_priority_rank", None)
+        row.pop("_status_rank", None)
+    _validate_issue_rows(rows)
+    return Page(rows, next_cursor, generation)
+
+
+def browse_summary(config: AppConfig, population: str, filters: browse.Filters) -> dict[str, Any]:
+    """The header metrics over the whole population (as in snapshot mode) and the filtered count,
+    read under one generation."""
+    relation = _table(config, "dqm_all_issues")
+    adapter = config.adapter_type
+    searched = browse.normalized_search(filters.search) is not None
+
+    def read():
+        metrics = _run_browse_query(config, browse.metrics_query(adapter, relation, population))[0]
+        matching = _run_browse_query(
+            config, browse.count_query(adapter, relation, population, filters), searched=searched
+        )[0]["matching"]
+        return {**{key: int(value or 0) for key, value in metrics.items()}, "matching": int(matching)}
+
+    summary, generation = _verified(config, read)
+    return {**summary, "generation": generation}
 
 
 def _json_object(value: Any, *, required: bool) -> dict[str, Any] | None:

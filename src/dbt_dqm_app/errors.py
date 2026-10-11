@@ -25,6 +25,10 @@ class SnapshotUnavailable(AppError):
     """The warehouse answered, but its data can't be trusted to replace the local cache."""
 
 
+class SearchTooCostly(AppError):
+    """A BigQuery search would process more bytes than --max-search-gib allows; nothing ran."""
+
+
 class WarehouseBusy(AppError):
     """A reconciliation or another writer held the data; nothing was changed."""
 

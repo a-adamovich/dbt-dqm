@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Groundwork for warehouse-side issue browsing (0.3, `docs/design/warehouse-browsing.md`): parameterized filter, search, keyset-page, count and metrics queries for both adapters, verified against the control generation like a sync, with BigQuery pages read in two phases (keys, then one page of rows). A BigQuery search is estimated with a dry run and runs with `maximum_bytes_billed`; the new `--max-search-gib` (default 1) sets the ceiling. The app doesn't use warehouse browsing yet.
 - Requires PyArrow 25.x (`>=25.0.1,<26`). Peak sync memory at the 50,000-issue boundary is equal or slightly lower than with 23.0.1 (`docs/scale.md`).
 - Supports pandas 3 (`pandas>=2.2,<4`; the lockfile uses 3.0.6). pandas 3 stores missing strings as NaN, which made never-edited issue cards show "User updated: nan"; card and filter helpers now treat None, NaN, NaT and `pd.NA` alike as missing. The app keeps object-backed strings, because pandas 3's Arrow-backed default added about 70 MiB of peak memory at the 50,000-issue boundary (`docs/scale.md`).
 - The app no longer reports an unsupported dbt version or invalid `dbt_project.yml` as a missing profile: the profile hint matched dbt's own "profiles.yml file [OK found and valid]" line. dbt output is matched without its colour codes.

@@ -471,6 +471,27 @@ select customer_id from {{ ref('demo_records') }} where false
     assert demo.sql("select sum(assessed_count) n from @schema.dqm_test_health")[0]["n"] == 1
 
 
+def test_warehouse_browsing_matches_the_snapshot_and_sees_generation_changes(demo):
+    from browse_checks import check_browsing
+
+    from dbt_dqm_app.browse import Filters
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.warehouse import browse_page, browse_population, browse_summary
+
+    demo.capture()
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    config = load_config(demo.project, demo.profiles, "dev")
+    generation = check_browsing(config)
+    demo.capture("passed")
+    demo.dbt("run", "--select", "dqm_reconcile")
+    population = browse_population(config)
+    archived = browse_page(config, population, Filters(lifecycle=("Archived",)), None, 25)
+    assert archived.generation != generation  # the app restarts paging instead of mixing pages
+    assert len(archived.rows) == 7
+    summary = browse_summary(config, population, Filters())
+    assert summary["active_count"] == summary["matching"] == 0
+
+
 def test_first_package_build_and_interrupted_setup_resume(demo):
     # App-written models create their tables once, even when no capture has run yet.
     demo.dbt("run", "--select", "package:dbt_dqm")
@@ -677,6 +698,8 @@ def test_capture_completing_after_a_later_run_is_late_evidence(demo):
 def test_restricted_runner_and_reviewer_use_only_documented_grants(demo):
     """A non-superuser runner builds everything; a reviewer with only the documented grants can
     perform every app operation and nothing else."""
+    from browse_checks import check_browsing
+
     from dbt_dqm_app.config import load_config
     from dbt_dqm_app.store import Patch
     from dbt_dqm_app.warehouse import apply_patches, fetch_health, fetch_issues, insert_missed_issue
@@ -722,6 +745,7 @@ def test_restricted_runner_and_reviewer_use_only_documented_grants(demo):
         issues = fetch_issues(config)
         assert len(issues) == len(as_runner.occurrences())
         assert fetch_health(config)["tests"]
+        check_browsing(config, "Archived")
         row = issues[0]
         patch = Patch(
             row["occurrence_id"],
