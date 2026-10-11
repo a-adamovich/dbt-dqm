@@ -25,6 +25,7 @@ import pandas as pd
 
 from dbt_dqm_app.config import load_config
 from dbt_dqm_app.display import paired_display
+from dbt_dqm_app.frames import configure_pandas
 from dbt_dqm_app.store import Workspace
 from dbt_dqm_app.warehouse import fetch_health, fetch_issues
 
@@ -36,6 +37,7 @@ def peak_rss_mb() -> float:
 
 
 def main() -> None:
+    configure_pandas()  # the app's DataFrame settings, as in streamlit_app
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--project-dir", required=True)
     parser.add_argument("--profiles-dir", required=True)

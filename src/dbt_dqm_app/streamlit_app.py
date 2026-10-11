@@ -30,6 +30,7 @@ from dbt_dqm_app.display import (
     workflow_status_options,
 )
 from dbt_dqm_app.errors import classify
+from dbt_dqm_app.frames import configure_pandas
 from dbt_dqm_app.limits import CacheLimitExceeded, check_cache_size
 from dbt_dqm_app.store import EDITABLE_FIELDS, Workspace
 from dbt_dqm_app.warehouse import (
@@ -39,6 +40,8 @@ from dbt_dqm_app.warehouse import (
     manifest_nodes,
     sync_worker,
 )
+
+configure_pandas()
 
 PAGE_SIZE_OPTIONS = [25, 50, 100, 200]
 

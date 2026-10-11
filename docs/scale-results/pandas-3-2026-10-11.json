@@ -1,0 +1,260 @@
+{
+  "date": "2026-10-11",
+  "postgres": "16.11",
+  "harness": "integration_tests/scale/cache_boundary.py",
+  "method": "Alternating runs, 6 per variant per comparison, idle machine. The string-dtype comparison set pandas' future.infer_string option inside the measured subprocess.",
+  "runs": [
+    {
+      "comparison": "pandas 2 vs 3 (default)",
+      "variant": "pandas 2.3.3",
+      "round": 1,
+      "peak_rss_mb": 556.8,
+      "total_seconds": 4.69
+    },
+    {
+      "comparison": "pandas 2 vs 3 (default)",
+      "variant": "pandas 2.3.3",
+      "round": 2,
+      "peak_rss_mb": 490.2,
+      "total_seconds": 4.71
+    },
+    {
+      "comparison": "pandas 2 vs 3 (default)",
+      "variant": "pandas 2.3.3",
+      "round": 3,
+      "peak_rss_mb": 577.6,
+      "total_seconds": 4.5
+    },
+    {
+      "comparison": "pandas 2 vs 3 (default)",
+      "variant": "pandas 2.3.3",
+      "round": 4,
+      "peak_rss_mb": 554.7,
+      "total_seconds": 4.52
+    },
+    {
+      "comparison": "pandas 2 vs 3 (default)",
+      "variant": "pandas 2.3.3",
+      "round": 5,
+      "peak_rss_mb": 576.8,
+      "total_seconds": 4.58
+    },
+    {
+      "comparison": "pandas 2 vs 3 (default)",
+      "variant": "pandas 2.3.3",
+      "round": 6,
+      "peak_rss_mb": 580.6,
+      "total_seconds": 4.49
+    },
+    {
+      "comparison": "pandas 2 vs 3 (default)",
+      "variant": "pandas 3.0.6, default Arrow strings",
+      "round": 1,
+      "peak_rss_mb": 613.6,
+      "total_seconds": 4.65
+    },
+    {
+      "comparison": "pandas 2 vs 3 (default)",
+      "variant": "pandas 3.0.6, default Arrow strings",
+      "round": 2,
+      "peak_rss_mb": 660.1,
+      "total_seconds": 4.63
+    },
+    {
+      "comparison": "pandas 2 vs 3 (default)",
+      "variant": "pandas 3.0.6, default Arrow strings",
+      "round": 3,
+      "peak_rss_mb": 649.3,
+      "total_seconds": 4.69
+    },
+    {
+      "comparison": "pandas 2 vs 3 (default)",
+      "variant": "pandas 3.0.6, default Arrow strings",
+      "round": 4,
+      "peak_rss_mb": 589.6,
+      "total_seconds": 4.65
+    },
+    {
+      "comparison": "pandas 2 vs 3 (default)",
+      "variant": "pandas 3.0.6, default Arrow strings",
+      "round": 5,
+      "peak_rss_mb": 547.7,
+      "total_seconds": 4.85
+    },
+    {
+      "comparison": "pandas 2 vs 3 (default)",
+      "variant": "pandas 3.0.6, default Arrow strings",
+      "round": 6,
+      "peak_rss_mb": 544.1,
+      "total_seconds": 4.7
+    },
+    {
+      "comparison": "string dtype under pandas 3",
+      "variant": "pandas 3.0.6, default Arrow strings",
+      "round": 1,
+      "peak_rss_mb": 630.1,
+      "total_seconds": 4.79
+    },
+    {
+      "comparison": "string dtype under pandas 3",
+      "variant": "pandas 3.0.6, default Arrow strings",
+      "round": 2,
+      "peak_rss_mb": 625.0,
+      "total_seconds": 4.66
+    },
+    {
+      "comparison": "string dtype under pandas 3",
+      "variant": "pandas 3.0.6, default Arrow strings",
+      "round": 3,
+      "peak_rss_mb": 655.8,
+      "total_seconds": 4.66
+    },
+    {
+      "comparison": "string dtype under pandas 3",
+      "variant": "pandas 3.0.6, default Arrow strings",
+      "round": 4,
+      "peak_rss_mb": 657.2,
+      "total_seconds": 4.56
+    },
+    {
+      "comparison": "string dtype under pandas 3",
+      "variant": "pandas 3.0.6, default Arrow strings",
+      "round": 5,
+      "peak_rss_mb": 570.2,
+      "total_seconds": 4.81
+    },
+    {
+      "comparison": "string dtype under pandas 3",
+      "variant": "pandas 3.0.6, default Arrow strings",
+      "round": 6,
+      "peak_rss_mb": 641.1,
+      "total_seconds": 4.64
+    },
+    {
+      "comparison": "string dtype under pandas 3",
+      "variant": "pandas 3.0.6, object strings",
+      "round": 1,
+      "peak_rss_mb": 543.1,
+      "total_seconds": 4.65
+    },
+    {
+      "comparison": "string dtype under pandas 3",
+      "variant": "pandas 3.0.6, object strings",
+      "round": 2,
+      "peak_rss_mb": 563.0,
+      "total_seconds": 4.51
+    },
+    {
+      "comparison": "string dtype under pandas 3",
+      "variant": "pandas 3.0.6, object strings",
+      "round": 3,
+      "peak_rss_mb": 581.7,
+      "total_seconds": 4.53
+    },
+    {
+      "comparison": "string dtype under pandas 3",
+      "variant": "pandas 3.0.6, object strings",
+      "round": 4,
+      "peak_rss_mb": 575.3,
+      "total_seconds": 4.57
+    },
+    {
+      "comparison": "string dtype under pandas 3",
+      "variant": "pandas 3.0.6, object strings",
+      "round": 5,
+      "peak_rss_mb": 579.8,
+      "total_seconds": 4.5
+    },
+    {
+      "comparison": "string dtype under pandas 3",
+      "variant": "pandas 3.0.6, object strings",
+      "round": 6,
+      "peak_rss_mb": 513.8,
+      "total_seconds": 4.65
+    },
+    {
+      "comparison": "pandas 2 vs 3 with the app setting",
+      "variant": "pandas 2.3.3",
+      "round": 1,
+      "peak_rss_mb": 482.2,
+      "total_seconds": 4.82
+    },
+    {
+      "comparison": "pandas 2 vs 3 with the app setting",
+      "variant": "pandas 2.3.3",
+      "round": 2,
+      "peak_rss_mb": 518.4,
+      "total_seconds": 4.81
+    },
+    {
+      "comparison": "pandas 2 vs 3 with the app setting",
+      "variant": "pandas 2.3.3",
+      "round": 3,
+      "peak_rss_mb": 473.8,
+      "total_seconds": 4.88
+    },
+    {
+      "comparison": "pandas 2 vs 3 with the app setting",
+      "variant": "pandas 2.3.3",
+      "round": 4,
+      "peak_rss_mb": 553.3,
+      "total_seconds": 4.75
+    },
+    {
+      "comparison": "pandas 2 vs 3 with the app setting",
+      "variant": "pandas 2.3.3",
+      "round": 5,
+      "peak_rss_mb": 575.2,
+      "total_seconds": 4.61
+    },
+    {
+      "comparison": "pandas 2 vs 3 with the app setting",
+      "variant": "pandas 2.3.3",
+      "round": 6,
+      "peak_rss_mb": 574.4,
+      "total_seconds": 4.72
+    },
+    {
+      "comparison": "pandas 2 vs 3 with the app setting",
+      "variant": "pandas 3.0.6 with the app's configure_pandas()",
+      "round": 1,
+      "peak_rss_mb": 580.5,
+      "total_seconds": 4.5
+    },
+    {
+      "comparison": "pandas 2 vs 3 with the app setting",
+      "variant": "pandas 3.0.6 with the app's configure_pandas()",
+      "round": 2,
+      "peak_rss_mb": 477.4,
+      "total_seconds": 4.73
+    },
+    {
+      "comparison": "pandas 2 vs 3 with the app setting",
+      "variant": "pandas 3.0.6 with the app's configure_pandas()",
+      "round": 3,
+      "peak_rss_mb": 468.2,
+      "total_seconds": 4.87
+    },
+    {
+      "comparison": "pandas 2 vs 3 with the app setting",
+      "variant": "pandas 3.0.6 with the app's configure_pandas()",
+      "round": 4,
+      "peak_rss_mb": 521.3,
+      "total_seconds": 4.6
+    },
+    {
+      "comparison": "pandas 2 vs 3 with the app setting",
+      "variant": "pandas 3.0.6 with the app's configure_pandas()",
+      "round": 5,
+      "peak_rss_mb": 584.1,
+      "total_seconds": 4.54
+    },
+    {
+      "comparison": "pandas 2 vs 3 with the app setting",
+      "variant": "pandas 3.0.6 with the app's configure_pandas()",
+      "round": 6,
+      "peak_rss_mb": 565.2,
+      "total_seconds": 4.53
+    }
+  ]
+}
