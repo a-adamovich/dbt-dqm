@@ -115,7 +115,7 @@ def test_restricted_bigquery_runner_and_reviewer(tmp_path):
     assert "0003_app_change_staging" in migrations
     assert "0004_app_staging_safety" in migrations
     assert "0005_maintenance_log" in migrations
-    assert "0006_maintenance_attribution" in migrations
+    assert "0007_browse_keyset_index" in migrations
 
     dbt("seed", "--select", fixture)
     dbt("run", "--select", fixture + "_records")

@@ -1,0 +1,16 @@
+Limit  (cost=0.97..775.97 rows=26 width=1186) (actual time=0.063..0.226 rows=26 loops=1)
+  Buffers: shared hit=153
+  ->  Nested Loop Left Join  (cost=0.97..354861.41 rows=11905 width=1186) (actual time=0.063..0.225 rows=26 loops=1)
+        Buffers: shared hit=153
+        ->  Index Scan using dqm_occurrence_browse_active on dqm_issue_occurrences cur  (cost=0.42..267247.02 rows=11905 width=1011) (actual time=0.047..0.075 rows=26 loops=1)
+              Filter: ((record_status = 'Active'::text) OR (archived_at >= '2026-07-13 04:37:10.810666-05'::timestamp with time zone))
+              Buffers: shared hit=23
+        ->  Index Scan using dqm_occurrence_identity_history on dqm_issue_occurrences prev  (cost=0.55..7.31 rows=1 width=294) (actual time=0.005..0.005 rows=0 loops=26)
+              Index Cond: ((test_unique_id = cur.test_unique_id) AND (unique_id = cur.unique_id))
+              Filter: ((NOT (cur.identity_scheme_signature IS DISTINCT FROM identity_scheme_signature)) AND (cur.occurrence_number = (occurrence_number + 1)))
+              Rows Removed by Filter: 1
+              Buffers: shared hit=130
+Planning:
+  Buffers: shared hit=327
+Planning Time: 0.707 ms
+Execution Time: 0.261 ms

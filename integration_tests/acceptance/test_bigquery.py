@@ -731,7 +731,7 @@ def test_bigquery_0002_upgrades_populated_schema_after_interruption(demo):
     assert demo.sql("select 1 from @dataset.dqm_app_change_staging` limit 0") == []
     control = demo.sql("select * from @dataset.dqm_reconciliation_control`")[0]
     assert control["setup_status"] == "ready" and control["migration_owner"] is None
-    assert control["schema_version"] == "0006_maintenance_attribution"
+    assert control["schema_version"] == "0007_browse_keyset_index"
 
 
 def test_bigquery_0004_preserves_history_and_bounds_legacy_staging(demo):

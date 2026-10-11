@@ -300,3 +300,15 @@ def test_bigquery_two_phase_pages_match_the_snapshot_filters():
         assert values["recurring_count"] == sum(bool(row["is_recurrence"]) for row in active)
     finally:
         client.delete_dataset(dataset, delete_contents=True, not_found_ok=True)
+
+
+def test_the_migration_indexes_exactly_the_app_sort_expressions():
+    """Migration 0007's Postgres index only helps if its expressions match the page query's."""
+    from pathlib import Path
+
+    from dbt_dqm_app.browse import _priority_rank_sql, _status_rank_sql
+
+    macros = (Path(__file__).parents[1] / "macros/schema_management.sql").read_text()
+    assert ("{% macro browse_priority_rank_sql() %}" + _priority_rank_sql() + "{% endmacro %}"
+            in macros)
+    assert "{% macro browse_status_rank_sql() %}" + _status_rank_sql() + "{% endmacro %}" in macros

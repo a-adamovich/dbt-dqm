@@ -1,0 +1,387 @@
+{
+  "adapter": "postgres",
+  "server_version": "16.11",
+  "volumes": {
+    "tests": 200,
+    "occurrences": 1000000,
+    "active_occurrences": 100000,
+    "executions": 50000,
+    "observations": 5000000,
+    "payload_columns": 8
+  },
+  "synthetic_load_seconds": 269.5,
+  "steady_reconcile_seconds": 4.54,
+  "steady_plan_execution_seconds": {
+    "freeze": 0.061649999999999996,
+    "change_set": 9.854208
+  },
+  "mass_pass_reconcile_seconds": 37.46,
+  "mass_pass_plan_execution_seconds": {},
+  "active_scale_occurrences_after_mass_pass": 0,
+  "app_sync": null,
+  "browse": {
+    "with_index": {
+      "adapter": "postgres",
+      "label": "1000000-baseline",
+      "cases": {
+        "all_active": {
+          "summary": {
+            "median_s": 0.697,
+            "max_s": 3.961,
+            "first_s": 3.961
+          },
+          "matching": 100007,
+          "first_page": {
+            "median_s": 0.019,
+            "max_s": 0.056,
+            "first_s": 0.056
+          },
+          "next_page": {
+            "median_s": 0.02,
+            "max_s": 0.046,
+            "first_s": 0.02
+          }
+        },
+        "status_blocked": {
+          "summary": {
+            "median_s": 0.427,
+            "max_s": 0.491,
+            "first_s": 0.491
+          },
+          "matching": 12500,
+          "first_page": {
+            "median_s": 0.137,
+            "max_s": 0.17,
+            "first_s": 0.137
+          },
+          "next_page": {
+            "median_s": 0.105,
+            "max_s": 0.201,
+            "first_s": 0.201
+          }
+        },
+        "priority_high": {
+          "summary": {
+            "median_s": 0.557,
+            "max_s": 2.602,
+            "first_s": 2.602
+          },
+          "matching": 28574,
+          "first_page": {
+            "median_s": 0.195,
+            "max_s": 0.232,
+            "first_s": 0.179
+          },
+          "next_page": {
+            "median_s": 0.187,
+            "max_s": 0.398,
+            "first_s": 0.398
+          }
+        },
+        "owner": {
+          "summary": {
+            "median_s": 0.516,
+            "max_s": 2.129,
+            "first_s": 2.129
+          },
+          "matching": 5000,
+          "first_page": {
+            "median_s": 0.155,
+            "max_s": 0.197,
+            "first_s": 0.197
+          },
+          "next_page": {
+            "median_s": 0.046,
+            "max_s": 0.231,
+            "first_s": 0.231
+          }
+        },
+        "created_last_30_days": {
+          "summary": {
+            "median_s": 0.944,
+            "max_s": 2.048,
+            "first_s": 2.048
+          },
+          "matching": 39706,
+          "first_page": {
+            "median_s": 0.019,
+            "max_s": 0.07,
+            "first_s": 0.027
+          },
+          "next_page": {
+            "median_s": 0.025,
+            "max_s": 0.048,
+            "first_s": 0.019
+          }
+        },
+        "tag": {
+          "summary": {
+            "median_s": 4.784,
+            "max_s": 5.228,
+            "first_s": 1.667
+          },
+          "matching": 33334,
+          "first_page": {
+            "median_s": 0.019,
+            "max_s": 0.073,
+            "first_s": 0.048
+          },
+          "next_page": {
+            "median_s": 0.025,
+            "max_s": 0.057,
+            "first_s": 0.046
+          }
+        },
+        "recurrences_only": {
+          "summary": {
+            "median_s": 1.078,
+            "max_s": 7.99,
+            "first_s": 7.99
+          },
+          "matching": 0,
+          "first_page": {
+            "median_s": 0.513,
+            "max_s": 1.654,
+            "first_s": 1.654
+          }
+        },
+        "search": {
+          "summary": {
+            "median_s": 0.571,
+            "max_s": 2.35,
+            "first_s": 2.35
+          },
+          "matching": 11,
+          "first_page": {
+            "median_s": 0.191,
+            "max_s": 0.237,
+            "first_s": 0.179
+          }
+        },
+        "search_with_status": {
+          "summary": {
+            "median_s": 0.508,
+            "max_s": 1.269,
+            "first_s": 0.508
+          },
+          "matching": 4,
+          "first_page": {
+            "median_s": 0.151,
+            "max_s": 0.219,
+            "first_s": 0.151
+          }
+        }
+      },
+      "options": {
+        "median_s": 4.028,
+        "max_s": 4.028,
+        "first_s": 4.028
+      },
+      "deep_paging_200_per_page_s": [
+        0.076,
+        0.045,
+        0.047,
+        0.042,
+        0.078,
+        0.046,
+        0.048,
+        0.077,
+        0.042,
+        0.038
+      ],
+      "page_cache_rows": 2000,
+      "postgres_plan_execution_s": {
+        "first_page": 0.000261,
+        "next_page": 0.000204,
+        "status_blocked": 0.28367899999999996,
+        "search": 0.244764,
+        "count_all": 2.7124430000000004,
+        "metrics": 3.9077089999999997
+      },
+      "baseline_rss_mb": 161.8,
+      "peak_rss_mb": 174.1
+    },
+    "without_index": {
+      "adapter": "postgres",
+      "label": "1000000-baseline-no-index",
+      "cases": {
+        "all_active": {
+          "summary": {
+            "median_s": 2.427,
+            "max_s": 3.312,
+            "first_s": 2.427
+          },
+          "matching": 100007,
+          "first_page": {
+            "median_s": 2.675,
+            "max_s": 2.828,
+            "first_s": 2.375
+          },
+          "next_page": {
+            "median_s": 0.308,
+            "max_s": 0.579,
+            "first_s": 0.579
+          }
+        },
+        "status_blocked": {
+          "summary": {
+            "median_s": 0.479,
+            "max_s": 1.742,
+            "first_s": 1.742
+          },
+          "matching": 12500,
+          "first_page": {
+            "median_s": 0.154,
+            "max_s": 0.187,
+            "first_s": 0.147
+          },
+          "next_page": {
+            "median_s": 0.058,
+            "max_s": 0.086,
+            "first_s": 0.058
+          }
+        },
+        "priority_high": {
+          "summary": {
+            "median_s": 0.909,
+            "max_s": 2.225,
+            "first_s": 1.008
+          },
+          "matching": 28574,
+          "first_page": {
+            "median_s": 0.2,
+            "max_s": 0.256,
+            "first_s": 0.196
+          },
+          "next_page": {
+            "median_s": 0.171,
+            "max_s": 0.457,
+            "first_s": 0.457
+          }
+        },
+        "owner": {
+          "summary": {
+            "median_s": 0.455,
+            "max_s": 1.429,
+            "first_s": 1.429
+          },
+          "matching": 5000,
+          "first_page": {
+            "median_s": 0.143,
+            "max_s": 0.185,
+            "first_s": 0.185
+          },
+          "next_page": {
+            "median_s": 0.05,
+            "max_s": 0.173,
+            "first_s": 0.173
+          }
+        },
+        "created_last_30_days": {
+          "summary": {
+            "median_s": 0.509,
+            "max_s": 0.938,
+            "first_s": 0.938
+          },
+          "matching": 39706,
+          "first_page": {
+            "median_s": 0.191,
+            "max_s": 0.407,
+            "first_s": 0.193
+          },
+          "next_page": {
+            "median_s": 0.168,
+            "max_s": 0.505,
+            "first_s": 0.505
+          }
+        },
+        "tag": {
+          "summary": {
+            "median_s": 2.451,
+            "max_s": 6.089,
+            "first_s": 6.089
+          },
+          "matching": 33334,
+          "first_page": {
+            "median_s": 0.313,
+            "max_s": 0.377,
+            "first_s": 0.313
+          },
+          "next_page": {
+            "median_s": 0.317,
+            "max_s": 0.338,
+            "first_s": 0.338
+          }
+        },
+        "recurrences_only": {
+          "summary": {
+            "median_s": 0.737,
+            "max_s": 4.838,
+            "first_s": 4.838
+          },
+          "matching": 0,
+          "first_page": {
+            "median_s": 4.896,
+            "max_s": 5.215,
+            "first_s": 2.023
+          }
+        },
+        "search": {
+          "summary": {
+            "median_s": 0.503,
+            "max_s": 1.475,
+            "first_s": 1.475
+          },
+          "matching": 11,
+          "first_page": {
+            "median_s": 0.186,
+            "max_s": 0.256,
+            "first_s": 0.186
+          }
+        },
+        "search_with_status": {
+          "summary": {
+            "median_s": 0.622,
+            "max_s": 0.731,
+            "first_s": 0.622
+          },
+          "matching": 4,
+          "first_page": {
+            "median_s": 0.246,
+            "max_s": 2.37,
+            "first_s": 0.169
+          }
+        }
+      },
+      "options": {
+        "median_s": 12.05,
+        "max_s": 12.05,
+        "first_s": 12.05
+      },
+      "deep_paging_200_per_page_s": [
+        0.424,
+        0.406,
+        0.311,
+        0.319,
+        0.341,
+        0.271,
+        0.317,
+        0.351,
+        0.341,
+        0.311
+      ],
+      "page_cache_rows": 2000,
+      "postgres_plan_execution_s": {
+        "first_page": 2.378964,
+        "next_page": 0.201387,
+        "status_blocked": 2.384047,
+        "search": 1.286031,
+        "count_all": 3.029898,
+        "metrics": 3.74515
+      },
+      "baseline_rss_mb": 160.2,
+      "peak_rss_mb": 173.8
+    },
+    "index_build_seconds": 5.15
+  }
+}

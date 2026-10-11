@@ -1,0 +1,25 @@
+Finalize Aggregate  (cost=219102.03..219102.04 rows=1 width=32) (actual time=3906.676..3907.660 rows=1 loops=1)
+  Buffers: shared hit=490 read=199714
+  ->  Gather  (cost=219101.80..219102.01 rows=2 width=32) (actual time=3861.913..3907.650 rows=3 loops=1)
+        Workers Planned: 2
+        Workers Launched: 2
+        Buffers: shared hit=490 read=199714
+        ->  Partial Aggregate  (cost=218101.80..218101.81 rows=1 width=32) (actual time=3842.472..3842.475 rows=1 loops=3)
+              Buffers: shared hit=490 read=199714
+              ->  Parallel Hash Right Join  (cost=107117.48..216494.55 rows=49454 width=22) (actual time=3828.762..3834.856 rows=40678 loops=3)
+                    Hash Cond: ((prev.test_unique_id = cur.test_unique_id) AND (prev.unique_id = cur.unique_id) AND ((prev.occurrence_number + 1) = cur.occurrence_number))
+                    Join Filter: (NOT (cur.identity_scheme_signature IS DISTINCT FROM prev.identity_scheme_signature))
+                    Buffers: shared hit=490 read=199714
+                    ->  Parallel Seq Scan on dqm_issue_occurrences prev  (cost=0.00..104168.69 rows=416669 width=137) (actual time=0.013..2062.308 rows=333336 loops=3)
+                          Buffers: shared hit=195 read=99807
+                    ->  Parallel Hash  (cost=106252.04..106252.04 rows=49454 width=145) (actual time=1666.087..1666.087 rows=40678 loops=3)
+                          Buckets: 131072  Batches: 1  Memory Usage: 22816kB
+                          Buffers: shared hit=99 read=99903
+                          ->  Parallel Seq Scan on dqm_issue_occurrences cur  (cost=0.00..106252.04 rows=49454 width=145) (actual time=0.382..1656.930 rows=40678 loops=3)
+                                Filter: ((record_status = 'Active'::text) OR (archived_at >= '2026-07-13 04:37:10.810666-05'::timestamp with time zone))
+                                Rows Removed by Filter: 292658
+                                Buffers: shared hit=99 read=99903
+Planning:
+  Buffers: shared hit=23 read=3
+Planning Time: 1.365 ms
+Execution Time: 3907.709 ms

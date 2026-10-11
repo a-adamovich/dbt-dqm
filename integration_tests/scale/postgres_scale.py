@@ -149,6 +149,17 @@ def payload_sql(columns: int, key: str = "g") -> str:
     return "('{' || " + " || ',' || ".join(parts) + " || '}')"
 
 
+# Annotations vary across synthetic occurrences so warehouse browsing sorts and filters realistic
+# data: most issues are NEW, some are triaged, blocked or resolved; a fifth have no priority or
+# owner; tags add "finance" or "ops" to the tracked tests' "dqm" tag.
+VARIED_STATUS = ("(array['NEW','NEW','NEW','TRIAGED','IN_PROGRESS','BLOCKED','RESOLVED',"
+                 "'ACCEPTED_RISK'])[1 + g % 8]")
+VARIED_PRIORITY = "(array[null,'critical','high','high','medium','medium','low'])[1 + g % 7]"
+VARIED_OWNER = "case when g % 5 = 0 then null else 'owner_' || lpad((g % 20)::text, 2, '0') end"
+VARIED_TAGS = ("(array['[\"dqm\"]','[\"dqm\",\"finance\"]','[\"dqm\",\"ops\"]'])"
+               "[1 + g % 3]")
+
+
 def load_history(project: Project, args: argparse.Namespace) -> None:
     """Bulk-insert processed synthetic history for the scale tests, older than any real run."""
     scale_ids = [
@@ -204,18 +215,20 @@ def load_history(project: Project, args: argparse.Namespace) -> None:
            record_values_json, failure_row_count, test_tags, first_seen_at, last_seen_at,
            archived_at, record_status, close_reason, first_seen_invocation, last_seen_invocation,
            last_evaluated_invocation, workflow_status, test_status, annotation_version,
-           granularity_signature, identity_scheme_signature, review_verdict)
+           granularity_signature, identity_scheme_signature, review_verdict, test_priority,
+           poc_responsible)
         select md5('occurrence-' || g), ({ids})[1 + g % {args.tests}], 'scale_synthetic',
-          md5('identity-' || g), 1, {payload_sql(args.payload_columns)}, 1, '["dqm"]',
+          md5('identity-' || g), 1, {payload_sql(args.payload_columns)}, 1,
+          {VARIED_TAGS},
           (select anchor from scale_base) - (g * {step} * interval '1 second'),
           (select anchor from scale_base) - (g * {step} * interval '1 second' - interval '1 hour'),
           case when g <= {active} then null
                else (select anchor from scale_base) - (g * {step} * interval '1 second' - interval '2 hours') end,
           case when g <= {active} then 'Active' else 'Archived' end,
           case when g <= {active} then null else 'Passed' end,
-          'syn-exec-1', 'syn-exec-1', 'syn-exec-1', 'NEW', 'NEW', 0,
+          'syn-exec-1', 'syn-exec-1', 'syn-exec-1', {VARIED_STATUS}, {VARIED_STATUS}, 0,
           '["customer_id"]', '{{"granularity":["customer_id"],"version":"dqm-id-v1"}}',
-          'UNREVIEWED'
+          'UNREVIEWED', {VARIED_PRIORITY}, {VARIED_OWNER}
         from generate_series(1, {args.occurrences}) g;
 
         analyze @schema.dqm_test_executions;
@@ -260,6 +273,35 @@ def explain(
     return times
 
 
+def browse_probe(project: Project, output: Path, label: str) -> dict:
+    """Run browse_probe.py in a fresh process against this project."""
+    result = subprocess.run(
+        [sys.executable, str(Path(__file__).with_name("browse_probe.py")),
+         "--project-dir", str(project.path), "--profiles-dir", str(project.profiles),
+         "--output", str(output), "--label", label],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"browse probe failed:\n{result.stdout}{result.stderr}")
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def rebuild_browse_index(project: Project, drop: bool) -> float:
+    """Drop (or rebuild) migration 0007's browse index, to measure browsing without it."""
+    from dbt_dqm_app.browse import _priority_rank_sql, _status_rank_sql
+
+    started = time.perf_counter()
+    if drop:
+        project.sql("drop index @schema.dqm_occurrence_browse_active")
+    else:
+        project.sql(
+            "create index dqm_occurrence_browse_active on @schema.dqm_issue_occurrences "
+            f"(({_priority_rank_sql()}), ({_status_rank_sql()}), first_seen_at, occurrence_id) "
+            "where record_status = 'Active'; analyze @schema.dqm_issue_occurrences;"
+        )
+    return round(time.perf_counter() - started, 2)
+
+
 def app_sync(project: Project) -> dict[str, float | int]:
     """Run the app's sync path in a fresh process and report its wall time and peak RSS."""
     result = subprocess.run(
@@ -300,6 +342,13 @@ def main() -> None:
     )
     parser.add_argument("--output", type=Path, default=Path("scale-results"))
     parser.add_argument("--keep", action="store_true", help="keep the schema for inspection")
+    parser.add_argument("--browse", action="store_true",
+                        help="also measure warehouse browsing (browse_probe.py) after the steady run")
+    parser.add_argument("--browse-label", default="baseline")
+    parser.add_argument("--compare-index", action="store_true",
+                        help="also probe browsing without migration 0007's index (then rebuild it)")
+    parser.add_argument("--skip-sync", action="store_true",
+                        help="skip the snapshot sync probe (it refuses above 50,000 cached issues)")
     parser.add_argument(
         "--explain-mass-pass",
         action="store_true",
@@ -327,7 +376,19 @@ def main() -> None:
             if args.compare_planner:
                 plans_nestloop = explain(project, args.output, "steady", nestloop=True)
             steady = project.reconcile_seconds()
-            sync = app_sync(project)
+            sync = app_sync(project) if not args.skip_sync else None
+            browsing = (
+                browse_probe(project, args.output, f"{args.occurrences}-{args.browse_label}")
+                if args.browse else None
+            )
+            if args.browse and args.compare_index:
+                rebuild_browse_index(project, drop=True)
+                browsing = {
+                    "with_index": browsing,
+                    "without_index": browse_probe(
+                        project, args.output, f"{args.occurrences}-{args.browse_label}-no-index"),
+                    "index_build_seconds": rebuild_browse_index(project, drop=False),
+                }
 
             # Mass pass: every scale test passes, archiving all of their Active occurrences.
             project.dbt("test", "--select", "tag:dqm")
@@ -375,6 +436,7 @@ def main() -> None:
         ),
         "active_scale_occurrences_after_mass_pass": archived,
         "app_sync": sync,
+        **({"browse": browsing} if args.browse else {}),
     }
     report["volumes"]["payload_columns"] = args.payload_columns
     name = f"postgres-{args.occurrences}-payload{args.payload_columns}"
