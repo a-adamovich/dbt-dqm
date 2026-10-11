@@ -10,6 +10,10 @@ from typing import Any
 
 from .limits import MAX_CACHE_ISSUES, MAX_CACHE_MIB, check_cache_size, issue_json
 
+# Warehouse browsing keeps only recently loaded pages (and issues with pending edits) locally.
+PAGE_CACHE_ISSUES = 2_000
+PAGE_CACHE_MIB = 32
+
 EDITABLE_FIELDS = (
     "workflow_status",
     "review_verdict",
@@ -209,6 +213,79 @@ class Workspace:
                     snapshots[patch["occurrence_id"]][patch["field_name"]] = patch["new_value"]
                     snapshots[patch["occurrence_id"]]["_dirty"] = True
         return list(snapshots.values())
+
+    def upsert_pages(self, rows: Iterable[dict[str, Any]], *, max_issues=PAGE_CACHE_ISSUES,
+                     max_bytes=PAGE_CACHE_MIB * 2**20) -> None:
+        """Store a page read in warehouse mode, then trim the cache to its bound.
+
+        Loaded rows are what edits are staged against (their base value and annotation version)
+        and what the offline view shows. Trimming drops the least recently loaded rows, but never
+        a row with pending edits or a row of the page just stored.
+        """
+        rows = list(rows)
+        now = datetime.now(UTC).isoformat()
+        connection = self._connect_immediate()
+        try:
+            connection.execute("begin immediate")
+            connection.executemany(
+                "insert into snapshot(occurrence_id,payload_json,synced_at) values (?,?,?) "
+                "on conflict(occurrence_id) do update set payload_json=excluded.payload_json, "
+                "synced_at=excluded.synced_at",
+                [(str(row["occurrence_id"]), issue_json(row), now) for row in rows],
+            )
+            kept_count, kept_size = connection.execute(
+                "select count(*), coalesce(sum(length(cast(payload_json as blob))),0) from snapshot "
+                "where synced_at=? or occurrence_id in (select occurrence_id from pending_changes)",
+                (now,),
+            ).fetchone()
+            connection.execute(
+                """
+                delete from snapshot where occurrence_id in (
+                  select occurrence_id from (
+                    select occurrence_id,
+                      row_number() over recent as position,
+                      sum(length(cast(payload_json as blob))) over recent as size
+                    from snapshot
+                    where synced_at<>? and occurrence_id not in
+                      (select occurrence_id from pending_changes)
+                    window recent as (order by synced_at desc, occurrence_id
+                                      rows between unbounded preceding and current row)
+                  ) where position>? or size>?
+                )
+                """,
+                (now, max(0, max_issues - kept_count), max(0, max_bytes - kept_size)),
+            )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def rows_for(self, occurrence_ids: Iterable[str]) -> list[dict[str, Any]]:
+        """Cached rows in the given order with pending edits overlaid, as `rows()` does."""
+        ids = list(dict.fromkeys(str(value) for value in occurrence_ids))
+        if not ids:
+            return []
+        marks = ",".join("?" * len(ids))
+        with self.connect() as connection:
+            found = {
+                row["occurrence_id"]: json.loads(row["payload_json"])
+                for row in connection.execute(
+                    f"select * from snapshot where occurrence_id in ({marks})", ids)
+            }
+            for patch in connection.execute(
+                f"select * from pending_changes where occurrence_id in ({marks})", ids
+            ):
+                found[patch["occurrence_id"]][patch["field_name"]] = patch["new_value"]
+                found[patch["occurrence_id"]]["_dirty"] = True
+        return [found[value] for value in ids if value in found]
+
+    def pending_issue_ids(self, limit: int = 200) -> list[str]:
+        with self.connect() as connection:
+            return [row[0] for row in connection.execute(
+                "select occurrence_id from pending_changes group by occurrence_id "
+                "order by max(changed_at) desc limit ?", (limit,))]
 
     def set_change(self, occurrence_id: str, field_name: str, new_value: Any) -> None:
         if field_name not in EDITABLE_FIELDS:

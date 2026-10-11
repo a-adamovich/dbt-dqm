@@ -281,3 +281,30 @@ def test_calendar_date_handles_iso_values_and_missing_values():
     assert calendar_date("2026-08-09T02:25:20").isoformat() == "2026-08-09"
     assert calendar_date(None) is None
     assert calendar_date("not-a-date") is None
+
+
+def test_page_cache_trims_old_pages_but_keeps_pending_edits_and_the_new_page(tmp_path):
+    workspace = Workspace(tmp_path / "w.sqlite")
+
+    def page(start, count):
+        return [{**issue(), "occurrence_id": f"p{n:03}"} for n in range(start, start + count)]
+
+    workspace.upsert_pages(page(0, 5), max_issues=8)
+    workspace.set_change("p001", "notes", "keep me")
+    workspace.upsert_pages(page(5, 3), max_issues=8)
+    workspace.upsert_pages(page(8, 5), max_issues=8)
+    with workspace.connect() as connection:
+        cached = {row[0] for row in connection.execute("select occurrence_id from snapshot")}
+    # The newest page, the pending edit's issue, and the most recent older rows within the bound.
+    assert {f"p{n:03}" for n in range(8, 13)} | {"p001"} <= cached and len(cached) == 8
+    assert workspace.rows_for(["p012", "p001", "missing"]) == [
+        {**issue(), "occurrence_id": "p012"},
+        {**issue(), "occurrence_id": "p001", "notes": "keep me", "_dirty": True},
+    ]
+    # A byte bound trims too, and a reloaded row replaces its older copy.
+    workspace.upsert_pages([{**issue("fresh"), "occurrence_id": "p012"}], max_bytes=1)
+    assert workspace.rows_for(["p012"])[0]["notes"] == "fresh"
+    with workspace.connect() as connection:
+        cached = {row[0] for row in connection.execute("select occurrence_id from snapshot")}
+    assert cached == {"p012", "p001"}
+    assert workspace.pending_issue_ids() == ["p001"]

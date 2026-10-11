@@ -406,6 +406,25 @@ def browse_summary(config: AppConfig, population: str, filters: browse.Filters) 
     return {**summary, "generation": generation}
 
 
+def browse_options(config: AppConfig, population: str) -> dict[str, Any]:
+    """Filter choices for warehouse browsing, read under one verified generation."""
+    relation = _table(config, "dqm_all_issues")
+
+    def read():
+        row = _run_browse_query(
+            config, browse.options_query(config.adapter_type, relation, population))[0]
+        return {
+            "statuses": [str(value) for value in row["statuses"] or []],
+            "owners": [str(value) for value in row["owners"] or []],
+            "tags": [str(value) for value in row["tags"] or []],
+            "first_seen_min": row["first_seen_min"],
+            "first_seen_max": row["first_seen_max"],
+        }
+
+    options, generation = _verified(config, read)
+    return {**options, "generation": generation}
+
+
 def _json_object(value: Any, *, required: bool) -> dict[str, Any] | None:
     """Validate portable record data without accepting the retired array representation."""
     if value is None:
@@ -695,13 +714,24 @@ def sync_worker(config: AppConfig) -> dict[str, Any]:
     return {"issues": fetch_issues(config), "health": fetch_health(config)}
 
 
+def browse_refresh_worker(config: AppConfig) -> dict[str, Any]:
+    """Warehouse mode's sync: issue pages are read on demand, so only Health is refreshed."""
+    validate_dbt(config)
+    return {"health": fetch_health(config)}
+
+
 def apply_worker(
-    config: AppConfig, patches: list[Patch]
+    config: AppConfig, patches: list[Patch], browsing: bool = False
 ) -> tuple[str, dict[str, Any] | None, AppError | None]:
-    """Apply patches, then refresh. A failed refresh doesn't undo or hide a committed apply."""
+    """Apply patches, then refresh. A failed refresh doesn't undo or hide a committed apply.
+
+    In warehouse mode the refresh is Health only; the app re-reads the page on screen.
+    """
     validate_dbt(config)
     batch_id = apply_patches(config, patches)
     try:
+        if browsing:
+            return batch_id, {"health": fetch_health(config)}, None
         return batch_id, {"issues": fetch_issues(config), "health": fetch_health(config)}, None
     except Exception as error:  # noqa: BLE001 - the apply already committed; report the refresh.
         return batch_id, None, classify(error)

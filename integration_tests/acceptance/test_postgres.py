@@ -472,7 +472,7 @@ select customer_id from {{ ref('demo_records') }} where false
 
 
 def test_warehouse_browsing_matches_the_snapshot_and_sees_generation_changes(demo):
-    from browse_checks import check_browsing
+    from browse_checks import check_browsing, check_page_edit
 
     from dbt_dqm_app.browse import Filters
     from dbt_dqm_app.config import load_config
@@ -482,6 +482,7 @@ def test_warehouse_browsing_matches_the_snapshot_and_sees_generation_changes(dem
     demo.dbt("build", "--select", "package:dbt_dqm")
     config = load_config(demo.project, demo.profiles, "dev")
     generation = check_browsing(config)
+    check_page_edit(config, demo.project.parent / "workspace.sqlite")
     demo.capture("passed")
     demo.dbt("run", "--select", "dqm_reconcile")
     population = browse_population(config)

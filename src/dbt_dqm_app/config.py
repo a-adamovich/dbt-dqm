@@ -13,6 +13,8 @@ from platformdirs import user_data_path
 
 from .limits import MAX_CACHE_ISSUES, MAX_CACHE_MIB, validate_limits
 
+BROWSE_MODES = ("snapshot", "warehouse", "auto")
+
 
 @dataclass(frozen=True)
 class AppConfig:
@@ -45,11 +47,16 @@ class AppConfig:
     # Ceiling for one BigQuery search in warehouse browsing: estimated with a dry run first and
     # enforced with maximum_bytes_billed on the search query itself.
     max_search_gib: float = 1.0
+    # snapshot: sync the whole review population locally; warehouse: read pages on demand;
+    # auto: snapshot while the population fits the cache limits, warehouse paging above them.
+    browse_mode: str = "snapshot"
 
     def __post_init__(self) -> None:
         validate_limits(self.max_cache_issues, self.max_cache_mib)
         if not 0 < self.max_search_gib <= 1024:
             raise ValueError("--max-search-gib must be greater than 0 and at most 1024")
+        if self.browse_mode not in BROWSE_MODES:
+            raise ValueError(f"--browse must be one of {', '.join(BROWSE_MODES)}")
 
     @property
     def max_search_bytes(self) -> int:
@@ -135,4 +142,5 @@ def load_config(project_dir: str | Path, profiles_dir: str | Path, target: str) 
         max_cache_issues=int(os.environ.get("DBT_DQM_MAX_CACHE_ISSUES", str(MAX_CACHE_ISSUES))),
         max_cache_mib=int(os.environ.get("DBT_DQM_MAX_CACHE_MIB", str(MAX_CACHE_MIB))),
         max_search_gib=float(os.environ.get("DBT_DQM_MAX_SEARCH_GIB", "1")),
+        browse_mode=os.environ.get("DBT_DQM_BROWSE", "snapshot"),
     )
