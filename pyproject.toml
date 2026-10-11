@@ -17,8 +17,8 @@ classifiers = [
   "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = [
-  "dbt-core==1.11.15",
-  "dbt-bigquery==1.11.3",
+  "dbt-core==1.12.5",
+  "dbt-bigquery==1.12.1",
   "dbt-postgres>=1.11,<1.12",
   "google-cloud-bigquery>=3.25,<4",
   # Security floors for transitive dependencies (#24): wheels don't carry uv.lock, so these keep
@@ -28,7 +28,7 @@ dependencies = [
   "platformdirs>=4,<5",
   "pyarrow>=23.0.1,<24",
   "pyyaml>=6,<7",
-  "sqlparse>=0.6.0,<0.7",  # five advisories fixed in 0.6.0; dbt-core 1.11.15 allows <0.7
+  "sqlparse>=0.6.0,<0.7",  # five advisories fixed in 0.6.0; dbt-core 1.12.5 allows <0.7
   "streamlit>=1.41,<2",
   "urllib3>=2.8.0,<3",  # three advisories fixed in 2.8.0
 ]
