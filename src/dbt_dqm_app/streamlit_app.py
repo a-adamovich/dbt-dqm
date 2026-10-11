@@ -188,7 +188,8 @@ def run_app() -> None:
                 "Apply and sync",
                 disabled=busy
                 or not pending
-                or (bool(drifted) and not st.session_state.allow_drift_overwrite),
+                or (bool(drifted) and not st.session_state.allow_drift_overwrite)
+                or st.session_state.get("browse_offline", False),
                 type="primary",
             ):
                 _submit_apply(executor, config, list(pending))
@@ -296,7 +297,8 @@ def _reset_browse_cache(restart: bool = False) -> None:
     for key in BROWSE_STATE:
         st.session_state.pop(key, None)
     if restart:
-        for key in ("browse_cursors", "browse_page_index", "browse_generation", "browse_key"):
+        for key in ("browse_cursors", "browse_page_index", "browse_generation", "browse_key",
+                    "browse_offline"):
             st.session_state.pop(key, None)
 
 
@@ -316,6 +318,25 @@ def _warehouse_read(read, *args):
         return None
 
 
+def _render_offline(workspace, pending, config) -> None:
+    """The warehouse can't be read: show the bounded cache of recently loaded pages."""
+    state = st.session_state
+    if not state.get("browse_offline"):
+        state.browse_offline = True
+        st.rerun()  # disable Apply in the action bar above
+    st.warning(
+        "Offline: showing recently loaded issues only, as of "
+        f"{format_timestamp(workspace.last_page_load(), 'never')} (up to 2,000). Filters, "
+        "search and counts apply to these cached issues only. Edits are kept locally; Apply "
+        "is available again once the warehouse can be read."
+    )
+    if st.button("Retry the warehouse"):
+        _reset_browse_cache()
+        state.pop("browse_offline", None)
+        st.rerun()
+    _render_issues(workspace, pending, config)
+
+
 def _status_choices(values) -> list[str]:
     known = [status for status in WORKFLOW_STATUSES if status in set(values)]
     return known + sorted(set(values) - set(known))
@@ -328,6 +349,9 @@ def _render_warehouse_issues(workspace, pending, config) -> None:
     bounded local cache, so edits are staged against it exactly as in snapshot mode.
     """
     state = st.session_state
+    if state.get("browse_offline"):  # until Retry or Sync, don't wait on the warehouse again
+        _render_offline(workspace, pending, config)
+        return
     if "browse_population" not in state:
         state.browse_population = browse_population(config)  # fixed for the session
     population = state.browse_population
@@ -335,7 +359,7 @@ def _render_warehouse_issues(workspace, pending, config) -> None:
         with st.spinner("Reading filter choices…"):
             options = _warehouse_read(browse_options, config, population)
         if options is None:
-            _render_pending_panel(workspace, config)
+            _render_offline(workspace, pending, config)
             return
         state.browse_options = options
     options = state.browse_options
@@ -426,7 +450,7 @@ def _render_warehouse_issues(workspace, pending, config) -> None:
                 if filters not in summaries:
                     summary = _warehouse_read(browse_summary, config, population, filters)
                     if summary is None:
-                        _render_pending_panel(workspace, config)
+                        _render_offline(workspace, pending, config)
                         return
                     summaries[filters] = summary
                 summary = summaries[filters]
@@ -434,7 +458,7 @@ def _render_warehouse_issues(workspace, pending, config) -> None:
                     page = _warehouse_read(browse_page, config, population, filters,
                                            state.browse_cursors[index], page_size)
                     if page is None:
-                        _render_pending_panel(workspace, config)
+                        _render_offline(workspace, pending, config)
                         return
                     pages[index] = page
         except SearchTooCostly as error:
