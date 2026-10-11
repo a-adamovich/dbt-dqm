@@ -465,6 +465,11 @@ class Workspace:
                     ),
                 )
 
+    def last_page_load(self) -> str | None:
+        """When the most recently loaded row was stored (pages and snapshot syncs alike)."""
+        with self.connect() as connection:
+            return connection.execute("select max(synced_at) from snapshot").fetchone()[0]
+
     def last_sync(self) -> str | None:
         with self.connect() as connection:
             row = connection.execute("select value from metadata where key='last_sync'").fetchone()

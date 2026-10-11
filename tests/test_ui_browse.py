@@ -199,3 +199,35 @@ def test_snapshot_mode_is_the_default(tmp_path):
     assert config.browse_mode == "snapshot"
     with pytest.raises(ValueError, match="--browse"):
         replace(config, browse_mode="sometimes")
+
+
+def test_an_unreachable_warehouse_shows_the_cached_pages_offline(harness, monkeypatch):
+    import dbt_dqm_app.streamlit_app as ui
+    from dbt_dqm_app import warehouse as real
+
+    app, warehouse, _, workspace = harness()
+    click(app, "Next")
+    next(box for box in app.selectbox if box.label == "Review verdict").set_value(
+        "TRUE_POSITIVE").run()
+    # The real page read against a closed port: a genuine connection failure.
+    config = ui.load_config()
+    monkeypatch.setattr(ui, "load_config", lambda *args: replace(config, host="127.0.0.1", port=1))
+    monkeypatch.setattr(ui, "browse_page", real.browse_page)
+    monkeypatch.setattr(ui, "browse_summary", real.browse_summary)
+    app.session_state["browse_pages"] = {}
+    app.session_state["browse_summaries"] = {}
+    app.run()
+    assert not app.exception, app.exception
+    assert any("Offline" in warning.value for warning in app.warning)
+    assert any(caption.value.startswith("Warehouse error:") for caption in app.caption)
+    # Both loaded pages are available offline, with local filters; the edit is kept.
+    assert any("of 50 issue record(s)" in caption.value for caption in app.caption)
+    assert workspace.pending()[0].occurrence_id == "id025"
+    assert next(b for b in app.button if b.label == "Apply and sync").disabled
+    # Back online: Retry reads the warehouse again.
+    monkeypatch.setattr(ui, "load_config", lambda *args: config)
+    monkeypatch.setattr(ui, "browse_page", warehouse.page)
+    monkeypatch.setattr(ui, "browse_summary", warehouse.summary)
+    click(app, "Retry the warehouse")
+    assert not any("Offline" in warning.value for warning in app.warning)
+    assert not next(b for b in app.button if b.label == "Apply and sync").disabled

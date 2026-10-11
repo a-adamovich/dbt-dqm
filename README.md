@@ -138,7 +138,8 @@ dbt-dqm app \
   loaded pages (up to 2,000 issues or 32 MiB) and issues with pending edits are kept locally.
   `auto` uses a snapshot while it fits the limits and switches above them. On BigQuery, every
   page and count is a billed query, and a search is refused before it runs if a dry run estimates
-  more than `--max-search-gib` (default 1). The default stays `snapshot` for now.
+  more than `--max-search-gib` (default 1). When the warehouse
+  can't be read, the cached pages are shown offline. The default stays `snapshot` for now.
 
 ## Demo projects
 
