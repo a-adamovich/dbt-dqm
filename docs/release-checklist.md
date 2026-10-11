@@ -40,7 +40,8 @@ authorized the following alpha criteria on 2026-10-11:
 - Publish only `v0.2.0a1`. dbt Hub rejects this Python-style alpha tag; submit registration after
   publication and retain Git installation instructions without claiming an alpha Hub listing.
 
-The current alpha evidence will be recorded in `release-0.2.0a1.md`; the table below is historical
+The [current alpha evidence](release-0.2.0a1.md) records a **blocked** preparation candidate:
+dbt's project schema rejects the Python alpha version spelling. The table below is historical
 evidence for `613e089`, not proof for the alpha candidate.
 
 ## Results
