@@ -22,6 +22,8 @@ def parser() -> argparse.ArgumentParser:
                      help="Issue cache ceiling, configurable downward from 50000")
     app.add_argument("--max-cache-mib", type=int, default=MAX_CACHE_MIB,
                      help="Serialized issue cache ceiling, configurable downward from 128 MiB")
+    app.add_argument("--max-search-gib", type=float, default=1.0,
+                     help="BigQuery bytes one search may process in warehouse browsing (GiB)")
     app.add_argument(
         "--archive-cache-days",
         type=int,
@@ -75,6 +77,8 @@ def main() -> None:
             validate_limits(args.max_cache_issues, args.max_cache_mib)
         except ValueError as error:
             raise SystemExit(str(error)) from error
+        if not 0 < args.max_search_gib <= 1024:
+            raise SystemExit("--max-search-gib must be greater than 0 and at most 1024")
         if args.archive_cache_days < 0:
             raise SystemExit("--archive-cache-days must be zero or a positive integer")
         if args.lock_timeout <= 0:
@@ -90,6 +94,7 @@ def main() -> None:
                 "DBT_DQM_LOCK_TIMEOUT_SECONDS": str(args.lock_timeout),
                 "DBT_DQM_MAX_CACHE_ISSUES": str(args.max_cache_issues),
                 "DBT_DQM_MAX_CACHE_MIB": str(args.max_cache_mib),
+                "DBT_DQM_MAX_SEARCH_GIB": str(args.max_search_gib),
             }
         )
         app_path = Path(__file__).with_name("streamlit_app.py")

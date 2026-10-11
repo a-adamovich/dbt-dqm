@@ -22,9 +22,18 @@ from google.api_core.exceptions import Forbidden
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
+from dbt_dqm_app.browse import Filters
 from dbt_dqm_app.config import load_config
 from dbt_dqm_app.store import Patch
-from dbt_dqm_app.warehouse import apply_patches, fetch_issues, insert_missed_issue, sync_worker
+from dbt_dqm_app.warehouse import (
+    apply_patches,
+    browse_page,
+    browse_population,
+    browse_summary,
+    fetch_issues,
+    insert_missed_issue,
+    sync_worker,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT = "dbt-dqm"
@@ -142,6 +151,12 @@ def test_restricted_bigquery_runner_and_reviewer(tmp_path):
     assert refreshed["annotation_version"] == row["annotation_version"] + 1
     assert refreshed["notes"] == "Permissions QA " + token
     assert refreshed["review_verdict"] == "TRUE_POSITIVE"
+    # Warehouse browsing with reviewer access, including the search dry run.
+    population = browse_population(config)
+    found = browse_page(config, population, Filters(lifecycle=(), search="Permissions QA " + token),
+                        None, 25)
+    assert [r["occurrence_id"] for r in found.rows] == [row["occurrence_id"]]
+    assert browse_summary(config, population, Filters(search=token))["matching"] == 1
     count = reviewer.query(
         f"select count(*) as n from `{PROJECT}.{DATASET}.dqm_annotation_changes` "
         "where batch_id=@batch",

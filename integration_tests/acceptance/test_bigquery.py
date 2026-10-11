@@ -600,6 +600,35 @@ def _tracking_fingerprints(demo):
     }
 
 
+def test_bigquery_warehouse_browsing_search_ceiling_and_generation_changes(demo):
+    from dataclasses import replace
+
+    from browse_checks import check_browsing
+
+    from dbt_dqm_app.browse import Filters
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.errors import SearchTooCostly
+    from dbt_dqm_app.warehouse import browse_page, browse_population, browse_summary
+
+    demo.capture("initial")
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    config = load_config(demo.path, demo.profiles, "dev")
+    generation = check_browsing(config)
+    population = browse_population(config)
+    # A ceiling below the estimate refuses the search before anything is billed.
+    tiny = replace(config, max_search_gib=1e-9)
+    with pytest.raises(SearchTooCostly, match="current results are kept"):
+        browse_page(tiny, population, Filters(search="demo"), None, 25)
+    with pytest.raises(SearchTooCostly):
+        browse_summary(tiny, population, Filters(search="demo"))
+    assert browse_page(tiny, population, Filters(), None, 25).rows  # unsearched pages unaffected
+    demo.capture("passed")
+    demo.dbt("run", "--select", "dqm_reconcile")
+    archived = browse_page(config, population, Filters(lifecycle=("Archived",)), None, 25)
+    assert archived.generation != generation and archived.rows
+    assert browse_summary(config, population, Filters())["matching"] == 0
+
+
 def test_bigquery_empty_changes_no_tracking_table(demo):
     from dbt_dqm_app.config import load_config
     from dbt_dqm_app.store import Patch

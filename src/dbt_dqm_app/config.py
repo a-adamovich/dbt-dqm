@@ -42,9 +42,18 @@ class AppConfig:
     credentials_file: Path | None = None
     max_cache_issues: int = MAX_CACHE_ISSUES
     max_cache_mib: int = MAX_CACHE_MIB
+    # Ceiling for one BigQuery search in warehouse browsing: estimated with a dry run first and
+    # enforced with maximum_bytes_billed on the search query itself.
+    max_search_gib: float = 1.0
 
     def __post_init__(self) -> None:
         validate_limits(self.max_cache_issues, self.max_cache_mib)
+        if not 0 < self.max_search_gib <= 1024:
+            raise ValueError("--max-search-gib must be greater than 0 and at most 1024")
+
+    @property
+    def max_search_bytes(self) -> int:
+        return int(self.max_search_gib * 2**30)
 
     @property
     def max_cache_bytes(self) -> int:
@@ -125,4 +134,5 @@ def load_config(project_dir: str | Path, profiles_dir: str | Path, target: str) 
         lock_timeout_seconds=lock_timeout_seconds,
         max_cache_issues=int(os.environ.get("DBT_DQM_MAX_CACHE_ISSUES", str(MAX_CACHE_ISSUES))),
         max_cache_mib=int(os.environ.get("DBT_DQM_MAX_CACHE_MIB", str(MAX_CACHE_MIB))),
+        max_search_gib=float(os.environ.get("DBT_DQM_MAX_SEARCH_GIB", "1")),
     )
