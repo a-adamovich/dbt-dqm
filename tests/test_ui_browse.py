@@ -190,6 +190,8 @@ def test_auto_mode_switches_to_warehouse_paging_above_the_snapshot_limits(harnes
     for _ in range(3):
         app.run()
     assert app.session_state["browsing"] is True
+    # The reason stays on screen after the one-time notice.
+    assert any("above the local snapshot limits" in text.value for text in app.markdown)
     assert card_titles(app)[:1] == ["test 0"]
     workers = [call.args[0].__name__ for call in executor.submit.call_args_list]
     assert workers[:2] == ["sync_worker", "browse_refresh_worker"]
