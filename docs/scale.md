@@ -193,6 +193,18 @@ What this shows, and what it doesn't:
 
 Raw results: [`memory-interval-2026-10-10.json`](scale-results/memory-interval-2026-10-10.json).
 
+### PyArrow 25 (2026-10-11)
+
+Same harness, pandas 3.0.6 with the app's object strings, 6 alternating rounds:
+
+| PyArrow | Peak RSS range | Median |
+| --- | --- | ---: |
+| 23.0.1 | 577–585 MiB | 579 MiB |
+| 25.0.1 | 547–583 MiB | 569 MiB |
+
+Equal or slightly lower, so the pin moved to 25.x. PyArrow 26.0.0 was one day old at the time and
+was not evaluated. Raw results: [`pyarrow-25-2026-10-11.json`](scale-results/pyarrow-25-2026-10-11.json).
+
 ### pandas 3 (2026-10-11)
 
 Same harness at 50,000 issues, alternating runs, 6 per variant:

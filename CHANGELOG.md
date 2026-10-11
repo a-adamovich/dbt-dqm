@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Requires PyArrow 25.x (`>=25.0.1,<26`). Peak sync memory at the 50,000-issue boundary is equal or slightly lower than with 23.0.1 (`docs/scale.md`).
 - Supports pandas 3 (`pandas>=2.2,<4`; the lockfile uses 3.0.6). pandas 3 stores missing strings as NaN, which made never-edited issue cards show "User updated: nan"; card and filter helpers now treat None, NaN, NaT and `pd.NA` alike as missing. The app keeps object-backed strings, because pandas 3's Arrow-backed default added about 70 MiB of peak memory at the 50,000-issue boundary (`docs/scale.md`).
 - The app no longer reports an unsupported dbt version or invalid `dbt_project.yml` as a missing profile: the profile hint matched dbt's own "profiles.yml file [OK found and valid]" line. dbt output is matched without its colour codes.
 - Supports dbt-core 1.12 (the lockfile now uses dbt-core 1.12.5 and dbt-bigquery 1.12.1; dbt-postgres stays on 1.11, which supports dbt-core 1.12). `require-dbt-version` widens to `>=1.11.0, <1.13.0`. All protocol SQL and compiled package nodes render identically under 1.11.15 and 1.12.5 on both adapters. dbt-core 1.12 brings new transitive dependencies (metricflow, sqlglot, rapidfuzz, opentelemetry-api, python-dotenv, tabulate, dbt-core-experimental-parser).

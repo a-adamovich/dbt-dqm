@@ -1,0 +1,81 @@
+{
+  "date": "2026-10-11",
+  "postgres": "16.11",
+  "pandas": "3.0.6 (app object strings)",
+  "harness": "integration_tests/scale/cache_boundary.py",
+  "method": "6 alternating rounds; main a5af575 (PyArrow 23.0.1) vs the same code with PyArrow 25.0.1; idle machine.",
+  "runs": [
+    {
+      "pyarrow": "23.0.1",
+      "round": 1,
+      "peak_rss_mb": 584.7,
+      "total_seconds": 4.52
+    },
+    {
+      "pyarrow": "23.0.1",
+      "round": 2,
+      "peak_rss_mb": 581.5,
+      "total_seconds": 4.61
+    },
+    {
+      "pyarrow": "23.0.1",
+      "round": 3,
+      "peak_rss_mb": 578.7,
+      "total_seconds": 4.61
+    },
+    {
+      "pyarrow": "23.0.1",
+      "round": 4,
+      "peak_rss_mb": 579.8,
+      "total_seconds": 4.5
+    },
+    {
+      "pyarrow": "23.0.1",
+      "round": 5,
+      "peak_rss_mb": 577.2,
+      "total_seconds": 4.68
+    },
+    {
+      "pyarrow": "23.0.1",
+      "round": 6,
+      "peak_rss_mb": 577.1,
+      "total_seconds": 4.48
+    },
+    {
+      "pyarrow": "25.0.1",
+      "round": 1,
+      "peak_rss_mb": 546.5,
+      "total_seconds": 4.56
+    },
+    {
+      "pyarrow": "25.0.1",
+      "round": 2,
+      "peak_rss_mb": 553.3,
+      "total_seconds": 4.65
+    },
+    {
+      "pyarrow": "25.0.1",
+      "round": 3,
+      "peak_rss_mb": 556.7,
+      "total_seconds": 4.77
+    },
+    {
+      "pyarrow": "25.0.1",
+      "round": 4,
+      "peak_rss_mb": 583.2,
+      "total_seconds": 4.43
+    },
+    {
+      "pyarrow": "25.0.1",
+      "round": 5,
+      "peak_rss_mb": 581.3,
+      "total_seconds": 4.59
+    },
+    {
+      "pyarrow": "25.0.1",
+      "round": 6,
+      "peak_rss_mb": 583.4,
+      "total_seconds": 4.53
+    }
+  ]
+}

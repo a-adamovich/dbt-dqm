@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from packaging.requirements import Requirement
+from packaging.version import Version
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -41,8 +42,10 @@ def _assert_floors(requirements):
     by_name = {requirement.name: requirement for requirement in requirements}
     for name, (vulnerable, patched) in REVIEWED.items():
         assert name in by_name, f"{name} has no security floor"
-        assert vulnerable not in by_name[name].specifier, f"{name} {vulnerable} is allowed"
-        assert patched in by_name[name].specifier, f"{name} {patched} is excluded"
+        specifier = by_name[name].specifier
+        assert vulnerable not in specifier, f"{name} {vulnerable} is allowed"
+        floors = [Version(s.version) for s in specifier if s.operator in (">=", ">", "==")]
+        assert floors and min(floors) >= Version(patched), f"{name} allows versions below {patched}"
 
 
 def test_project_metadata_excludes_vulnerable_versions():
