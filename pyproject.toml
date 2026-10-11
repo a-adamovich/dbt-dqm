@@ -24,7 +24,7 @@ dependencies = [
   # Security floors for transitive dependencies (#24): wheels don't carry uv.lock, so these keep
   # installs from retaining versions with known advisories.
   "oauthlib>=4.0.0,<5",  # GHSA advisories fixed in 4.0.0 (reached via pandas-gbq auth)
-  "pandas>=2.2,<3",
+  "pandas>=2.2,<4",
   "platformdirs>=4,<5",
   "pyarrow>=23.0.1,<24",
   "pyyaml>=6,<7",

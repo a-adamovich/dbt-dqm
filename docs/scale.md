@@ -193,6 +193,24 @@ What this shows, and what it doesn't:
 
 Raw results: [`memory-interval-2026-10-10.json`](scale-results/memory-interval-2026-10-10.json).
 
+### pandas 3 (2026-10-11)
+
+Same harness at 50,000 issues, alternating runs, 6 per variant:
+
+| Variant | Peak RSS median | Mean |
+| --- | ---: | ---: |
+| pandas 2.3.3 | 567 MiB | 556 MiB |
+| pandas 3.0.6, default (Arrow-backed strings) | 602 MiB | 601 MiB |
+| pandas 3.0.6, Arrow-backed strings (second run) | 636 MiB | 630 MiB |
+| pandas 3.0.6, object strings | 569 MiB | 560 MiB |
+| pandas 2.3.3 (confirmation) | 536 MiB | 530 MiB |
+| pandas 3.0.6 with the app's `configure_pandas()` | 543 MiB | 533 MiB |
+
+pandas 3 infers Arrow-backed strings by default, and that costs about 70 MiB at this boundary
+(Arrow higher in 33 of 36 pairs). The review app therefore keeps object strings
+(`dbt_dqm_app/frames.py`), which brings pandas 3 back in line with pandas 2 (20 of 36 pairs, no
+difference). Raw results: [`pandas-3-2026-10-11.json`](scale-results/pandas-3-2026-10-11.json).
+
 ### Allocator A/B (2026-10-10)
 
 PyArrow 23.0.1, same harness and Postgres 16.11, 12 rounds alternating which pool ran first:
