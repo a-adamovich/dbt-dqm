@@ -219,6 +219,7 @@ def test_an_unreachable_warehouse_shows_the_cached_pages_offline(harness, monkey
     app.run()
     assert not app.exception, app.exception
     assert any("Offline" in warning.value for warning in app.warning)
+    assert any(caption.value.startswith("Warehouse error:") for caption in app.caption)
     # Both loaded pages are available offline, with local filters; the edit is kept.
     assert any("of 50 issue record(s)" in caption.value for caption in app.caption)
     assert workspace.pending()[0].occurrence_id == "id025"

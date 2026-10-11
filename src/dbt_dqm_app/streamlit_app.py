@@ -311,10 +311,7 @@ def _warehouse_read(read, *args):
     except Exception as error:  # noqa: BLE001 - the UI reports every warehouse failure.
         failure = classify(error)
         logger.warning("Warehouse browse read failed: %s", failure.details)
-        st.error(failure.message)
-        if failure.details:
-            with st.expander("Technical details"):
-                st.code(failure.details, language=None)
+        st.session_state.browse_failure = (failure.message, failure.details)
         return None
 
 
@@ -330,9 +327,16 @@ def _render_offline(workspace, pending, config) -> None:
         "search and counts apply to these cached issues only. Edits are kept locally; Apply "
         "is available again once the warehouse can be read."
     )
+    message, details = state.get("browse_failure", ("", ""))
+    if message:
+        st.caption(f"Warehouse error: {message}")
+    if details:
+        with st.expander("Technical details"):
+            st.code(details, language=None)
     if st.button("Retry the warehouse"):
         _reset_browse_cache()
         state.pop("browse_offline", None)
+        state.pop("browse_failure", None)
         st.rerun()
     _render_issues(workspace, pending, config)
 
