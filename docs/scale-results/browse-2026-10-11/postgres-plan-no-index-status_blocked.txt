@@ -1,0 +1,27 @@
+Limit  (cost=109560.22..109563.26 rows=26 width=1180) (actual time=2381.915..2384.012 rows=26 loops=1)
+  Buffers: shared hit=70982 read=91566
+  ->  Gather Merge  (cost=109560.22..109566.29 rows=52 width=1180) (actual time=2381.914..2384.011 rows=26 loops=1)
+        Workers Planned: 2
+        Workers Launched: 2
+        Buffers: shared hit=70982 read=91566
+        ->  Sort  (cost=108560.20..108560.27 rows=26 width=1180) (actual time=2380.244..2380.249 rows=18 loops=3)
+              Sort Key: (CASE lower(COALESCE(cur.test_priority, ''::text)) WHEN 'critical'::text THEN 0 WHEN 'high'::text THEN 1 WHEN 'medium'::text THEN 2 WHEN 'low'::text THEN 3 ELSE 4 END), (CASE upper(COALESCE(cur.workflow_status, 'NEW'::text)) WHEN 'NEW'::text THEN 0 WHEN 'BLOCKED'::text THEN 1 WHEN 'IN_PROGRESS'::text THEN 2 WHEN 'TRIAGED'::text THEN 3 WHEN 'RESOLVED'::text THEN 4 WHEN 'ACCEPTED_RISK'::text THEN 5 WHEN 'FALSE_POSITIVE'::text THEN 6 ELSE 99 END), cur.first_seen_at, cur.occurrence_id
+              Sort Method: top-N heapsort  Memory: 71kB
+              Buffers: shared hit=70982 read=91566
+              Worker 0:  Sort Method: top-N heapsort  Memory: 71kB
+              Worker 1:  Sort Method: top-N heapsort  Memory: 73kB
+              ->  Nested Loop Left Join  (cost=0.55..108559.59 rows=26 width=1180) (actual time=0.494..2376.521 rows=4167 loops=3)
+                    Buffers: shared hit=70938 read=91566
+                    ->  Parallel Seq Scan on dqm_issue_occurrences cur  (cost=0.00..108335.27 rows=26 width=1005) (actual time=0.009..2252.644 rows=4167 loops=3)
+                          Filter: ((record_status = ANY ('{Active}'::text[])) AND (upper(COALESCE(workflow_status, 'NEW'::text)) = ANY ('{BLOCKED}'::text[])) AND ((record_status = 'Active'::text) OR (archived_at >= '2026-07-13 04:38:41.738078-05'::timestamp with time zone)))
+                          Rows Removed by Filter: 329169
+                          Buffers: shared hit=10524 read=89478
+                    ->  Index Scan using dqm_occurrence_identity_history on dqm_issue_occurrences prev  (cost=0.55..8.58 rows=1 width=294) (actual time=0.029..0.029 rows=0 loops=12500)
+                          Index Cond: ((test_unique_id = cur.test_unique_id) AND (unique_id = cur.unique_id))
+                          Filter: ((NOT (cur.identity_scheme_signature IS DISTINCT FROM identity_scheme_signature)) AND (cur.occurrence_number = (occurrence_number + 1)))
+                          Rows Removed by Filter: 1
+                          Buffers: shared hit=60414 read=2088
+Planning:
+  Buffers: shared hit=20
+Planning Time: 0.214 ms
+Execution Time: 2384.047 ms

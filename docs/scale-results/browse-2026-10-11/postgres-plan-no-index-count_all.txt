@@ -1,0 +1,23 @@
+Finalize Aggregate  (cost=145402.13..145402.14 rows=1 width=8) (actual time=3027.103..3029.879 rows=1 loops=1)
+  Buffers: shared hit=483725 read=116314
+  ->  Gather  (cost=145401.92..145402.13 rows=2 width=8) (actual time=3026.907..3029.861 rows=3 loops=1)
+        Workers Planned: 2
+        Workers Launched: 2
+        Buffers: shared hit=483725 read=116314
+        ->  Partial Aggregate  (cost=144401.92..144401.93 rows=1 width=8) (actual time=3025.103..3025.104 rows=1 loops=3)
+              Buffers: shared hit=483725 read=116314
+              ->  Nested Loop Left Join  (cost=0.55..144389.00 rows=5168 width=0) (actual time=0.019..3023.709 rows=33336 loops=3)
+                    Buffers: shared hit=483725 read=116314
+                    ->  Parallel Seq Scan on dqm_issue_occurrences cur  (cost=0.00..106772.79 rows=5168 width=130) (actual time=0.005..2378.935 rows=33336 loops=3)
+                          Filter: ((record_status = ANY ('{Active}'::text[])) AND ((record_status = 'Active'::text) OR (archived_at >= '2026-07-13 04:38:41.738078-05'::timestamp with time zone)))
+                          Rows Removed by Filter: 300000
+                          Buffers: shared hit=1715 read=98287
+                    ->  Index Scan using dqm_occurrence_identity_history on dqm_issue_occurrences prev  (cost=0.55..7.27 rows=1 width=130) (actual time=0.019..0.019 rows=0 loops=100007)
+                          Index Cond: ((test_unique_id = cur.test_unique_id) AND (unique_id = cur.unique_id))
+                          Filter: ((NOT (cur.identity_scheme_signature IS DISTINCT FROM identity_scheme_signature)) AND (cur.occurrence_number = (occurrence_number + 1)))
+                          Rows Removed by Filter: 1
+                          Buffers: shared hit=482010 read=18027
+Planning:
+  Buffers: shared hit=26
+Planning Time: 0.180 ms
+Execution Time: 3029.898 ms

@@ -16,6 +16,12 @@ The figures to use today; everything below is the method and the dated measureme
 - **BigQuery reconciliation at 1M occurrences:** about 1.5 GB processed steady and 1.8 GB for a
   mass pass. See [BigQuery](#bigquery).
 - Measurements of 100,000+ cached issues predate the enforced ceiling and are historical.
+- **Warehouse browsing at 1M occurrences / 100k Active (preview, `--browse warehouse`):** app
+  memory stays about 175 MiB whatever the backlog. On Postgres with migration 0007's index a
+  page takes about 0.02 s unfiltered and up to 0.2 s with filters; the header summary 0.4–1.1 s
+  (a tag filter 2.5–4.8 s). On BigQuery a page costs about **0.96 GB** and 2–6 s, because the
+  page's rows are read by id and nothing prunes that read; a summary costs about 0.16 GB, a
+  searched page about 1.4 GB. See [Warehouse browsing](#warehouse-browsing-2026-10-11).
 
 Two harnesses build a disposable consumer project, initialize the DQM schema through the
 package, bulk-load synthetic *processed* history (occurrences, executions, observations and
@@ -62,6 +68,81 @@ emails, amounts and reasons.
 
 Environment, 2026-10-07: dbt-core 1.11.11, dbt-postgres 1.11, dbt-bigquery 1.11.3. PostgreSQL
 14.20 and 16.11 built from source on an Apple-silicon laptop. BigQuery on-demand, US multi-region.
+
+## Warehouse browsing (2026-10-11)
+
+[`browse_probe.py`](../integration_tests/scale/browse_probe.py) calls the app's own reads in a
+fresh process: filter choices, the header summary (metrics and the filtered count) and pages of
+25 for the whole Active population and eight typical filters, ten deep pages of 200, each page
+stored in a page cache as the app does. Times are wall time per call through the app's functions
+(median of 5 on Postgres, 3 on BigQuery); BigQuery bytes are from the first call of each read
+(repeats hit the query cache, as they would in the app). Both harnesses accept `--browse`; the
+synthetic history varies workflow status, priority, owner and tags so sorting and filters see
+realistic data, and has no recurrences.
+
+```bash
+uv run python integration_tests/scale/postgres_scale.py --payload-columns 8 --browse --compare-index --skip-sync
+uv run python integration_tests/scale/bigquery_scale.py --browse --skip-sync --label browse
+```
+
+Commit `ef2e406` (single-statement reads from #56 plus migration 0007), 1M occurrences / 100k
+Active, 8-column payloads. dbt-core 1.12.5; PostgreSQL 16.11 on the same laptop; BigQuery
+on-demand, US. Raw results and plans: [`scale-results/browse-2026-10-11/`](scale-results/browse-2026-10-11/).
+
+**Postgres** (seconds, median through the app):
+
+| Read | Matching | Page 1 with 0007 | Page 1 without | Page 2 with | Page 2 without | Summary |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| All Active | 100,007 | 0.019 | 2.675 | 0.020 | 0.308 | 0.70 |
+| Status BLOCKED | 12,500 | 0.137 | 0.154 | 0.105 | 0.058 | 0.43 |
+| Priority high | 28,574 | 0.195 | 0.200 | 0.187 | 0.171 | 0.56 |
+| One owner | 5,000 | 0.155 | 0.143 | 0.046 | 0.050 | 0.52 |
+| Created in the last 30 days | 39,706 | 0.019 | 0.191 | 0.025 | 0.168 | 0.94 |
+| One tag | 33,334 | 0.019 | 0.313 | 0.025 | 0.317 | 4.78 |
+| Recurrences only | 0 | 0.513 | 4.896 | | | 1.08 |
+| Search | 11 | 0.191 | 0.186 | | | 0.57 |
+
+- **Migration 0007's index** (a partial expression index on the page sort keys, Active rows
+  only) turns the unfiltered page from a sort of every Active issue (2.4 s in the plan, spilling
+  to disk) into an index range scan (0.3 ms). Deep pages of 200 drop from 0.34 to 0.05 s.
+  Building it took 1.5–5 s at 1M rows, under the reconcile lock; the mass-pass reconcile showed
+  no measurable cost from maintaining it.
+- **Filters the index can't order** (status, priority, owner, search) scan the Active rows:
+  0.1–0.2 s here.
+- **The summary** counts the whole Active population through the history join (for the
+  Recurring metric), 0.4–1.1 s; a tag filter parses every Active issue's tag JSON, 2.5–4.8 s.
+  The app reads it once per filter set and session.
+- **Filter choices** (distinct statuses, owners and tags, read once per session) took 4 s.
+- **Peak RSS of the probe process: 174 MiB**, against 435–585 MiB for a 50,000-issue snapshot
+  sync. The page cache is bounded at 2,000 issues.
+
+**BigQuery** (first call, MB billed; seconds first call / median of repeats):
+
+| Read | MB per read | Seconds |
+| --- | ---: | ---: |
+| Page (any non-search filter) | 960–976 | 4.4–6.3 / 2.3–2.6 |
+| Page, recurrences only (no rows) | 210 | 2.6 / 1.2 |
+| Page with a search | 1,412 (dry-run estimate 653 for the searched part) | 6.0–6.5 / 2.9–3.3 |
+| Summary | 161–176 | 2.5–3.5 / 1.2–1.3 |
+| Summary with a search | 619 | 3.0–3.4 / 1.5–1.7 |
+| Filter choices | 185 | 3.3 |
+| Deep page of 200 | (as a page) | 4.9–6.6 |
+
+- **Why a page costs about 1 GB:** phase 1 (key columns for the filtered population) reads about
+  160 MB. Phase 2 reads the page's 25 full rows by `occurrence_id`, and BigQuery bills the
+  referenced columns of every row, including the payload: about 800 MB at 1M occurrences,
+  whether 25 or 2,000 rows come back. Clustering can't help in place (an existing table's
+  clustering can't be changed with SQL, and the read would also need pruning on the history
+  join), and search indexes are only populated above 10 GB.
+- **Consequence:** because phase 2 costs the same for 25 or 2,000 rows, reading BigQuery pages in
+  chunks of the page-cache size (2,000 issues, 80 pages of 25) would cut the amortized cost to
+  about 14 MB per page and the round trips by the same factor. That is the next change; until
+  then warehouse mode on BigQuery costs about one snapshot sync (~1.1 GB at 100k Active) every
+  page or two.
+- The search ceiling (`--max-search-gib`, 1 GiB) applies to the searched part of a read, which the
+  dry run estimated at 653 MB here.
+- Peak RSS of the probe process: 165 MiB.
+
 
 ## PostgreSQL
 
