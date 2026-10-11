@@ -138,6 +138,7 @@ def demo(tmp_path):
 {% macro postgres__maintenance_log_pruning() %}{{ dbt_dqm.default__maintenance_log_pruning() }}{% if var('fail_step','')=='log_pruning' %} raise exception '{{ var("fail_marker","injected") }}';{% endif %}{% endmacro %}
 {% macro postgres__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression, marker, kind) %}{% if var('fail_log',false) %} raise exception 'maintenance log unavailable';{% else %}{{ dbt_dqm.default__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression, marker, kind) }}{% endif %}{% endmacro %}
 {% macro acceptance_records_fault() %}{% if execute and var('fail_records',false) %}do $$ begin raise exception 'injected model failure'; end $$;{% endif %}{% endmacro %}
+{% macro postgres__browse_keyset_index_verify() %}{{ dbt_dqm.default__browse_keyset_index_verify() }}{% if var('interrupt_0007',false) %} raise exception 'injected 0007 interruption';{% endif %}{% endmacro %}
 {% macro postgres__maintenance_attribution_verify() %}{{ dbt_dqm.default__maintenance_attribution_verify() }}{% if var('interrupt_0006',false) %} raise exception 'injected 0006 interruption';{% endif %}{% endmacro %}
 {% macro postgres__maintenance_log_verify() %}{{ dbt_dqm.default__maintenance_log_verify() }}{% if var('interrupt_0005',false) %} raise exception 'injected 0005 interruption';{% endif %}{% endmacro %}
 {% macro postgres__event_payload_mode_backfill() %}{{ dbt_dqm.default__event_payload_mode_backfill() }}{% if var('interrupt_0002',false) %} raise exception 'injected 0002 interruption';{% endif %}{% endmacro %}
@@ -875,10 +876,11 @@ def test_event_payload_migration_upgrades_an_existing_02_schema(demo):
         "0004_app_staging_safety",
         "0005_maintenance_log",
         "0006_maintenance_attribution",
+        "0007_browse_keyset_index",
     }
     control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
     assert (
-        control["schema_version"] == "0006_maintenance_attribution"
+        control["schema_version"] == "0007_browse_keyset_index"
         and control["setup_status"] == "ready"
     )
 
@@ -983,7 +985,8 @@ def test_migration_0005_upgrades_a_populated_schema_after_interruption(demo):
     demo.sql("drop table @schema.dqm_maintenance_log cascade")  # a 0004 schema has neither
     demo.sql(
         "delete from @schema.dqm_schema_migrations "
-        "where migration_id in ('0005_maintenance_log', '0006_maintenance_attribution')"
+        "where migration_id in "
+        "('0005_maintenance_log', '0006_maintenance_attribution', '0007_browse_keyset_index')"
     )
     demo.sql(
         "update @schema.dqm_reconciliation_control set schema_version='0004_app_staging_safety'"
@@ -1000,7 +1003,7 @@ def test_migration_0005_upgrades_a_populated_schema_after_interruption(demo):
     assert demo.sql("select count(*) n from @schema.dqm_maintenance_log")[0]["n"] == 0
     control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
     assert (
-        control["schema_version"] == "0006_maintenance_attribution"
+        control["schema_version"] == "0007_browse_keyset_index"
         and control["setup_status"] == "ready"
     )
 
@@ -1234,7 +1237,8 @@ def test_migration_0006_adds_attribution_to_a_populated_log(demo):
         "drop column trigger_marker_at, drop column trigger_kind"
     )
     demo.sql(
-        "delete from @schema.dqm_schema_migrations where migration_id='0006_maintenance_attribution'"
+        "delete from @schema.dqm_schema_migrations "
+        "where migration_id in ('0006_maintenance_attribution', '0007_browse_keyset_index')"
     )
     demo.sql("update @schema.dqm_reconciliation_control set schema_version='0005_maintenance_log'")
     legacy = _maintenance(demo)
@@ -1266,7 +1270,44 @@ def test_migration_0006_adds_attribution_to_a_populated_log(demo):
     assert len(preserved) == len(legacy)
     assert {row["trigger_kind"] for row in preserved} == {None}
     control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
-    assert control["schema_version"] == "0006_maintenance_attribution"
+    assert control["schema_version"] == "0007_browse_keyset_index"
+
+
+def test_migration_0007_adds_the_browse_index_after_interruption(demo):
+    from dbt_dqm_app.browse import Filters, page_query
+
+    demo.capture()
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    index = (
+        "select indexdef from pg_indexes where schemaname=%s "
+        "and indexname='dqm_occurrence_browse_active'"
+    )
+    assert demo.sql(index, [demo.schema])  # fresh installs get it too
+    # A 0006 schema.
+    demo.sql("drop index @schema.dqm_occurrence_browse_active")
+    demo.sql(
+        "delete from @schema.dqm_schema_migrations where migration_id='0007_browse_keyset_index'"
+    )
+    demo.sql(
+        "update @schema.dqm_reconciliation_control set schema_version='0006_maintenance_attribution'"
+    )
+    before = demo.occurrences()
+    demo.dbt("run", "--select", "dqm_reconcile", variables={"interrupt_0007": True}, success=False)
+    assert not demo.sql(index, [demo.schema])  # rolled back with the failed migration
+    demo.dbt("run", "--select", "dqm_reconcile")
+    assert demo.sql(index, [demo.schema])
+    assert demo.occurrences() == before
+    control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
+    assert control["schema_version"] == "0007_browse_keyset_index"
+    assert control["setup_status"] == "ready"
+    # The app's page query matches the index expressions, so the planner can use it.
+    query = page_query("postgres", f'"{demo.schema}".dqm_all_issues', "record_status = 'Active'",
+                       Filters(), None, 25)
+    with psycopg2.connect(DSN) as conn, conn.cursor() as cursor:
+        cursor.execute("set enable_seqscan = off; set enable_bitmapscan = off")
+        cursor.execute("explain " + query.sql, query.params)
+        plan = "\n".join(row[0] for row in cursor.fetchall())
+    assert "dqm_occurrence_browse_active" in plan, plan
 
 
 RACE_PROBE = """{{{{ config(materialized='{materialization}',

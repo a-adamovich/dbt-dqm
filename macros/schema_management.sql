@@ -23,7 +23,8 @@
     {'id': '0003_app_change_staging', 'description': 'Package-owned staging table for BigQuery app edits', 'apply': 'app_change_staging_apply', 'verify': 'app_change_staging_verify'},
     {'id': '0004_app_staging_safety', 'description': 'Isolated app uploads with bounded lifetime', 'apply': 'app_staging_safety_apply', 'backfill': 'app_staging_safety_backfill', 'verify': 'app_staging_safety_verify'},
     {'id': '0005_maintenance_log', 'description': 'Outcome log for optional maintenance', 'apply': 'maintenance_log_apply', 'verify': 'maintenance_log_verify'},
-    {'id': '0006_maintenance_attribution', 'description': 'Trigger attribution for maintenance outcomes', 'apply': 'maintenance_attribution_apply', 'verify': 'maintenance_attribution_verify'}
+    {'id': '0006_maintenance_attribution', 'description': 'Trigger attribution for maintenance outcomes', 'apply': 'maintenance_attribution_apply', 'verify': 'maintenance_attribution_verify'},
+    {'id': '0007_browse_keyset_index', 'description': 'Keyset index for warehouse browsing', 'apply': 'browse_keyset_index_apply', 'verify': 'browse_keyset_index_verify'}
   ]) }}
 {% endmacro %}
 
@@ -143,6 +144,30 @@
       ~ " and table_name='dqm_maintenance_log' and ((lower(column_name)='trigger_marker_at' and lower(data_type) in " ~ timestamp_types
       ~ ") or (lower(column_name)='trigger_kind' and lower(data_type) in " ~ string_types ~ '))) = 2',
     dbt_dqm.sql_string('Maintenance attribution columns are missing or have the wrong type. Rerun setup with the current package.')) }}
+{% endmacro %}
+
+{#- 0007: warehouse browsing reads Active issues in the review app's sort order (priority rank,
+    workflow-status rank, first seen, occurrence id) one keyset page at a time. On Postgres a
+    partial expression index on exactly those keys turns each page into a short index range scan
+    instead of sorting every Active issue (measured at 1M occurrences / 100k Active: first page
+    ~0.5 s to ~0.05 s). The expressions must match the app's (src/dbt_dqm_app/browse.py) character
+    for character; tests/test_browse.py pins that. BigQuery has no indexes, and changing an existing
+    table's clustering isn't available in SQL, so this migration only records the version there;
+    BigQuery page costs are documented in docs/scale.md. #}
+{% macro browse_priority_rank_sql() %}(case lower(coalesce(test_priority, '')) when 'critical' then 0 when 'high' then 1 when 'medium' then 2 when 'low' then 3 else 4 end){% endmacro %}
+{% macro browse_status_rank_sql() %}(case upper(coalesce(workflow_status, 'NEW')) when 'NEW' then 0 when 'BLOCKED' then 1 when 'IN_PROGRESS' then 2 when 'TRIAGED' then 3 when 'RESOLVED' then 4 when 'ACCEPTED_RISK' then 5 when 'FALSE_POSITIVE' then 6 else 99 end){% endmacro %}
+{% macro default__browse_keyset_index_apply() %}
+  {% if target.type == 'postgres' %}
+    create index if not exists dqm_occurrence_browse_active on {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }}
+      (({{ dbt_dqm.browse_priority_rank_sql() }}), ({{ dbt_dqm.browse_status_rank_sql() }}), first_seen_at, occurrence_id)
+      where record_status = 'Active';
+  {% endif %}
+{% endmacro %}
+{% macro default__browse_keyset_index_verify() %}
+  {% if target.type == 'postgres' %}
+    {{ dbt_dqm.assert_sql("exists(select 1 from pg_indexes where schemaname=" ~ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_issue_occurrences').schema) ~ " and indexname='dqm_occurrence_browse_active')",
+      dbt_dqm.sql_string('The warehouse browsing index is missing. Rerun setup with the current package.')) }}
+  {% endif %}
 {% endmacro %}
 
 {#- Event payload retention: full before/after values (default), only changed column names plus

@@ -42,6 +42,13 @@ SCALE_TEST = """{{ config(tags=['dqm'], store_failures=true, meta={'dbt_dqm': {'
 select customer_id from {{ ref('demo_records') }} where false
 """
 SIGNATURE = '{"granularity":["customer_id"],"version":"dqm-id-v1"}'
+# Varied annotations for warehouse browsing, as in postgres_scale.py.
+VARIED_STATUS = ("['NEW','NEW','NEW','TRIAGED','IN_PROGRESS','BLOCKED','RESOLVED',"
+                 "'ACCEPTED_RISK'][offset(mod(g, 8))]")
+VARIED_PRIORITY = ("[cast(null as string),'critical','high','high','medium','medium','low']"
+                   "[offset(mod(g, 7))]")
+VARIED_OWNER = "if(mod(g, 5) = 0, null, concat('owner_', lpad(cast(mod(g, 20) as string), 2, '0')))"
+VARIED_TAGS = """['["dqm"]','["dqm","finance"]','["dqm","ops"]'][offset(mod(g, 3))]"""
 
 
 def payload_sql(columns: int, key: str = "g") -> str:
@@ -190,18 +197,19 @@ class Harness:
                record_values_json, failure_row_count, test_tags, first_seen_at, last_seen_at,
                archived_at, record_status, close_reason, first_seen_invocation,
                last_seen_invocation, last_evaluated_invocation, workflow_status, test_status,
-               annotation_version, granularity_signature, identity_scheme_signature, review_verdict)
+               annotation_version, granularity_signature, identity_scheme_signature, review_verdict,
+               test_priority, poc_responsible)
             select to_hex(md5(concat('occurrence-', cast(g as string)))), {test_of % "g"},
               'scale_synthetic', to_hex(md5(concat('identity-', cast(g as string)))), 1, {payload},
-              1, '["dqm"]',
+              1, {VARIED_TAGS},
               timestamp_sub(anchor, interval cast(g * {step} as int64) second),
               timestamp_sub(anchor, interval cast(g * {step} - 3600 as int64) second),
               if(g <= {active_limit}, null,
                  timestamp_sub(anchor, interval cast(g * {step} - 7200 as int64) second)),
               if(g <= {active_limit}, 'Active', 'Archived'),
               if(g <= {active_limit}, null, 'Passed'),
-              'syn-exec-1', 'syn-exec-1', 'syn-exec-1', 'NEW', 'NEW', 0, '["customer_id"]',
-              '{SIGNATURE}', 'UNREVIEWED'
+              'syn-exec-1', 'syn-exec-1', 'syn-exec-1', {VARIED_STATUS}, {VARIED_STATUS}, 0,
+              '["customer_id"]', '{SIGNATURE}', 'UNREVIEWED', {VARIED_PRIORITY}, {VARIED_OWNER}
             from unnest(generate_array({first + 1}, {first + count})) g;
         """)
 
@@ -219,6 +227,17 @@ class Harness:
             text=True,
             check=True,
         )
+        return json.loads(result.stdout.strip().splitlines()[-1])
+
+    def browse_probe(self, output: Path, label: str) -> dict:
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).with_name("browse_probe.py")),
+             "--project-dir", str(self.path), "--profiles-dir", str(self.profiles),
+             "--output", str(output), "--label", label, "--repeat", "3"],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"browse probe failed:\n{result.stdout}{result.stderr}")
         return json.loads(result.stdout.strip().splitlines()[-1])
 
     def drop(self) -> None:
@@ -239,6 +258,10 @@ def main() -> None:
     parser.add_argument("--label", default="baseline")
     parser.add_argument("--output", type=Path, default=Path("scale-results"))
     parser.add_argument("--keep", action="store_true")
+    parser.add_argument("--browse", action="store_true",
+                        help="also measure warehouse browsing (browse_probe.py) on the full history")
+    parser.add_argument("--skip-sync", action="store_true",
+                        help="skip the snapshot sync probe (it refuses above 50,000 cached issues)")
     args = parser.parse_args()
     project = os.environ["DBT_DQM_BIGQUERY_TEST_PROJECT"]
     location = os.environ.get("DBT_DQM_BIGQUERY_TEST_LOCATION", "US")
@@ -270,7 +293,11 @@ def main() -> None:
             )
             harness.dbt("test", "--select", *DEMO_TESTS)
             report["steady_full"] = harness.measured(harness.reconcile)
-            report["app_sync"] = harness.measured(lambda: {"process": harness.app_sync()})
+            if not args.skip_sync:
+                report["app_sync"] = harness.measured(lambda: {"process": harness.app_sync()})
+            if args.browse:
+                report["browse"] = harness.measured(
+                    lambda: {"probe": harness.browse_probe(args.output, args.label)})
             harness.dbt("test", "--select", "tag:dqm")
             report["mass_pass"] = harness.measured(harness.reconcile)
             report["active_scale_after_mass_pass"] = harness.sql(
