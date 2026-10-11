@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.2.0a1 - 2026-10-11
+
+First Python alpha and matching dbt Git package release. Interfaces may change. The Python
+app and dbt package are installed separately; 0.1 users need a fresh DQM schema. The previous
+0.2.0 heading represented unreleased development, now included here.
+
+- WIF is supported through externally supplied ADC with an `oauth` profile. Offline compatibility
+  coverage uses simulated token exchange; live WIF remains unverified. Release BigQuery QA uses
+  existing local service-account credentials without creating or downloading keys.
+- The GitHub release is a prerelease; approval and provenance verification remain required.
+- The alpha tag uses Python version spelling and is not accepted by dbt Hub; install this alpha
+  through Git even after repository registration.
 
 - `--browse auto` is now the default: the app syncs a local snapshot while the review population fits the cache limits (50,000 issues / 128 MiB), as before, and reads issues from the warehouse page by page above them instead of refusing. `--browse snapshot` restores the old behaviour. Evidence: `docs/scale.md` (Warehouse browsing, 1M occurrences on both adapters).
 - Warehouse browsing on BigQuery reads pages in chunks of 2,000 issues and pages through each chunk locally. BigQuery bills the referenced columns of every row whether a read returns 25 rows or 2,000, so a page used to cost about 0.96 GB at 1M occurrences; a chunk costs the same and serves 80 pages of 25 (about 12 MB and 0.1 s per page amortized). Postgres still reads one page per statement.
@@ -8,8 +19,8 @@
 - The scale harnesses measure warehouse browsing (`--browse`, `integration_tests/scale/browse_probe.py`), and their synthetic history now varies workflow status, priority, owner and tags.
 - Warehouse browsing reads are faster: each page, summary and filter-choice read carries the control generation and setup status in the same statement (one snapshot) instead of separate checks before and after. A Postgres page is one statement (was three), a BigQuery page two jobs (was four) and a summary one (was four); on BigQuery each job adds about a second.
 - Warehouse browsing works offline: when the warehouse can't be read, the app shows the recently loaded pages it has cached (up to 2,000 issues) with local filters, labelled "Offline" with the time of the last load. Edits are kept locally, Apply is disabled until a "Retry the warehouse" or Sync succeeds.
-- Warehouse browsing in the app, as a preview: `--browse warehouse` reads issues one page at a time from the warehouse (filters, search, counts and the sort run there), and `--browse auto` uses a snapshot while the population fits the cache limits and switches to paging above them. The default stays `snapshot`. Pages are cached locally up to 2,000 issues or 32 MiB, never dropping issues with pending edits, so edits are staged and applied with the same compare-and-set versions as before; a reconciliation between pages shows a "restart from the first page" banner. In warehouse mode, Sync and Apply refresh Health and re-read the page on screen instead of downloading every issue.
-- Groundwork for warehouse-side issue browsing (0.3, `docs/design/warehouse-browsing.md`): parameterized filter, search, keyset-page, count and metrics queries for both adapters, verified against the control generation like a sync, with BigQuery pages read in two phases (keys, then one page of rows). A BigQuery search is estimated with a dry run and runs with `maximum_bytes_billed`; the new `--max-search-gib` (default 1) sets the ceiling. The app doesn't use warehouse browsing yet.
+- Warehouse browsing in the app, as a preview: `--browse warehouse` reads issues one page at a time from the warehouse (filters, search, counts and the sort run there), and `--browse auto` uses a snapshot while the population fits the cache limits and switches to paging above them. The default is `auto`. Pages are cached locally up to 2,000 issues or 32 MiB, never dropping issues with pending edits, so edits are staged and applied with the same compare-and-set versions as before; a reconciliation between pages shows a "restart from the first page" banner. In warehouse mode, Sync and Apply refresh Health and re-read the page on screen instead of downloading every issue.
+- Warehouse-side issue browsing (`docs/design/warehouse-browsing.md`): parameterized filter, search, keyset-page, count and metrics queries for both adapters, verified against the control generation like a sync, with BigQuery pages read in two phases (keys, then one page of rows). A BigQuery search is estimated with a dry run and runs with `maximum_bytes_billed`; the new `--max-search-gib` (default 1) sets the ceiling. The app uses these queries in warehouse browsing mode.
 - Requires PyArrow 25.x (`>=25.0.1,<26`). Peak sync memory at the 50,000-issue boundary is equal or slightly lower than with 23.0.1 (`docs/scale.md`).
 - Supports pandas 3 (`pandas>=2.2,<4`; the lockfile uses 3.0.6). pandas 3 stores missing strings as NaN, which made never-edited issue cards show "User updated: nan"; card and filter helpers now treat None, NaN, NaT and `pd.NA` alike as missing. The app keeps object-backed strings, because pandas 3's Arrow-backed default added about 70 MiB of peak memory at the 50,000-issue boundary (`docs/scale.md`).
 - The app no longer reports an unsupported dbt version or invalid `dbt_project.yml` as a missing profile: the profile hint matched dbt's own "profiles.yml file [OK found and valid]" line. dbt output is matched without its colour codes.
@@ -18,11 +29,8 @@
 - BigQuery maintenance uses fewer jobs per invocation: the trigger marker is read by the first step's job, and one protected job logs every outcome after the steps (from 1 + 2n jobs to n + 1). Each step still runs as its own job, separate from the logging.
 - The credentialed BigQuery acceptance suite runs in parallel (`pytest -n 6`, about 25 minutes instead of 2 h 19 m). Every disposable dataset is labelled with its run, and leftovers from killed workers or stopped runs are swept automatically (`integration_tests/acceptance/bigquery_datasets.py`).
 
-## 0.2.0 - 2026-10-10
-
 - Releases check that the tag matches the `pyproject.toml` and `dbt_project.yml` versions before anything is built, and install from the lockfile (`uv sync --locked`).
 - Requires `sqlparse>=0.6.0`, `urllib3>=2.8.0` and `oauthlib>=4.0.0` directly, the first versions without the advisories resolved in #24. The lockfile already used them, but a wheel installed without the lockfile could keep older, vulnerable versions that still satisfied the upstream ranges.
-- Requires PyArrow 23.x (`>=23.0.1,<24`). In repeated runs at the 50,000-issue boundary, peak sync memory is sometimes higher than with PyArrow 19 (`docs/scale.md`).
 - Postgres reconciliation replaces the `dqm_reconcile` view in place after taking its lock (`dqm_entry_view` materialization), so overlapping runs no longer act on each other's temporary relations (#17).
 - Optional maintenance (retention, staging expiry, stage drops) runs only after invocations that captured tracked tests or completed a reconciliation. A SQL error inside a step never fails the dbt invocation (connection, cancellation and lock failures still do). Outcomes go to `dqm_maintenance_log` (migration `0005`) with sanitized descriptions and safe diagnostic IDs, and appear as `ok`/`failing`/`unknown` in `dqm_maintenance_health` and the app's Health tab (#13).
 - Maintenance outcomes are now trustworthy: on BigQuery each step and its outcome log run as separate jobs; a failed stage drop fails `stage_drops` and keeps its run for a retry; `cleanup_dqm_logs` requires a recorded success for every scheduled step; and migration `0006_maintenance_attribution` records each outcome's trigger, so Health compares outcomes with the invocations that should have produced them (contract in `docs/warehouse-interfaces.md`).
@@ -50,7 +58,7 @@
 - Reconciliation planning no longer degrades to nested loops on Postgres, and the replay reads only Active rows plus the history of affected identities (see `docs/scale.md`).
 
 
-## 0.1.1 (development history, never released; incorporated into 0.2.0)
+## 0.1.1 (development history, never released; incorporated into 0.2.0a1)
 
 ### Package
 

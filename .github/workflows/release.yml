@@ -132,6 +132,9 @@ jobs:
       - name: Publish to PyPI through trusted publishing
         run: uv publish
       - name: Create GitHub release
-        run: gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes --verify-tag
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes --verify-tag \
+            --prerelease --title "dbt-dqm ${GITHUB_REF_NAME} (alpha)" \
+            --notes "Alpha release: interfaces may change. Install the Python app with pip install dbt-dqm==0.2.0a1 and install the dbt package separately using Git revision v0.2.0a1. Upgrades from 0.1 require a fresh DQM schema. See README.md and CHANGELOG.md at this tag for supported versions and operating limits."
         env:
           GH_TOKEN: ${{ github.token }}

@@ -53,7 +53,7 @@ def verify(tmp_path):
             "PATH": str(binaries) + os.pathsep + os.environ["PATH"],
             "GITHUB_REPOSITORY": "a-adamovich/dbt-dqm",
             "GITHUB_SHA": "a" * 40,
-            "GITHUB_REF": "refs/tags/v0.2.0",
+            "GITHUB_REF": "refs/tags/v0.2.0a1",
             "GH_TOKEN": "test-token",
             "VERIFY_LOG": str(log),
             "SLEEP_LOG": str(sleep_log),
@@ -109,7 +109,7 @@ def test_release_verifies_each_artifact_with_exact_identity(verify):
             "--source-digest",
             "a" * 40,
             "--source-ref",
-            "refs/tags/v0.2.0",
+            "refs/tags/v0.2.0a1",
             "--deny-self-hosted-runners",
         ]
         for name in ("package.whl", "package.tar.gz")
@@ -132,7 +132,7 @@ def test_release_recovers_after_attestation_visibility_delay(verify):
     assert sleeps == ["5", "5"]
 
 
-def _tag_check(tmp_path, tag, python_version="0.2.0", dbt_version="0.2.0"):
+def _tag_check(tmp_path, tag, python_version="0.2.0a1", dbt_version="0.2.0a1"):
     workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
     steps = workflow["jobs"]["release"]["steps"]
     names = [s.get("name") for s in steps]
@@ -155,10 +155,10 @@ def _tag_check(tmp_path, tag, python_version="0.2.0", dbt_version="0.2.0"):
 
 
 def test_release_tag_must_match_both_package_versions(tmp_path):
-    assert _tag_check(tmp_path, "v0.2.0").returncode == 0
+    assert _tag_check(tmp_path, "v0.2.0a1").returncode == 0
     mismatch = _tag_check(tmp_path, "v0.2.1")
-    assert mismatch.returncode != 0 and "doesn't match package version v0.2.0" in mismatch.stderr
-    differ = _tag_check(tmp_path, "v0.2.0", dbt_version="0.2.1")
+    assert mismatch.returncode != 0 and "doesn't match package version v0.2.0a1" in mismatch.stderr
+    differ = _tag_check(tmp_path, "v0.2.0a1", dbt_version="0.2.1")
     assert differ.returncode != 0 and "versions differ" in differ.stderr
 
 
@@ -167,6 +167,30 @@ def test_repository_versions_agree_and_release_installs_locked():
 
     python_version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
     dbt_version = str(yaml.safe_load((ROOT / "dbt_project.yml").read_text())["version"])
-    assert python_version == dbt_version
+    from dbt_dqm_app import __version__
+
+    lock = tomllib.loads((ROOT / "uv.lock").read_text())
+    locked_version = next(p["version"] for p in lock["package"] if p["name"] == "dbt-dqm")
+    assert python_version == dbt_version == __version__ == locked_version
     workflow = (ROOT / ".github/workflows/release.yml").read_text()
     assert "uv sync --locked --all-groups" in workflow
+
+
+def test_alpha_release_preserves_approval_and_provenance_gates():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+    job = workflow["jobs"]["release"]
+    assert job["environment"] == "pypi"
+    names = [s.get("name") for s in job["steps"]]
+    assert names.index("Verify distribution provenance") < names.index(
+        "Publish to PyPI through trusted publishing"
+    ) < names.index("Create GitHub release")
+    release = next(s for s in job["steps"] if s.get("name") == "Create GitHub release")
+    assert "--prerelease" in release["run"] and "(alpha)" in release["run"]
+
+
+def test_alpha_version_is_accepted_by_python_and_dbt():
+    from dbt_common.semver import VersionSpecifier
+    from packaging.version import Version
+
+    assert Version("0.2.0a1").is_prerelease
+    assert VersionSpecifier.from_version_string("0.2.0a1").prerelease == "a1"

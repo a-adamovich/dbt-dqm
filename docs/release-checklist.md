@@ -25,6 +25,24 @@ ordinary CI itself; the warehouse suites below ran on the candidate, not on that
 
 Tagging and publishing remain the maintainer's decision after every gate passes.
 
+### 0.2.0a1 authentication and publication criteria
+
+The maintainer confirmed PyPI trusted publishing and the `pypi` approval environment, and
+authorized the following alpha criteria on 2026-10-11:
+
+- Gates 3 and 4 still require complete live BigQuery runs, using existing local service-account
+  files. No keys are created or downloaded. Gate 4 verifies each identity with `SESSION_USER()`.
+- WIF support is verified separately by `tests/test_wif.py`, offline through real app/dbt ADC
+  loaders and simulated exchange/impersonation responses. It requires no WIF infrastructure.
+  Live WIF and IAM are not certified by this smoke test.
+- All other gates remain required. No shared dataset reset, IAM change or approval bypass is
+  authorized. Scheduled WIF verification stays inactive unless already configured.
+- Publish only `v0.2.0a1`. dbt Hub rejects this Python-style alpha tag; submit registration after
+  publication and retain Git installation instructions without claiming an alpha Hub listing.
+
+The current alpha evidence will be recorded in `release-0.2.0a1.md`; the table below is historical
+evidence for `613e089`, not proof for the alpha candidate.
+
 ## Results
 
 | Gate | Candidate commit | Result | Evidence |
@@ -37,7 +55,7 @@ Tagging and publishing remain the maintainer's decision after every gate passes.
 | 6 | `613e089` | Peak RSS 439 / 575 / 518 MiB | Inside the documented 435–585 MiB range; [`candidate-613e089-cache-boundary.json`](scale-results/candidate-613e089-cache-boundary.json) |
 | 7 | `613e089` | Versions agree (0.2.0); the release workflow refuses a mismatched tag | Unit tests run the release step script |
 | 8 | 2026-10-10 | No open Dependabot alerts | GitHub Dependabot alerts |
-| 9 | — | **Waiting for the maintainer** | [#12](https://github.com/a-adamovich/dbt-dqm/issues/12) |
+| 9 | — | Confirmed by the maintainer for 0.2.0a1 | [#12](https://github.com/a-adamovich/dbt-dqm/issues/12); `pypi` required-reviewer and `v*` tag protection inspected 2026-10-11 |
 | 10 | — | Not yet observed (no tag pushed) | Observed on the first `v0.2.0` tag |
 
 This table was added by a later documentation-only commit; the warehouse suites ran on `613e089`,
