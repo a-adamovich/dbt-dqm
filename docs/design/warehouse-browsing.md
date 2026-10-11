@@ -1,6 +1,6 @@
 # Design: warehouse-side issue browsing (0.3)
 
-Status: **proposal for review**. No code until this is agreed.
+Status: **agreed 2026-10-11** (decisions recorded below). Implementation follows the delivery plan.
 
 ## Problem
 
@@ -38,8 +38,10 @@ A page is `(filters, sort, cursor, page_size)` → up to `page_size` issue rows 
 - **Snapshot mode (today's behavior, kept):** the bounded full sync remains available with
   `--browse snapshot` for small projects and offline-first use, with its existing limits.
 
-The CLI selects the mode (`--browse warehouse|snapshot`); the default flips to `warehouse` only
-after the evidence in "Acceptance" exists.
+**Mode selection (decided):** `--browse auto` (the default once the evidence in "Acceptance" exists)
+uses the snapshot sync when the backlog fits the snapshot limits and switches to warehouse paging
+automatically when it doesn't (the count is already read before every sync). `--browse snapshot`
+and `--browse warehouse` force a mode.
 
 ### 2. Query builder (`warehouse.py`)
 
@@ -81,9 +83,16 @@ after the evidence in "Acceptance" exists.
 - **Postgres:** `ilike` over a fixed set of text columns (test name, display identity, notes, call
   to action, owner, and the payload as text), combined with the other filters and the page limit.
   No index is required for 0.3; `pg_trgm` is documented as an optional speed-up.
-- **BigQuery:** `contains_substr` over the same columns. Before running, a **dry run** checks the
-  bytes the query would process against a configurable ceiling (`--max-search-gib`, default 1).
-  Above it, the app asks the reviewer to narrow the filters first.
+- **BigQuery (decided):** `contains_substr` over the same columns, with a configurable ceiling
+  (`--max-search-gib`, default **1 GiB**):
+  - search runs only when the reviewer submits it, never on each keystroke;
+  - a **dry run** estimates the bytes first; above the ceiling the search is refused;
+  - the search query itself runs with **`maximum_bytes_billed`** set to the ceiling, so BigQuery
+    enforces it even if the estimate was wrong;
+  - a refusal keeps the current results on screen and suggests narrower filters (lifecycle, date
+    range, status, owner, tags);
+  - the docs state plainly that page reads and count queries also process (and bill) bytes; the
+    ceiling applies to search, and per-page and count costs are measured and documented separately.
 
 ### 6. Pending edits outside the page
 
@@ -117,7 +126,7 @@ after the evidence in "Acceptance" exists.
 2. **Paged UI:** cursor navigation, the generation-change banner, pending values on loaded pages.
 3. **Offline bounded view.**
 4. **Migration 0007** (Postgres indexes; BigQuery clustering if measurement supports it).
-5. **Evidence, then the default flip:** scale runs at 250k and 1M occurrences, BigQuery bytes per
+5. **Evidence, then `--browse auto` as the default:** scale runs at 250k and 1M occurrences, BigQuery bytes per
    page and per search, Postgres plans, memory, browser QA, and the full release checklist for
    0.3.
 
@@ -132,10 +141,12 @@ after the evidence in "Acceptance" exists.
   change between pages, an edit to an issue not on the current page, and an offline view.
 - Hostile search input (quotes, wildcards, very long strings) is parameterized and bounded.
 
-## Questions for review
+## Decisions (2026-10-11)
 
-1. Default mode: flip to `warehouse` automatically when the backlog exceeds the snapshot limit, or
-   always (after the evidence)?
-2. BigQuery search cost guard: is a 1 GiB default ceiling per search right?
-3. Is migration 0007 acceptable for 0.3? The BigQuery clustering changes table metadata on
-   existing installations.
+1. **Mode:** automatic. Snapshot sync while the backlog fits the snapshot limits; warehouse paging
+   above them; `--browse` forces either.
+2. **Search cost:** 1 GiB default, configurable; dry-run estimate plus `maximum_bytes_billed` on
+   every search; submit-only; refusals keep current results and suggest narrower filters; page and
+   count costs documented separately.
+3. **Migration 0007:** included, with both the Postgres keyset indexes and the BigQuery clustering
+   (the clustering step only if measurement shows a benefit).
