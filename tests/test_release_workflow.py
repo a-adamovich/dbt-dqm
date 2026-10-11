@@ -174,6 +174,8 @@ def test_repository_versions_agree_and_release_installs_locked():
     assert python_version == dbt_version == __version__ == locked_version
     workflow = (ROOT / ".github/workflows/release.yml").read_text()
     assert "uv sync --locked --all-groups" in workflow
+    # uv otherwise adds dist/.gitignore, which the strict provenance inventory rejects.
+    assert "uv build --no-create-gitignore" in workflow
 
 
 def test_alpha_release_preserves_approval_and_provenance_gates():
@@ -189,8 +191,11 @@ def test_alpha_release_preserves_approval_and_provenance_gates():
 
 
 def test_alpha_version_is_accepted_by_python_and_dbt():
+    from dbt.contracts.project import Project
     from dbt_common.semver import VersionSpecifier
     from packaging.version import Version
 
     assert Version("0.2.0a1").is_prerelease
     assert VersionSpecifier.from_version_string("0.2.0a1").prerelease == "a1"
+    # Parsing a version alone is insufficient: dbt validates package project schemas too.
+    Project.validate(yaml.safe_load((ROOT / "dbt_project.yml").read_text()))

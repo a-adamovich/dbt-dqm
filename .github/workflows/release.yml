@@ -51,7 +51,7 @@ jobs:
           uv sync --locked --all-groups
           uv run ruff check .
           uv run pytest -q
-          uv build
+          uv build --no-create-gitignore
           uvx --from twine twine check dist/*
       - name: Configure release-gate Postgres
         run: |

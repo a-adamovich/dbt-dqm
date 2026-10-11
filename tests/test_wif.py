@@ -87,18 +87,21 @@ def test_wif_adc_exchanges_impersonates_and_refreshes(wif, loader):
         payload = json.loads(body)
         assert "https://www.googleapis.com/auth/cloud-platform" in payload["scope"]
         return Response({
-            "accessToken": "impersonated-service-token",
+            "accessToken": f"impersonated-service-token-{calls.count(IMPERSONATION)}",
             "expireTime": (datetime.now(UTC) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         })
 
     credentials.refresh(exchange)
-    assert credentials.token == "impersonated-service-token" and credentials.valid
+    assert credentials.token == "impersonated-service-token-1" and credentials.valid
     headers = {}
-    credentials.before_request(exchange, "GET", "https://bigquery.googleapis.com/", headers)
-    assert headers["authorization"] == "Bearer impersonated-service-token"
+    # apply verifies bearer headers without starting google-auth's optional background
+    # regional-access lookup; only the token exchange/refresh is under test here.
+    credentials.apply(headers)
+    assert headers["authorization"] == "Bearer impersonated-service-token-1"
     assert calls == [STS, IMPERSONATION]
     credentials.refresh(exchange)
     assert calls[-1] == IMPERSONATION and calls.count(IMPERSONATION) == 2
+    assert credentials.token == "impersonated-service-token-2"
 
 
 @pytest.mark.parametrize("loader", ["app", "dbt"])
