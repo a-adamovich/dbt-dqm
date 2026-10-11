@@ -97,7 +97,7 @@ def test_oversized_cache_ui_keeps_pending_and_reports_committed_apply(tmp_path, 
     from dbt_dqm_app.limits import CacheLimitExceeded
 
     config = AppConfig(tmp_path, tmp_path, "dev", "demo", "postgres", "db", "schema", "US",
-                       "oauth", None, max_cache_issues=1)
+                       "oauth", None, max_cache_issues=1, browse_mode="snapshot")
     path = tmp_path / "workspace.sqlite"
     monkeypatch.setattr(AppConfig, "workspace_path", property(lambda self: path))
     monkeypatch.setattr(ui, "load_config", lambda *args: config)

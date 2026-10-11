@@ -49,7 +49,7 @@ class AppConfig:
     max_search_gib: float = 1.0
     # snapshot: sync the whole review population locally; warehouse: read pages on demand;
     # auto: snapshot while the population fits the cache limits, warehouse paging above them.
-    browse_mode: str = "snapshot"
+    browse_mode: str = "auto"
 
     def __post_init__(self) -> None:
         validate_limits(self.max_cache_issues, self.max_cache_mib)
@@ -142,5 +142,5 @@ def load_config(project_dir: str | Path, profiles_dir: str | Path, target: str) 
         max_cache_issues=int(os.environ.get("DBT_DQM_MAX_CACHE_ISSUES", str(MAX_CACHE_ISSUES))),
         max_cache_mib=int(os.environ.get("DBT_DQM_MAX_CACHE_MIB", str(MAX_CACHE_MIB))),
         max_search_gib=float(os.environ.get("DBT_DQM_MAX_SEARCH_GIB", "1")),
-        browse_mode=os.environ.get("DBT_DQM_BROWSE", "snapshot"),
+        browse_mode=os.environ.get("DBT_DQM_BROWSE", "auto"),
     )

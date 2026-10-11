@@ -132,14 +132,18 @@ dbt-dqm app \
   plus 90 days of Archived history; `--archive-cache-days 0` keeps Active issues only. An
   oversized sync keeps the existing cache and pending edits. These limits bound serialized data,
   not process memory; see [scale](docs/scale.md).
-- **Warehouse browsing (preview, `--browse warehouse` or `--browse auto`):** issues are read from
-  the warehouse one page at a time instead of syncing everything, so backlogs above the cache
-  limits can be reviewed. Filters, search, counts and the sort run in the warehouse; only recently
-  loaded pages (up to 2,000 issues or 32 MiB) and issues with pending edits are kept locally.
-  `auto` uses a snapshot while it fits the limits and switches above them. On BigQuery, every
-  page and count is a billed query, and a search is refused before it runs if a dry run estimates
-  more than `--max-search-gib` (default 1). When the warehouse
-  can't be read, the cached pages are shown offline. The default stays `snapshot` for now.
+- **Backlogs above the cache limits (`--browse`, default `auto`):** the app syncs a local
+  snapshot while the review population fits the limits, and above them reads issues from the
+  warehouse page by page instead. Filters, search, counts and the sort then run in the
+  warehouse; only recently loaded pages (up to 2,000 issues or 32 MiB) and issues with pending
+  edits are kept locally, and edits keep the same compare-and-set versions. When the warehouse
+  can't be read, the cached pages are shown offline. `--browse snapshot` or `--browse warehouse`
+  forces a mode.
+- **Warehouse cost in that mode:** every page, count and search is a query. On BigQuery the app
+  reads 2,000 issues at a time (about 1 GB billed at 1M occurrences, serving 80 pages of 25), a
+  header summary costs about 0.16 GB, and a search is refused before it runs if a dry run
+  estimates more than `--max-search-gib` (default 1). Postgres needs migration 0007's index for
+  fast pages. Measured figures: [scale](docs/scale.md#warehouse-browsing-2026-10-11).
 
 ## Demo projects
 

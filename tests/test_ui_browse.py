@@ -195,9 +195,13 @@ def test_auto_mode_switches_to_warehouse_paging_above_the_snapshot_limits(harnes
     assert workers[:2] == ["sync_worker", "browse_refresh_worker"]
 
 
-def test_snapshot_mode_is_the_default(tmp_path):
+def test_auto_mode_is_the_default(tmp_path):
+    from dbt_dqm_app.cli import parser
+
     config = AppConfig(tmp_path, tmp_path, "dev", "demo", "postgres", "db", "s", "US", "oauth", None)
-    assert config.browse_mode == "snapshot"
+    assert config.browse_mode == "auto"
+    args = parser().parse_args(["app", "--project-dir", "p", "--profiles-dir", "p", "--target", "t"])
+    assert args.browse == "auto"
     with pytest.raises(ValueError, match="--browse"):
         replace(config, browse_mode="sometimes")
 
