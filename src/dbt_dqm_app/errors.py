@@ -6,6 +6,7 @@ original exception) for the "Technical details" expander and the app log.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import traceback
 
@@ -36,8 +37,16 @@ BUSY_MESSAGE = (
 # Ordered: the first matching hint wins. Matched case-insensitively against dbt's output.
 _DBT_HINTS = (
     (
-        ("could not find profile", "profiles.yml", "does not have a target named"),
+        # Only the failure forms: dbt debug also prints "profiles.yml file [OK found and valid]".
+        ("could not find profile", "does not have a target named", "profiles.yml file [error"),
         "dbt couldn't find the selected profile or target. Check --profiles-dir and --target.",
+    ),
+    (
+        ("this version of dbt is not supported", "dbt_project.yml file [error"),
+        (
+            "The dbt project doesn't support the installed dbt version, or its dbt_project.yml "
+            "is invalid. Run `dbt debug` in the project for details."
+        ),
     ),
     (
         (
@@ -61,6 +70,9 @@ _DBT_HINTS = (
     ),
 )
 
+# dbt colours its status markers ("[\x1b[31mERROR invalid\x1b[0m]"); match on the plain text.
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
 _BIGQUERY_CONFLICT_MARKERS = (
     "concurrent update",
     "transaction is aborted",
@@ -77,7 +89,7 @@ def classify(error: BaseException) -> AppError:
     if isinstance(error, subprocess.CalledProcessError):
         output = f"{error.stdout or ''}\n{error.stderr or ''}".strip()
         command = " ".join(str(part) for part in error.cmd[:2]) if error.cmd else "dbt"
-        lowered = output.lower()
+        lowered = _ANSI.sub("", output).lower()
         for markers, message in _DBT_HINTS:
             if any(marker in lowered for marker in markers):
                 return AppError(message, output or details)
