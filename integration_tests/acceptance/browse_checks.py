@@ -59,3 +59,33 @@ def sorted_ids(rows):
         priority_rank(row["test_priority"]), ranks.get((row["workflow_status"] or "NEW").upper(), 99),
         row["first_seen_at"], row["occurrence_id"],
     ))]
+
+
+def check_page_edit(config, workspace_path):
+    """An edit staged from a warehouse page applies with compare-and-set; a stale one doesn't."""
+    import pytest
+
+    from dbt_dqm_app.store import Workspace
+    from dbt_dqm_app.warehouse import apply_patches
+
+    population = browse_population(config)
+    workspace = Workspace(workspace_path)
+    page = browse_page(config, population, Filters(), None, 25)
+    workspace.upsert_pages(page.rows)
+    target = page.rows[0]["occurrence_id"]
+    workspace.set_change(target, "notes", "edited from a warehouse page")
+    apply_patches(config, workspace.pending())
+    workspace.clear_applied(workspace.pending())
+    reread = browse_page(config, population, Filters(), None, 25)
+    row = next(r for r in reread.rows if r["occurrence_id"] == target)
+    assert row["notes"] == "edited from a warehouse page"
+    assert row["annotation_version"] == page.rows[0]["annotation_version"] + 1
+    # A second reviewer staged against the page loaded before that apply: rejected, not merged.
+    stale = Workspace(workspace_path.with_name("stale.sqlite"))
+    stale.upsert_pages(page.rows)
+    stale.set_change(target, "notes", "stale overwrite")
+    with pytest.raises(Exception, match="(?i)annotation conflict"):
+        apply_patches(config, stale.pending())
+    final = browse_page(config, population, Filters(), None, 25)
+    assert next(r for r in final.rows if r["occurrence_id"] == target)["notes"] == (
+        "edited from a warehouse page")

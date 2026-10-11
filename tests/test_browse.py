@@ -17,6 +17,7 @@ from dbt_dqm_app.browse import (
     created_bounds,
     cursor_from_row,
     metrics_query,
+    options_query,
     page_query,
     rows_by_id_query,
 )
@@ -209,6 +210,12 @@ def test_postgres_pages_match_the_snapshot_filters():
             # The comparison is only meaningful if most combinations page through results.
             assert sum(size > 25 for size in sizes) >= 30, sizes
             assert sum(size == 0 for size in sizes) <= 10, sizes
+            cur.execute(options_query("postgres", relation, "true").sql)
+            options = cur.fetchone()
+            assert set(options["statuses"]) == {(r["workflow_status"] or "NEW").upper() for r in rows}
+            assert set(options["owners"]) == {owner_label(r["poc_responsible"]) for r in rows}
+            assert set(options["tags"]) == {tag for r in rows for tag in tag_list(r["test_tags"])}
+            assert options["first_seen_min"] == min(r["first_seen_at"] for r in rows).replace(tzinfo=None)
             metrics = metrics_query("postgres", relation, "true")
             cur.execute(metrics.sql, metrics.params)
             values = cur.fetchone()
@@ -284,6 +291,9 @@ def test_bigquery_two_phase_pages_match_the_snapshot_filters():
                 cursor = cursor_from_row(keys[199])
             assert got == expected, filters
             assert run(count_query("bigquery", relation, "true", filters))[0]["matching"] == len(expected)
+        options = run(options_query("bigquery", relation, "true"))[0]
+        assert set(options["owners"]) == {owner_label(r["poc_responsible"]) for r in rows}
+        assert set(options["tags"]) == {tag for r in rows for tag in tag_list(r["test_tags"])}
         values = run(metrics_query("bigquery", relation, "true"))[0]
         active = [row for row in rows if row["record_status"] == "Active"]
         assert values["active_count"] == len(active)

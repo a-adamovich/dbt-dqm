@@ -24,6 +24,9 @@ def parser() -> argparse.ArgumentParser:
                      help="Serialized issue cache ceiling, configurable downward from 128 MiB")
     app.add_argument("--max-search-gib", type=float, default=1.0,
                      help="BigQuery bytes one search may process in warehouse browsing (GiB)")
+    app.add_argument("--browse", choices=("snapshot", "warehouse", "auto"), default="snapshot",
+                     help="snapshot: sync all issues locally (default); warehouse: read pages "
+                     "from the warehouse on demand; auto: snapshot while it fits the cache limits")
     app.add_argument(
         "--archive-cache-days",
         type=int,
@@ -95,6 +98,7 @@ def main() -> None:
                 "DBT_DQM_MAX_CACHE_ISSUES": str(args.max_cache_issues),
                 "DBT_DQM_MAX_CACHE_MIB": str(args.max_cache_mib),
                 "DBT_DQM_MAX_SEARCH_GIB": str(args.max_search_gib),
+                "DBT_DQM_BROWSE": args.browse,
             }
         )
         app_path = Path(__file__).with_name("streamlit_app.py")

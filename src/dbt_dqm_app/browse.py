@@ -263,3 +263,27 @@ def cursor_from_row(row: dict[str, Any]) -> Cursor:
     if seen.tzinfo is None:
         seen = seen.replace(tzinfo=UTC)
     return Cursor(int(row["_priority_rank"]), int(row["_status_rank"]), seen, str(row["occurrence_id"]))
+
+
+def options_query(adapter: str, relation: str, population: str, limit: int = 500) -> Query:
+    """Filter choices over the whole population: statuses, owners, tags and the created range."""
+    if adapter == "bigquery":
+        tags = (f"select distinct trim(tag) from {relation}, unnest(json_value_array(test_tags)) tag "
+                f"where {population} and tag is not null and trim(tag) <> ''")
+    else:
+        elements = (
+            "case when jsonb_typeof(test_tags::jsonb) = 'array' then test_tags::jsonb "
+            "else '[]'::jsonb end"
+        )
+        tags = (f"select distinct trim(tag) from {relation} "
+                f"cross join lateral jsonb_array_elements_text({elements}) tag "
+                f"where {population} and trim(tag) <> ''")
+    return Query(
+        f"select array(select distinct {_status_sql()} from {relation} where {population} "
+        f"order by 1 limit {limit}) as statuses, "
+        f"array(select distinct {_owner_sql()} from {relation} where {population} "
+        f"order by 1 limit {limit}) as owners, "
+        f"array(select * from ({tags}) t order by 1 limit {limit}) as tags, "
+        f"(select min(first_seen_at) from {relation} where {population}) as first_seen_min, "
+        f"(select max(first_seen_at) from {relation} where {population}) as first_seen_max"
+    )

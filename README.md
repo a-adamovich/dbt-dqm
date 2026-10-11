@@ -132,6 +132,13 @@ dbt-dqm app \
   plus 90 days of Archived history; `--archive-cache-days 0` keeps Active issues only. An
   oversized sync keeps the existing cache and pending edits. These limits bound serialized data,
   not process memory; see [scale](docs/scale.md).
+- **Warehouse browsing (preview, `--browse warehouse` or `--browse auto`):** issues are read from
+  the warehouse one page at a time instead of syncing everything, so backlogs above the cache
+  limits can be reviewed. Filters, search, counts and the sort run in the warehouse; only recently
+  loaded pages (up to 2,000 issues or 32 MiB) and issues with pending edits are kept locally.
+  `auto` uses a snapshot while it fits the limits and switches above them. On BigQuery, every
+  page and count is a billed query, and a search is refused before it runs if a dry run estimates
+  more than `--max-search-gib` (default 1). The default stays `snapshot` for now.
 
 ## Demo projects
 

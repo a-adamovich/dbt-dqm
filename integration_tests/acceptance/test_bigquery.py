@@ -603,7 +603,7 @@ def _tracking_fingerprints(demo):
 def test_bigquery_warehouse_browsing_search_ceiling_and_generation_changes(demo):
     from dataclasses import replace
 
-    from browse_checks import check_browsing
+    from browse_checks import check_browsing, check_page_edit
 
     from dbt_dqm_app.browse import Filters
     from dbt_dqm_app.config import load_config
@@ -614,6 +614,7 @@ def test_bigquery_warehouse_browsing_search_ceiling_and_generation_changes(demo)
     demo.dbt("build", "--select", "package:dbt_dqm")
     config = load_config(demo.path, demo.profiles, "dev")
     generation = check_browsing(config)
+    check_page_edit(config, demo.path.parent / "workspace.sqlite")
     population = browse_population(config)
     # A ceiling below the estimate refuses the search before anything is billed.
     tiny = replace(config, max_search_gib=1e-9)
