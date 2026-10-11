@@ -8,6 +8,8 @@ updates:
     # Deferred compatibility work: https://github.com/a-adamovich/dbt-dqm/issues/11
     # Update-type exclusions preserve patch updates and security-update handling.
     ignore:
+      # dbt minors are adopted deliberately: the protocol SQL must render identically and the full
+      # warehouse suites must pass before the pins and require-dbt-version move (see #11).
       - dependency-name: dbt-core
         update-types: ["version-update:semver-minor"]
       - dependency-name: dbt-bigquery

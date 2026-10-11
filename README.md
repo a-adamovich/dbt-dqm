@@ -11,7 +11,7 @@ runs.
 | --- | --- |
 | Released | `v0.1.0` |
 | `main` | 0.2.0, **unreleased**. It needs a **fresh DQM schema**: set `dbt_dqm_schema` to a new schema. 0.1 tables are preserved and never reused or migrated. |
-| dbt | 1.11.x (dbt-core, dbt-postgres, dbt-bigquery) |
+| dbt | dbt-core 1.11 and 1.12, with dbt-bigquery 1.11 or 1.12 and dbt-postgres 1.11 (there is no dbt-postgres 1.12; 1.11 supports dbt-core 1.12) |
 | Warehouses | BigQuery; Postgres 14 and 16 (needs the `pgcrypto` extension) |
 | Review app | Python 3.11, the same two warehouses |
 

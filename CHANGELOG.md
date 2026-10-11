@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Supports dbt-core 1.12 (the lockfile now uses dbt-core 1.12.5 and dbt-bigquery 1.12.1; dbt-postgres stays on 1.11, which supports dbt-core 1.12). `require-dbt-version` widens to `>=1.11.0, <1.13.0`. All protocol SQL and compiled package nodes render identically under 1.11.15 and 1.12.5 on both adapters. dbt-core 1.12 brings new transitive dependencies (metricflow, sqlglot, rapidfuzz, opentelemetry-api, python-dotenv, tabulate, dbt-core-experimental-parser).
 - The scheduled BigQuery workflow is keyless (Workload Identity Federation, no stored key), runs only from `main` when enabled, checks that its identity can't read the shared QA dataset, runs the parallel acceptance suite, and reports failures in an issue. One-time setup: `docs/scheduled-bigquery.md`.
 - BigQuery maintenance uses fewer jobs per invocation: the trigger marker is read by the first step's job, and one protected job logs every outcome after the steps (from 1 + 2n jobs to n + 1). Each step still runs as its own job, separate from the logging.
 - The credentialed BigQuery acceptance suite runs in parallel (`pytest -n 6`, about 25 minutes instead of 2 h 19 m). Every disposable dataset is labelled with its run, and leftovers from killed workers or stopped runs are swept automatically (`integration_tests/acceptance/bigquery_datasets.py`).
