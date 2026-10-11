@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Warehouse browsing on BigQuery reads pages in chunks of 2,000 issues and pages through each chunk locally. BigQuery bills the referenced columns of every row whether a read returns 25 rows or 2,000, so a page used to cost about 0.96 GB at 1M occurrences; a chunk costs the same and serves 80 pages of 25 (about 12 MB and 0.1 s per page amortized). Postgres still reads one page per statement.
 - Migration `0007_browse_keyset_index`: on Postgres, a partial expression index on the warehouse-browsing sort keys (Active issues only), built under the reconcile lock (1.5–5 s at 1M occurrences). At 1M occurrences / 100k Active it takes an unfiltered page from about 2.7 s to 0.02 s. On BigQuery the migration records the version only. Warehouse-browsing costs and latencies at 1M occurrences are in `docs/scale.md`, including BigQuery's about 1 GB per page, which the next change addresses.
 - The scale harnesses measure warehouse browsing (`--browse`, `integration_tests/scale/browse_probe.py`), and their synthetic history now varies workflow status, priority, owner and tags.
 - Warehouse browsing reads are faster: each page, summary and filter-choice read carries the control generation and setup status in the same statement (one snapshot) instead of separate checks before and after. A Postgres page is one statement (was three), a BigQuery page two jobs (was four) and a summary one (was four); on BigQuery each job adds about a second.
