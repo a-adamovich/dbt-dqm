@@ -9,7 +9,7 @@ runs.
 
 | | |
 | --- | --- |
-| Release candidate | `0.2.0a1`, **alpha** (Git tag `v0.2.0a1` when published). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a1`. |
+| Latest release | `0.2.0a1`, **alpha**, released 2026-10-11: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a1/), Git tag [`v0.2.0a1`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a1). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a1`. |
 | Upgrade from 0.1 | Needs a **fresh DQM schema**: set `dbt_dqm_schema` to a new schema. 0.1 tables are preserved and never reused or migrated. |
 | dbt | dbt-core 1.11 and 1.12, with dbt-bigquery 1.11 or 1.12 and dbt-postgres 1.11 (there is no dbt-postgres 1.12; 1.11 supports dbt-core 1.12) |
 | Warehouses | BigQuery; Postgres 14 and 16 (needs the `pgcrypto` extension) |
@@ -17,7 +17,8 @@ runs.
 
 The Python app pins dbt-core 1.12.5 and dbt-bigquery 1.12.1, with dbt-postgres 1.11.x;
 the dbt package accepts the wider dbt range above. Python support is `>=3.11,<3.12`.
-The [release checklist](docs/release-checklist.md) lists what must pass before the alpha is tagged.
+The [release checklist](docs/release-checklist.md) lists what must pass before a release is tagged;
+the [0.2.0a1 evidence](docs/release-0.2.0a1.md) records this alpha's results.
 Package contracts (relations, migrations, grants, recovery, retention, maintenance) are in
 [warehouse interfaces](docs/warehouse-interfaces.md).
 
@@ -31,9 +32,8 @@ packages:
     revision: v0.2.0a1
 ```
 
-The alpha is not listed on dbt Hub. Registration will be submitted after publication;
-Hub's SemVer tag parser does not accept `v0.2.0a1`, so registration alone cannot make this
-alpha installable through Hub. Keep using the Git revision above for this alpha.
+The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a1`, so
+install this alpha through the Git revision above. Hub registration is planned for 0.2.0.
 
 The 0.2 app expects the matching 0.2 package; don't mix it with 0.1.
 
@@ -74,8 +74,7 @@ dbt-dqm app --project-dir . --profiles-dir ~/.dbt --target dev
 ```
 
 In the browser, Sync, edit an issue's notes or review verdict, then Apply. Health shows
-setup, tests and maintenance status. The installation commands require the alpha to be
-published; until then, they describe the release candidate's intended installation.
+setup, tests and maintenance status.
 
 ## BigQuery authentication through WIF
 
