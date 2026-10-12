@@ -1,5 +1,5 @@
 name: dbt_dqm
-version: 0.2.0
+version: 0.2.0-a1
 config-version: 2
 require-dbt-version: [">=1.11.0", "<1.13.0"]
 
@@ -17,7 +17,6 @@ on-run-start:
 models:
   dbt_dqm:
     +post-hook: "{{ dbt_dqm.public_view_grants() }}"
-    +schema: "{{ var('dbt_dqm_schema', none) }}"
     dqm_reconcile:
       +pre-hook:
         - "{{ dbt_dqm.reconcile_lock() }}"

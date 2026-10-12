@@ -2,6 +2,7 @@
 -- The dbt model owns the empty table schema; the application appends immutable change events.
 {{
   config(
+    schema=var('dbt_dqm_schema', none),
     materialized='incremental',
     incremental_strategy=dbt_dqm.incremental_upsert_strategy(),
     unique_key=['batch_id', 'occurrence_id', 'field_name'],

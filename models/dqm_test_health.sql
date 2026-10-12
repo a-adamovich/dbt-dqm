@@ -1,6 +1,6 @@
 -- depends_on: {{ ref('dqm_reconcile') }}
 -- depends_on: {{ ref('dqm_missed_issues') }}
-{{ config(materialized='view') }}
+{{ config(schema=var('dbt_dqm_schema', none), materialized='view') }}
 {% set window=dbt_dqm.positive_integer_var('dbt_dqm_metrics_window_days',30) %}
 {% set stale=dbt_dqm.positive_integer_var('dbt_dqm_stale_days',14) %}
 with tracked as ({{ dbt_dqm.health_tests_sql() }}),

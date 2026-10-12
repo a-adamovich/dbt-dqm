@@ -9,34 +9,109 @@ runs.
 
 | | |
 | --- | --- |
-| Released | `v0.1.0` |
-| `main` | 0.2.0, **unreleased**. It needs a **fresh DQM schema**: set `dbt_dqm_schema` to a new schema. 0.1 tables are preserved and never reused or migrated. |
+| Release candidate | `0.2.0a1`, **alpha** (Git tag `v0.2.0a1` when published). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a1`. |
+| Upgrade from 0.1 | Needs a **fresh DQM schema**: set `dbt_dqm_schema` to a new schema. 0.1 tables are preserved and never reused or migrated. |
 | dbt | dbt-core 1.11 and 1.12, with dbt-bigquery 1.11 or 1.12 and dbt-postgres 1.11 (there is no dbt-postgres 1.12; 1.11 supports dbt-core 1.12) |
 | Warehouses | BigQuery; Postgres 14 and 16 (needs the `pgcrypto` extension) |
 | Review app | Python 3.11, the same two warehouses |
 
-The [release checklist](docs/release-checklist.md) lists what must pass before 0.2.0 is tagged.
+The Python app pins dbt-core 1.12.5 and dbt-bigquery 1.12.1, with dbt-postgres 1.11.x;
+the dbt package accepts the wider dbt range above. Python support is `>=3.11,<3.12`.
+The [release checklist](docs/release-checklist.md) lists what must pass before the alpha is tagged.
 Package contracts (relations, migrations, grants, recovery, retention, maintenance) are in
 [warehouse interfaces](docs/warehouse-interfaces.md).
 
 ## Install the dbt package
 
-dbt-dqm isn't on dbt Hub yet; add it to `packages.yml` as a git dependency:
+Install the alpha through Git by adding it to your consumer project's `packages.yml`:
 
 ```yaml
 packages:
   - git: "https://github.com/a-adamovich/dbt-dqm.git"
-    revision: v0.1.0 # the latest release
+    revision: v0.2.0a1
 ```
 
-To try unreleased 0.2 instead, use `revision: main` with a fresh `dbt_dqm_schema`, and the review
-app from the same revision. The 0.2 app expects the 0.2 package; don't mix it with 0.1.
+The alpha is not listed on dbt Hub. Registration will be submitted after publication;
+Hub's SemVer tag parser does not accept `v0.2.0a1`, so registration alone cannot make this
+alpha installable through Hub. Keep using the Git revision above for this alpha.
+
+The 0.2 app expects the matching 0.2 package; don't mix it with 0.1.
 
 Then run `dbt deps`. The review app is a separate Python package (`dbt-dqm`); installing it doesn't
 install the dbt package, and vice versa.
 
 On Postgres, create the extension once (the package doesn't, because it usually needs elevated
 privileges): `create extension if not exists pgcrypto;`
+
+## Install the Python app and start reviewing
+
+In a Python 3.11 environment, install the app separately:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install 'dbt-dqm==0.2.0a1'
+```
+
+Configure your dbt profile, add the Git package above, and set a fresh schema in your
+consumer project's `dbt_project.yml` when upgrading from 0.1:
+
+```yaml
+vars:
+  dbt_dqm_schema: dqm_alpha
+```
+
+After adding a tracked test as shown below, run these steps separately. A test that finds
+failures can return a nonzero exit code; reconciliation must still run afterward:
+
+```bash
+dbt deps
+dbt parse
+dbt run --select package:dbt_dqm  # initialize tracking tables and public views
+dbt test --select tag:dqm
+dbt build --select package:dbt_dqm
+dbt-dqm app --project-dir . --profiles-dir ~/.dbt --target dev
+```
+
+In the browser, Sync, edit an issue's notes or review verdict, then Apply. Health shows
+setup, tests and maintenance status. The installation commands require the alpha to be
+published; until then, they describe the release candidate's intended installation.
+
+## BigQuery authentication through WIF
+
+The app and dbt use Application Default Credentials (ADC) for an `oauth` profile. Supply a
+trusted external-account configuration from your existing Workload Identity Federation
+environment; it exchanges the external identity for short-lived service-account access
+without a downloaded service-account key:
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/trusted-wif-adc.json
+```
+
+```yaml
+consumer:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: oauth
+      project: your-project
+      dataset: your_dataset
+      location: US
+      threads: 4
+```
+
+Use your consumer project's profile name in place of `consumer`. Keep the configuration
+and its external token source available to both commands and the app. WIF configurations
+belong to the environment owner; dbt-dqm does not create pools, providers, service accounts
+or IAM bindings. Use the normal ADC environment path, not an explicit credentials-file
+override, for WIF. Only use configurations from an environment you trust.
+
+The offline WIF smoke test exercises ADC loading, token exchange, service-account
+impersonation and refresh through the installed app/dbt authentication libraries, with
+simulated responses. It does not verify live WIF or IAM. Live release QA uses existing
+local service-account credentials; no new keys are created or downloaded. Optional
+[scheduled BigQuery verification](docs/scheduled-bigquery.md) stays inactive until configured.
 
 ## Configure a tracked test
 
@@ -83,6 +158,10 @@ Run two separate dbt steps, so a failing test command never prevents reconciliat
 dbt test --select tag:dqm             # collection: an on-run-end hook captures tracked results
 dbt build --select package:dbt_dqm    # reconciliation, public views and health views
 ```
+
+Captures sharing stored-failure tables must be serialized: equal row counts do not prove
+that the captured rows belong to the invocation. BigQuery supports one reconciliation per
+dataset at a time; overlapping reconciliations are detected, not queued.
 
 `dbt run --select dbt_dqm.dqm_reconcile` runs reconciliation alone. The package publishes
 `dqm_current_issues`, `dqm_all_issues`, `dqm_issue_timeline`, the health views and the tracking
