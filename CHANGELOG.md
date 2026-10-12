@@ -14,6 +14,10 @@ app and dbt package are installed separately; 0.1 users need a fresh DQM schema.
   through Git even after repository registration. dbt only accepts SemVer, so `dbt_project.yml`
   spells the version `0.2.0-a1`; the release check requires exactly that pairing.
 - Only pre-release tags create a GitHub pre-release; stable tags keep the generated release notes.
+- `dbt_dqm_schema` now places the package's tables and views. It was set in the package's own
+  `dbt_project.yml`, which dbt renders without the consumer's vars, so the documented setting was
+  silently ignored and everything went to the target schema. 0.1 users could therefore not follow
+  the fresh-schema instruction. The schema is now set in each package model.
 
 - `--browse auto` is now the default: the app syncs a local snapshot while the review population fits the cache limits (50,000 issues / 128 MiB), as before, and reads issues from the warehouse page by page above them instead of refusing. `--browse snapshot` restores the old behaviour. Evidence: `docs/scale.md` (Warehouse browsing, 1M occurrences on both adapters).
 - Warehouse browsing on BigQuery reads pages in chunks of 2,000 issues and pages through each chunk locally. BigQuery bills the referenced columns of every row whether a read returns 25 rows or 2,000, so a page used to cost about 0.96 GB at 1M occurrences; a chunk costs the same and serves 80 pages of 25 (about 12 MB and 0.1 s per page amortized). Postgres still reads one page per statement.

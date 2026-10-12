@@ -257,3 +257,36 @@ def test_bigquery_native_grants_quote_roles_and_principals(protocol_project, mon
     assert "grant `roles/bigquery.dataViewer` on TABLE" in sql
     assert "'serviceAccount:demo@example.iam.gserviceaccount.com'" in sql
     assert "revoke" not in sql.lower()
+
+
+def test_dbt_dqm_schema_places_every_package_model(protocol_project):
+    # A var in the package's own dbt_project.yml renders without the consumer's vars, so the
+    # schema is set in each model; hook tables follow dqm_reconcile's schema (dqm_relation).
+    project, profiles = protocol_project
+
+    def schemas(*args):
+        result = dbtRunner().invoke(
+            [
+                "ls",
+                "--select",
+                "package:dbt_dqm",
+                "--resource-type",
+                "model",
+                "--output",
+                "json",
+                "--output-keys",
+                "name schema",
+                "--project-dir",
+                str(project),
+                "--profiles-dir",
+                str(profiles),
+                *args,
+            ]
+        )
+        assert result.success, result.exception
+        return {json.loads(line)["name"]: json.loads(line)["schema"] for line in result.result}
+
+    assert set(schemas().values()) == {"dqm"}
+    selected = schemas("--vars", "{dbt_dqm_schema: governance}")
+    assert len(selected) == len(list((ROOT / "models").glob("*.sql")))
+    assert set(selected.values()) == {"dqm_governance"}
