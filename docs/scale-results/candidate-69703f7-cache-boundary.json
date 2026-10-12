@@ -1,0 +1,37 @@
+{
+  "candidate": "69703f710a323cec075a0dc67f6d7d8bd0543d1f",
+  "date": "2026-10-11",
+  "postgres": "16.11",
+  "runs": [
+    {
+      "issues": 50000,
+      "mean_payload_bytes": 408,
+      "warehouse_read_seconds": 1.89,
+      "total_seconds": 4.45,
+      "baseline_rss_mb": 170.2,
+      "peak_rss_mb": 583.1,
+      "scenario": "supported-cache-boundary-real-postgres-sync",
+      "synthetic_processed_history": true
+    },
+    {
+      "issues": 50000,
+      "mean_payload_bytes": 408,
+      "warehouse_read_seconds": 1.85,
+      "total_seconds": 4.44,
+      "baseline_rss_mb": 166.8,
+      "peak_rss_mb": 583.8,
+      "scenario": "supported-cache-boundary-real-postgres-sync",
+      "synthetic_processed_history": true
+    },
+    {
+      "issues": 50000,
+      "mean_payload_bytes": 408,
+      "warehouse_read_seconds": 1.95,
+      "total_seconds": 4.65,
+      "baseline_rss_mb": 163.5,
+      "peak_rss_mb": 583.9,
+      "scenario": "supported-cache-boundary-real-postgres-sync",
+      "synthetic_processed_history": true
+    }
+  ]
+}

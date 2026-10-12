@@ -40,28 +40,27 @@ authorized the following alpha criteria on 2026-10-11:
 - Publish only `v0.2.0a1`. dbt Hub rejects this Python-style alpha tag; submit registration after
   publication and retain Git installation instructions without claiming an alpha Hub listing.
 
-The [current alpha evidence](release-0.2.0a1.md) records a **blocked** first preparation candidate:
-dbt's project schema rejects the Python alpha version spelling. The maintainer approved the
-SemVer spelling `0.2.0-a1` for `dbt_project.yml` on 2026-10-11; a new candidate needs every gate. The table below is historical
-evidence for `613e089`, not proof for the alpha candidate.
+The [0.2.0a1 evidence](release-0.2.0a1.md) records every gate passing on candidate `69703f7`.
+The maintainer approved the SemVer spelling `0.2.0-a1` for `dbt_project.yml` on 2026-10-11. The
+first preparation candidate, `d0385e6`, was blocked and is superseded.
 
 ## Results
 
 | Gate | Candidate commit | Result | Evidence |
 | --- | --- | --- | --- |
-| 1 | `613e089` | Passed 5/5 | [CI run 38075091531](https://github.com/a-adamovich/dbt-dqm/actions/runs/38075091531) |
-| 2 | `613e089` | Postgres 14.20: 30/30 (657 s); Postgres 16.11: 30/30 (676 s) | Local, each run alone; server transaction counters confirm each server was exercised |
-| 3 | `613e089` | 24/24 in one run, no skips (2 h 19 m) | Local credentialed run, project `dbt-dqm`, disposable datasets |
-| 4 | `613e089` | Passed (4 m 48 s) | Local, run serially after 3 against `dbt_dqm_qa` (now at migration 0006) |
-| 5 | `613e089` | Passed | Sync; Apply under a held table lock shows "busy" and keeps the edit; retry applied batch `6dedb185…`; Health shows Maintenance (all `ok`) with the corrected caption |
-| 6 | `613e089` | Peak RSS 439 / 575 / 518 MiB | Inside the documented 435–585 MiB range; [`candidate-613e089-cache-boundary.json`](scale-results/candidate-613e089-cache-boundary.json) |
-| 7 | `613e089` | Versions agree (0.2.0); the release workflow refuses a mismatched tag | Unit tests run the release step script |
-| 8 | 2026-10-10 | No open Dependabot alerts | GitHub Dependabot alerts |
+| 1 | `69703f7` | Passed 5/5 | [CI run 38189103369](https://github.com/a-adamovich/dbt-dqm/actions/runs/38189103369) |
+| 2 | `69703f7` | Postgres 16.11: 32/32 (1,037 s); Postgres 14.20: 31/32 in the full run, with the remaining test passing alone (25 s) | Local, clean clone. The one test timed out in setup under concurrent BigQuery load and passed alone and in CI ([details](release-0.2.0a1.md#results-for-the-candidate)) |
+| 3 | `69703f7` | 25/25 in one run, 6 workers, no skips (31 m 53 s) | Local credentialed run, project `dbt-dqm`, disposable datasets |
+| 4 | `69703f7` | Passed (5 m 52 s) | Local, run serially after 3 against `dbt_dqm_qa`; identities checked with `SESSION_USER()` |
+| 5 | `69703f7` | Passed | Snapshot and warehouse modes, busy/retry, Health with Maintenance `OK`, paging, filter, search and refusal, edit from page 3, offline edit and recovery ([details](release-0.2.0a1.md#browser-qa)) |
+| 6 | `69703f7` | Peak RSS 583.1 / 583.8 / 583.9 MiB | Inside the documented 435–585 MiB range; [`candidate-69703f7-cache-boundary.json`](scale-results/candidate-69703f7-cache-boundary.json) |
+| 7 | `69703f7` | Python `0.2.0a1`, dbt `0.2.0-a1`; the release workflow refuses any other pairing | Unit tests run the release step script |
+| 8 | 2026-10-11 | No open Dependabot alerts; `pip-audit` clean | GitHub Dependabot alerts |
 | 9 | — | Confirmed by the maintainer for 0.2.0a1 | [#12](https://github.com/a-adamovich/dbt-dqm/issues/12); `pypi` required-reviewer and `v*` tag protection inspected 2026-10-11 |
-| 10 | — | Not yet observed (no tag pushed) | Observed on the first `v0.2.0` tag |
+| 10 | — | Not yet observed (no tag pushed) | Observed on the `v0.2.0a1` tag |
 
-This table was added by a later documentation-only commit; the warehouse suites ran on `613e089`,
-not on that commit.
+This table was added by a later documentation-only commit; the warehouse suites ran on `69703f7`,
+not on that commit. The `613e089` results it replaces are in this file's git history.
 
 ## Operating limits that stay true after release
 
