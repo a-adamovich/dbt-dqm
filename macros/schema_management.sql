@@ -76,10 +76,15 @@
   {% if target.type == 'bigquery' %}
     create table if not exists {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} (
       batch_id string, occurrence_id string, field_name string, old_value string,
-      new_value string, changed_at timestamp, changed_by string, base_annotation_version int64
+      new_value string, changed_at timestamp, changed_by string, base_annotation_version int64,
+      installation_id string, upload_id string, staged_at timestamp default current_timestamp()
     );
-    alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} add column if not exists base_annotation_version int64;
-    alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} add column if not exists installation_id string;
+    {% for column, kind in [('base_annotation_version','int64'),('installation_id','string')] %}
+      if not exists(select 1 from {{ dbt_dqm.columns_catalog() }}
+        where table_name='dqm_app_change_staging' and lower(column_name)={{ dbt_dqm.sql_string(column) }}) then
+        alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} add column {{ column }} {{ kind }};
+      end if;
+    {% endfor %}
   {% endif %}
 {% endmacro %}
 {% macro default__app_change_staging_verify() %}
@@ -92,9 +97,16 @@
     new JSON loads omit staged_at and use the warehouse default, independent of client clocks. #}
 {% macro default__app_staging_safety_apply() %}
   {% if target.type == 'bigquery' %}
-    alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} add column if not exists upload_id string;
-    alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} add column if not exists staged_at timestamp;
-    alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} alter column staged_at set default current_timestamp();
+    {% for column, kind in [('upload_id','string'),('staged_at','timestamp')] %}
+      if not exists(select 1 from {{ dbt_dqm.columns_catalog() }}
+        where table_name='dqm_app_change_staging' and lower(column_name)={{ dbt_dqm.sql_string(column) }}) then
+        alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} add column {{ column }} {{ kind }};
+      end if;
+    {% endfor %}
+    if not exists(select 1 from {{ dbt_dqm.columns_catalog() }} where table_name='dqm_app_change_staging'
+      and lower(column_name)='staged_at' and upper(coalesce(column_default,''))='CURRENT_TIMESTAMP()') then
+      alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} alter column staged_at set default current_timestamp();
+    end if;
   {% endif %}
 {% endmacro %}
 {% macro default__app_staging_safety_backfill() %}
