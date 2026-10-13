@@ -10,7 +10,7 @@ macros:
         type: string
         description: Custom schema requested by dbt, including the stored-failure audit schema.
       - name: node
-        type: ParsedNode
+        type: any
         description: dbt node requesting a schema; unused by the demo override.
   - name: reset_demo_dqm
     description: >

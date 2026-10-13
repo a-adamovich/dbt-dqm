@@ -54,7 +54,7 @@
     where invocation_id={{ dbt_dqm.sql_string(payload.invocation_id) }}
       and collection_status not in ('success','not_applicable','limit_reached')
   {% endset %}
-  {% set failures=run_query(dbt_dqm.capture_test_results(results,payload.invocation_id,initialized=true) ~ ';' ~ summary_sql) %}
+  {% set failures=run_query(dbt_dqm.capture_test_results(results,payload.invocation_id,initialized=true) ~ summary_sql) %}
   {% set errors=[] %}
   {% for row in failures.rows %}{% do errors.append({'test_name':row[0],'status':row[1],'message':row[2]}) %}{% endfor %}
   {% do log('DQM_COLLECTION_ERRORS=' ~ tojson(errors),info=false) %}
