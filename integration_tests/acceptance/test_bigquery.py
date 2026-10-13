@@ -1200,3 +1200,16 @@ def test_bigquery_maintenance_health_overlap_and_legacy_rows(demo):
         == "failing"
     )
     assert scenario([("log", ("legacy", "succeeded", None, None, t1))]) == "unknown"
+
+
+def test_package_initialization_and_app_with_custom_aliases(demo):
+    from alias_checks import NAMING_MACROS, check_alias_app
+
+    project = demo.path
+    (project / "macros/consumer_naming.sql").write_text(NAMING_MACROS, encoding="utf-8")
+    # First install and idempotent reruns must work at the normal four-thread setting.
+    for _ in range(3):
+        demo.dbt("run", "--select", "package:dbt_dqm", "--threads", "4")
+    demo.capture("initial")
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    check_alias_app(project, demo.profiles)

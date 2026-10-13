@@ -3,7 +3,9 @@ from __future__ import annotations
 import getpass
 import hashlib
 import json
+import logging
 import os
+import shutil
 import subprocess
 import sys
 import uuid
@@ -14,18 +16,19 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-import psycopg2
-from google.api_core.exceptions import Conflict, GoogleAPICallError, NotFound
-from google.cloud import bigquery
-from google.oauth2 import credentials as user_credentials
-from google.oauth2 import service_account
-from psycopg2.extras import RealDictCursor
-
 from . import browse
+from .adapters import LazyModule, require_adapter
 from .config import AppConfig
-from .errors import AppError, SearchTooCostly, SnapshotUnavailable, classify
-from .limits import check_cache_size, issue_json
+from .errors import AppError, SearchTooCostly, SnapshotUnavailable, WarehouseBusy, classify
+from .limits import CacheLimitExceeded, check_cache_size, issue_json
 from .store import EDITABLE_FIELDS, Patch
+
+psycopg2 = LazyModule("psycopg2", "postgres")
+pg_extras = LazyModule("psycopg2.extras", "postgres")
+bigquery = LazyModule("google.cloud.bigquery", "bigquery")
+google_errors = LazyModule("google.api_core.exceptions", "bigquery")
+user_credentials = LazyModule("google.oauth2.credentials", "bigquery")
+service_account = LazyModule("google.oauth2.service_account", "bigquery")
 
 BIGQUERY_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 UNREADABLE_CREDENTIALS = "The BigQuery credentials file can't be read as a JSON credentials file."
@@ -71,36 +74,91 @@ def _override_credentials(path: str, mtime_ns: int, size: int):
         raise AppError(INCOMPLETE_CREDENTIALS) from None
 
 
-def validate_dbt(config: AppConfig) -> None:
-    """Validate the credentials override first, then run dbt debug and parse with it.
+logger = logging.getLogger(__name__)
 
-    dbt rereads the override path itself, so that file must stay under the user's control for the
-    whole operation.
-    """
+
+def resolve_dbt_executable() -> str:
+    executable = (shutil.which("dbt", path=str(Path(sys.executable).parent))
+                  or shutil.which("dbt"))
+    if executable is None:
+        raise AppError("dbt could not be found. Install the selected dbt-dqm adapter extra "
+                       "in this Python environment.")
+    return str(Path(executable).resolve())
+
+
+@lru_cache(maxsize=8)
+def _dbt_version(executable: str) -> str:
+    result = subprocess.run([executable, "--version"], check=True, capture_output=True, text=True,
+                            encoding="utf-8", errors="replace",
+                            env={**os.environ, "DBT_VERSION_CHECK": "false"})
+    version = f"{result.stdout or ''}\n{result.stderr or ''}".strip()
+    if not logger.handlers:
+        logger.addHandler(logging.StreamHandler())
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+    logger.info("dbt executable: %s\ndbt --version:\n%s", executable, version)
+    return version
+
+
+def validate_dbt(config: AppConfig) -> None:
+    """Use the active environment's dbt and preserve the caller's default resolution."""
+    require_adapter(config.adapter_type)
     if config.credentials_file is not None:
         override_credentials(config.credentials_file)
-    environment_dbt = str(Path(sys.executable).with_name("dbt"))
-    dbt_executable = environment_dbt if Path(environment_dbt).exists() else "dbt"
-    base = [
-        "--project-dir",
-        str(config.project_dir),
-        "--profiles-dir",
-        str(config.profiles_dir),
-        "--target",
-        config.target,
+    dbt_executable = resolve_dbt_executable()
+    base = list(config.dbt_cli_args) if config.dbt_cli_args is not None else [
+        "--project-dir", str(config.project_dir), "--profiles-dir", str(config.profiles_dir),
+        "--target", config.target,
     ]
     environment = os.environ.copy()
     if config.credentials_file is not None:
         environment["GOOGLE_APPLICATION_CREDENTIALS"] = str(config.credentials_file.resolve())
-    subprocess.run([dbt_executable, "debug", *base], check=True, capture_output=True, text=True,
-                   env=environment)
-    subprocess.run([dbt_executable, "parse", *base], check=True, capture_output=True, text=True,
-                   env=environment)
+    version = ""
+    try:
+        version = _dbt_version(dbt_executable)
+        for operation in ("debug", "parse"):
+            subprocess.run([dbt_executable, operation, *base], check=True, capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", env=environment,
+                           cwd=config.working_dir)
+    except subprocess.CalledProcessError as error:
+        failure = classify(error)
+        failure.details += f"\ndbt --version:\n{version}"
+        raise failure from None
+    check_required_relations(config)
+
+
+REQUIRED_APP_RELATIONS = (
+    "dqm_reconciliation_control", "dqm_issue_occurrences", "dqm_all_issues", "dqm_test_health",
+    "dqm_area_health", "dqm_annotation_changes", "dqm_missed_issues", "dqm_app_change_staging",
+)
+
+
+def check_required_relations(config: AppConfig) -> None:
+    missing = []
+    if config.adapter_type == "bigquery":
+        client = client_for(config)
+        for name in REQUIRED_APP_RELATIONS:
+            relation = ".".join(_relation_parts(config, name))
+            try:
+                client.get_table(relation)
+            except google_errors.NotFound:
+                missing.append(relation)
+    else:
+        with _postgres_connection(config) as connection, connection.cursor() as cursor:
+            for name in REQUIRED_APP_RELATIONS:
+                relation = _table(config, name)
+                cursor.execute("select to_regclass(%s)", (relation,))
+                if cursor.fetchone()[0] is None:
+                    missing.append(relation)
+    if missing:
+        raise AppError("DQM tracking relations are missing. Run `dbt run --select package:dbt_dqm` "
+                       "first, then Sync again.", "Missing relations:\n" + "\n".join(missing))
 
 
 def client_for(config: AppConfig) -> bigquery.Client:
     if config.adapter_type != "bigquery":
         raise ValueError("BigQuery client requested for a non-BigQuery profile")
+    require_adapter("bigquery")
     if config.method == "service-account":
         if config.keyfile is None:
             raise ValueError("The dbt profile does not define keyfile")
@@ -154,7 +212,7 @@ def _query_rows(config: AppConfig, query: str) -> list[dict[str, Any]]:
         return [dict(row.items()) for row in client_for(config).query(query).result()]
     with (
         _postgres_connection(config) as connection,
-        connection.cursor(cursor_factory=RealDictCursor) as cursor,
+        connection.cursor(cursor_factory=pg_extras.RealDictCursor) as cursor,
     ):
         cursor.execute(query)
         return [dict(row) for row in cursor.fetchall()]
@@ -185,7 +243,7 @@ def _iter_issue_rows(config: AppConfig, query: str):
         return
     with (_postgres_connection(config) as connection,
           connection.cursor(name="dqm_sync_" + uuid.uuid4().hex,
-                            cursor_factory=RealDictCursor) as cursor):
+                            cursor_factory=pg_extras.RealDictCursor) as cursor):
         cursor.itersize = 500
         cursor.execute(query)
         while page := cursor.fetchmany(500):
@@ -292,7 +350,7 @@ def _run_browse_query(config: AppConfig, query: browse.Query, *, searched: bool 
     if config.adapter_type != "bigquery":
         with (
             _postgres_connection(config) as connection,
-            connection.cursor(cursor_factory=RealDictCursor) as cursor,
+            connection.cursor(cursor_factory=pg_extras.RealDictCursor) as cursor,
         ):
             cursor.execute(query.sql, query.params)
             return [dict(row) for row in cursor.fetchall()]
@@ -312,7 +370,7 @@ def _run_browse_query(config: AppConfig, query: browse.Query, *, searched: bool 
         job_config.maximum_bytes_billed = limit
     try:
         return [dict(row.items()) for row in client.query(query.sql, job_config=job_config).result()]
-    except GoogleAPICallError as error:
+    except google_errors.GoogleAPICallError as error:
         if limit is not None and "bytesBilledLimitExceeded" in str(getattr(error, "errors", "")) + str(error):
             raise SearchTooCostly(SEARCH_TOO_COSTLY.format(
                 estimate=limit / 2**30, limit=config.max_search_gib), str(error)) from error
@@ -523,7 +581,7 @@ def _apply_bigquery_patches(config: AppConfig, patches: Iterable[Patch]) -> str:
     staging_id = f"{database}.{schema}.dqm_app_change_staging"
     try:
         table = client.get_table(staging_id)
-    except NotFound as error:
+    except google_errors.NotFound as error:
         raise AppError("App staging is missing. Build package:dbt_dqm before applying.") from error
     if not {"upload_id", "staged_at"} <= {field.name for field in table.schema}:
         raise AppError("App staging requires migration 0004. Build package:dbt_dqm, "
@@ -622,6 +680,7 @@ def _bigquery_annotation_apply_sql(config: AppConfig) -> str:
 
 
 def _postgres_connection(config: AppConfig):
+    require_adapter("postgres")
     parameters = {
         "host": config.host,
         "port": config.port,
@@ -653,7 +712,7 @@ def _apply_postgres_patches(config: AppConfig, patches: list[Patch]) -> str:
 
     with (
         _postgres_connection(config) as connection,
-        connection.cursor(cursor_factory=RealDictCursor) as cursor,
+        connection.cursor(cursor_factory=pg_extras.RealDictCursor) as cursor,
     ):
         cursor.execute(
             f"select occurrence_id, field_name from {audit_table} where batch_id=%s",
@@ -717,6 +776,22 @@ def _apply_postgres_patches(config: AppConfig, patches: list[Patch]) -> str:
     return batch_id
 
 
+def worker_error(error: Exception) -> AppError:
+    """Keep only portable strings and known app exception types across process boundaries."""
+    failure = classify(error)
+    kind = type(failure) if type(failure) in (
+        AppError, SnapshotUnavailable, SearchTooCostly, WarehouseBusy, CacheLimitExceeded,
+    ) else AppError
+    return kind(str(failure.message), str(failure.details))
+
+
+def run_worker(worker, *args):
+    try:
+        return worker(*args)
+    except Exception as error:  # noqa: BLE001 - third-party exceptions cannot cross the pool.
+        raise worker_error(error) from None
+
+
 def sync_worker(config: AppConfig) -> dict[str, Any]:
     validate_dbt(config)
     return {"issues": fetch_issues(config), "health": fetch_health(config)}
@@ -742,7 +817,7 @@ def apply_worker(
             return batch_id, {"health": fetch_health(config)}, None
         return batch_id, {"issues": fetch_issues(config), "health": fetch_health(config)}, None
     except Exception as error:  # noqa: BLE001 - the apply already committed; report the refresh.
-        return batch_id, None, classify(error)
+        return batch_id, None, worker_error(error)
 
 
 MISSED_ROOT_CAUSES = ("no_test", "test_logic_gap", "threshold_too_loose", "test_not_run", "other")
@@ -778,7 +853,16 @@ def fetch_health(config: AppConfig) -> dict[str, Any]:
         health["maintenance"] = _query_rows(
             config, f"select * from {_table(config, 'dqm_maintenance_health')} order by step"
         )
-    except (NotFound, psycopg2.errors.UndefinedTable):
+    except Exception as error:
+        modules = {cls.__module__ for cls in type(error).__mro__}
+        missing_table = (
+            "google.api_core.exceptions" in modules and isinstance(error, google_errors.NotFound)
+        ) or (
+            any(module.startswith("psycopg2") for module in modules)
+            and isinstance(error, psycopg2.errors.UndefinedTable)
+        )
+        if not missing_table:
+            raise
         health["maintenance"] = None
     return health
 
@@ -840,10 +924,10 @@ def _insert_missed_bigquery(config, table, submission_id, query, job_config) -> 
         job_id = f"dqm_missed_{identity}_{attempt}"
         try:
             job = client.get_job(job_id, location=config.location)
-        except NotFound:
+        except google_errors.NotFound:
             try:
                 job = client.query(query, job_config=job_config, job_id=job_id, job_retry=None)
-            except Conflict:
+            except google_errors.Conflict:
                 job = client.get_job(job_id, location=config.location)
         if job.state == "DONE" and job.error_result:
             continue

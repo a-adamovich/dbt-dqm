@@ -1,6 +1,6 @@
 [project]
 name = "dbt-dqm"
-version = "0.2.0a2"
+version = "0.2.0a3"
 description = "Persistent dbt test issue tracking and a local review application"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
@@ -21,14 +21,10 @@ classifiers = [
 ]
 dependencies = [
   "dbt-core==1.12.5",
-  "dbt-bigquery==1.12.1",
-  "dbt-postgres>=1.11,<1.12",
-  "google-cloud-bigquery>=3.25,<4",
   # Security floors for transitive dependencies (#24): wheels don't carry uv.lock, so these keep
   # installs from retaining versions with known advisories.
   # dbt's older serializer cannot initialize on Python 3.14.
   "mashumaro>=3.17,<3.18",
-  "oauthlib>=4.0.0,<5",  # GHSA advisories fixed in 4.0.0 (reached via pandas-gbq auth)
   "pandas>=2.2,<4",
   "platformdirs>=4,<5",
   "pyarrow>=25.0.1,<26",
@@ -37,6 +33,14 @@ dependencies = [
   "streamlit>=1.52,<2",
   "urllib3>=2.8.0,<3",  # three advisories fixed in 2.8.0
 ]
+
+[project.optional-dependencies]
+bigquery = [
+  "dbt-bigquery==1.12.1",
+  "google-cloud-bigquery>=3.25,<4",
+  "oauthlib>=4.0.0,<5",  # Security floor for pandas-gbq authentication
+]
+postgres = ["dbt-postgres>=1.11,<1.12"]
 
 [project.urls]
 Homepage = "https://github.com/a-adamovich/dbt-dqm"

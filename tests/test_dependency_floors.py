@@ -28,7 +28,10 @@ REVIEWED = {
 
 def _project_requirements():
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
-    return [Requirement(text) for text in project["dependencies"]]
+    requirements = [Requirement(text) for text in project["dependencies"]]
+    for extra, dependencies in project["optional-dependencies"].items():
+        requirements.extend(Requirement(f'{text}; extra == "{extra}"') for text in dependencies)
+    return requirements
 
 
 def _wheel_requirements(path):
@@ -38,9 +41,13 @@ def _wheel_requirements(path):
     return [Requirement(text) for text in metadata.get_all("Requires-Dist") or []]
 
 
-def _assert_floors(requirements):
-    by_name = {requirement.name: requirement for requirement in requirements}
+def _assert_floors(requirements, extras):
+    by_name = {r.name: r for r in requirements if r.marker is None or any(
+        r.marker.evaluate({"extra": extra}) for extra in (extras or [""]))}
     for name, (vulnerable, patched) in REVIEWED.items():
+        if name == "oauthlib" and "bigquery" not in extras:
+            assert name not in by_name
+            continue
         assert name in by_name, f"{name} has no security floor"
         specifier = by_name[name].specifier
         assert vulnerable not in specifier, f"{name} {vulnerable} is allowed"
@@ -48,10 +55,12 @@ def _assert_floors(requirements):
         assert floors and min(floors) >= Version(patched), f"{name} allows versions below {patched}"
 
 
-def test_project_metadata_excludes_vulnerable_versions():
-    _assert_floors(_project_requirements())
+@pytest.mark.parametrize("extras", [[], ["bigquery"], ["postgres"], ["bigquery", "postgres"]])
+def test_project_metadata_excludes_vulnerable_versions(extras):
+    _assert_floors(_project_requirements(), extras)
 
 
 @pytest.mark.skipif(not os.environ.get("DBT_DQM_WHEEL"), reason="Set by CI after building")
-def test_built_wheel_metadata_excludes_vulnerable_versions():
-    _assert_floors(_wheel_requirements(os.environ["DBT_DQM_WHEEL"]))
+@pytest.mark.parametrize("extras", [[], ["bigquery"], ["postgres"], ["bigquery", "postgres"]])
+def test_built_wheel_metadata_excludes_vulnerable_versions(extras):
+    _assert_floors(_wheel_requirements(os.environ["DBT_DQM_WHEEL"]), extras)

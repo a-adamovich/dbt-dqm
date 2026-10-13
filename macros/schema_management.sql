@@ -191,7 +191,7 @@
   {% else %}information_schema.tables{% endif %}
 {% endmacro %}
 {% macro table_exists_sql(name) %}
-  exists(select 1 from {{ dbt_dqm.tables_catalog() }} where table_schema={{ dbt_dqm.sql_string(dbt_dqm.dqm_relation(name).schema) }} and table_name={{ dbt_dqm.sql_string(name) }})
+  exists(select 1 from {{ dbt_dqm.tables_catalog() }} where table_schema={{ dbt_dqm.sql_string(dbt_dqm.dqm_relation(name).schema) }} and table_name={{ dbt_dqm.sql_string(dbt_dqm.dqm_relation(name).identifier) }})
 {% endmacro %}
 {% macro default__initial_schema_verify() %}
   {% for name, columns in dbt_dqm.table_schemas().items() if name not in ['dqm_annotation_changes','dqm_missed_issues'] %}

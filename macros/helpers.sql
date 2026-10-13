@@ -40,9 +40,19 @@
    api.Relation.create() renders correctly per adapter (BigQuery backticks, Postgres double
    quotes, ...) instead of hand-rolling one quoting convention. #}
 {% macro dqm_relation(name) %}
-  {% set node = graph.nodes.get('model.dbt_dqm.dqm_reconcile') if graph.nodes is defined else none %}
-  {% set schema = node.schema if node else (target.schema if var('dbt_dqm_schema', none) is none else generate_schema_name(var('dbt_dqm_schema'), none)) %}
-  {{ return(api.Relation.create(database=node.database if node else target.database, schema=schema, identifier=name, type='table')) }}
+  {% set nodes = graph.nodes if graph.nodes is defined else {} %}
+  {% set model_node = nodes.get('model.dbt_dqm.' ~ name) %}
+  {% if model_node %}
+    {{ return(api.Relation.create(database=model_node.database, schema=model_node.schema,
+        identifier=model_node.alias, type='table')) }}
+  {% endif %}
+  {% if model is defined and model.package_name == 'dbt_dqm' and model.name == name %}
+    {{ return(this) }}
+  {% endif %}
+  {% set anchor = nodes.get('model.dbt_dqm.dqm_reconcile') %}
+  {% set schema = anchor.schema if anchor else (target.schema if var('dbt_dqm_schema', none) is none else generate_schema_name(var('dbt_dqm_schema'), none)) %}
+  {{ return(api.Relation.create(database=anchor.database if anchor else target.database,
+      schema=schema, identifier=name, type='table')) }}
 {% endmacro %}
 {% macro relation_name(name) %}{{ return(dbt_dqm.dqm_relation(name)) }}{% endmacro %}
 

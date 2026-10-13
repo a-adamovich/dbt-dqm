@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.0a3 - 2026-10-13 (release candidate)
+
+- Warehouse adapters are optional: install `dbt-dqm[bigquery]`, `dbt-dqm[postgres]`,
+  or `dbt-dqm[bigquery,postgres]`. Plain installs include no warehouse adapters.
+- Missing adapters produce an installation hint; local workspace commands work without adapters.
+- No warehouse schema migration is introduced.
+
+- CLI options are optional and follow dbt's project, profile and target defaults and environment.
+- Resolves the active environment's dbt executable on Windows as well as macOS/Linux; startup logs
+  its path and version, and errors preserve full command diagnostics.
+- Worker errors are classified before crossing process boundaries, preserving BigQuery errors,
+  cache-limit switching and committed-Apply refresh outcomes.
+- Checks required app relations and reports an initialization command for missing tables/views.
+- Orders all setup-writing models before reconciliation so BigQuery package initialization can use
+  normal multithreading.
+- Supports consumer model aliases throughout package SQL and app relation lookup.
+- Adds Windows/macOS CI with native configuration, spawn workers and four clean adapter variants.
+
 ## 0.2.0a2 - 2026-10-12
 
 - Supports Python 3.11–3.14 (`>=3.11,<3.15`), with Python 3.14 recommended.

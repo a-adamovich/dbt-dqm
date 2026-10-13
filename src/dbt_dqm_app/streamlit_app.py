@@ -51,6 +51,7 @@ from dbt_dqm_app.warehouse import (
     browse_summary,
     insert_missed_issue,
     manifest_nodes,
+    run_worker,
     sync_worker,
 )
 
@@ -73,11 +74,20 @@ def run_app() -> None:
     st.set_page_config(page_title="dbt-dqm", layout="wide")
     st.title("dbt-dqm issue review")
 
-    config = load_config(
-        os.environ["DBT_DQM_PROJECT_DIR"],
-        os.environ["DBT_DQM_PROFILES_DIR"],
-        os.environ["DBT_DQM_TARGET"],
-    )
+    try:
+        config = load_config(
+            os.environ.get("DBT_DQM_PROJECT_DIR"),
+            os.environ.get("DBT_DQM_PROFILES_DIR"),
+            os.environ.get("DBT_DQM_TARGET"),
+        )
+    except Exception as error:  # noqa: BLE001 - configuration errors belong in the UI.
+        failure = classify(error)
+        st.error(failure.message)
+        if failure.details:
+            with st.expander("Technical details"):
+                st.code(failure.details, language=None)
+        st.stop()
+        return
     workspace = Workspace(config.workspace_path)
     st.caption(f"{config.project_id}.{config.dataset} · target {config.target}")
     st.markdown(
@@ -288,14 +298,14 @@ def _install_snapshot(workspace, config, snapshot) -> None:
 def _submit_sync(executor, config) -> None:
     st.session_state.job_kind = "sync"
     worker = browse_refresh_worker if st.session_state.browsing else sync_worker
-    st.session_state.job = executor.submit(worker, config)
+    st.session_state.job = executor.submit(run_worker, worker, config)
 
 
 def _submit_apply(executor, config, patches) -> None:
     st.session_state.job_kind = "apply"
     st.session_state.job_patches = patches
     st.session_state.job = executor.submit(
-        apply_worker, config, patches, st.session_state.browsing)
+        run_worker, apply_worker, config, patches, st.session_state.browsing)
 
 
 BROWSE_STATE = ("browse_options", "browse_summaries", "browse_pages")

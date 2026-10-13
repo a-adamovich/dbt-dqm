@@ -42,6 +42,8 @@ def test_reviewer_dbt_subprocess_credentials_do_not_change_global_adc(tmp_path, 
     reviewer_file.write_text(json.dumps(
         {"type": "authorized_user", "client_id": "c", "client_secret": "s", "refresh_token": "r"}
     ))
+    monkeypatch.setattr(warehouse, "_dbt_version", lambda executable: "test version")
+    monkeypatch.setattr(warehouse, "check_required_relations", lambda config: None)
     warehouse.validate_dbt(replace(config(tmp_path, "bigquery"), credentials_file=reviewer_file))
     assert run.call_count == 2
     assert all(call.kwargs["env"]["GOOGLE_APPLICATION_CREDENTIALS"] == str(reviewer_file.resolve())

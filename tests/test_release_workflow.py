@@ -237,7 +237,7 @@ def test_only_pre_release_tags_create_a_github_pre_release(tmp_path):
     assert "--prerelease" in alpha
     assert alpha[alpha.index("--title") + 1] == "dbt-dqm v0.2.0a1 (pre-release)"
     notes = alpha[alpha.index("--notes") + 1]
-    assert "pip install dbt-dqm==0.2.0a1" in notes and "Git revision v0.2.0a1" in notes
+    assert "dbt-dqm[bigquery]==0.2.0a1" in notes and "Git revision v0.2.0a1" in notes
     assert "spells the version 0.2.0-a1" in notes
     stable = _create_release(tmp_path, "v0.2.0")
     assert "--prerelease" not in stable and "--notes" not in stable and "--title" not in stable

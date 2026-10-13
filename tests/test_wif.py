@@ -124,6 +124,7 @@ def test_wif_authentication_failure_has_no_fallback(wif, loader, failed_endpoint
     assert credentials.token is None
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX script fixture; native ADC propagation has portability coverage")
 def test_wif_adc_environment_reaches_dbt_subprocesses(wif, tmp_path, monkeypatch):
     config, adc = wif
     binary = tmp_path / "bin"
@@ -139,6 +140,9 @@ def test_wif_adc_environment_reaches_dbt_subprocesses(wif, tmp_path, monkeypatch
     )
     executable.chmod(0o700)
     monkeypatch.setattr(sys, "executable", str(binary / "python"))
+    from dbt_dqm_app import warehouse
+    monkeypatch.setattr(warehouse, "_dbt_version", lambda executable: "test version")
+    monkeypatch.setattr(warehouse, "check_required_relations", lambda config: None)
     validate_dbt(config)
     assert [json.loads(line) for line in log.read_text().splitlines()] == [
         {"command": command, "adc": str(adc)} for command in ("debug", "parse")

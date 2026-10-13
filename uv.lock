@@ -452,15 +452,11 @@ sdist = { url = "https://files.pythonhosted.org/packages/44/22/43a63fb0cd40dba71
 
 [[package]]
 name = "dbt-dqm"
-version = "0.2.0a2"
+version = "0.2.0a3"
 source = { editable = "." }
 dependencies = [
-    { name = "dbt-bigquery" },
     { name = "dbt-core" },
-    { name = "dbt-postgres" },
-    { name = "google-cloud-bigquery" },
     { name = "mashumaro" },
-    { name = "oauthlib" },
     { name = "pandas" },
     { name = "platformdirs" },
     { name = "pyarrow" },
@@ -468,6 +464,16 @@ dependencies = [
     { name = "sqlparse" },
     { name = "streamlit" },
     { name = "urllib3" },
+]
+
+[package.optional-dependencies]
+bigquery = [
+    { name = "dbt-bigquery" },
+    { name = "google-cloud-bigquery" },
+    { name = "oauthlib" },
+]
+postgres = [
+    { name = "dbt-postgres" },
 ]
 
 [package.dev-dependencies]
@@ -479,12 +485,12 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "dbt-bigquery", specifier = "==1.12.1" },
+    { name = "dbt-bigquery", marker = "extra == 'bigquery'", specifier = "==1.12.1" },
     { name = "dbt-core", specifier = "==1.12.5" },
-    { name = "dbt-postgres", specifier = ">=1.11,<1.12" },
-    { name = "google-cloud-bigquery", specifier = ">=3.25,<4" },
+    { name = "dbt-postgres", marker = "extra == 'postgres'", specifier = ">=1.11,<1.12" },
+    { name = "google-cloud-bigquery", marker = "extra == 'bigquery'", specifier = ">=3.25,<4" },
     { name = "mashumaro", specifier = ">=3.17,<3.18" },
-    { name = "oauthlib", specifier = ">=4.0.0,<5" },
+    { name = "oauthlib", marker = "extra == 'bigquery'", specifier = ">=4.0.0,<5" },
     { name = "pandas", specifier = ">=2.2,<4" },
     { name = "platformdirs", specifier = ">=4,<5" },
     { name = "pyarrow", specifier = ">=25.0.1,<26" },
@@ -493,6 +499,7 @@ requires-dist = [
     { name = "streamlit", specifier = ">=1.52,<2" },
     { name = "urllib3", specifier = ">=2.8.0,<3" },
 ]
+provides-extras = ["bigquery", "postgres"]
 
 [package.metadata.requires-dev]
 dev = [
