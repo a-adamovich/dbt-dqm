@@ -9,7 +9,7 @@ runs.
 
 | | |
 | --- | --- |
-| Version | `0.2.0a3`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a3/), Git tag [`v0.2.0a3`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a3). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a3`. |
+| Latest release | `0.2.0a3`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a3/), Git tag [`v0.2.0a3`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a3). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a3`. |
 | Upgrade from 0.1 | Needs a **fresh DQM schema**: set `dbt_dqm_schema` to a new schema. 0.1 tables are preserved and never reused or migrated. |
 | dbt | dbt-core 1.11 and 1.12, with dbt-bigquery 1.11 or 1.12 and dbt-postgres 1.11 (there is no dbt-postgres 1.12; 1.11 supports dbt-core 1.12) |
 | Warehouses | BigQuery; Postgres 14 and 16 (needs the `pgcrypto` extension) |
