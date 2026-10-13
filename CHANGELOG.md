@@ -15,7 +15,9 @@
 - Checks required app relations and reports an initialization command for missing tables/views.
 - Orders all setup-writing models before reconciliation so BigQuery package initialization can use
   normal multithreading.
-- Supports consumer model aliases throughout package SQL and app relation lookup.
+- Supports consumer model aliases throughout package SQL and app relation lookup, including
+  unique indexes when canonical and aliased tables coexist. Existing tables and data are preserved.
+- Renders selected profile values once, preserving literal credentials from environment variables.
 - Adds Windows/macOS CI with native configuration, spawn workers and four clean adapter variants.
 
 ## 0.2.0a2 - 2026-10-12

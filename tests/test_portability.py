@@ -263,3 +263,18 @@ def test_windows_current_directory_does_not_override_the_venv(tmp_path, monkeypa
     monkeypatch.setattr(warehouse.shutil, "which", which)
     assert warehouse.resolve_dbt_executable() == str(expected)
     assert calls == [("dbt", str(directory)), (str(expected), None)]
+
+
+def test_profile_secret_is_rendered_once(project, monkeypatch):
+    secret = "literal-$DQM_OTHER-{{ 1 + 1 }}"
+    monkeypatch.setenv("DQM_TEST_SECRET", secret)
+    monkeypatch.setenv("DQM_OTHER", "unexpected-expansion")
+    assert load_config().password == secret
+
+
+def test_explicit_project_path_preserves_literal_dollar_signs(project, monkeypatch):
+    monkeypatch.setenv("DQM_OTHER", "unexpected-expansion")
+    renamed = project.with_name("project$DQM_OTHER")
+    project.rename(renamed)
+    monkeypatch.chdir(renamed)
+    assert load_config(project_dir=renamed, profiles_dir=renamed).project_dir == renamed

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from dbt_dqm_app.config import load_config
 from dbt_dqm_app.store import Patch
 from dbt_dqm_app.warehouse import (
+    _postgres_connection,
     _relation_parts,
     apply_patches,
     fetch_issues,
@@ -46,6 +47,14 @@ def check_alias_app(project, profiles):
     refreshed = fetch_issues(config)
     assert next(row for row in refreshed if row["occurrence_id"] == issue["occurrence_id"])[
         "notes"] == "alias acceptance note"
+    if config.adapter_type == "postgres":
+        with _postgres_connection(config) as connection, connection.cursor() as cursor:
+            for name in ("dqm_annotation_changes", "dqm_missed_issues"):
+                _, schema, identifier = _relation_parts(config, name)
+                cursor.execute("select count(*) from pg_indexes where schemaname=%s "
+                               "and tablename=%s and indexdef like 'CREATE UNIQUE INDEX%%'",
+                               (schema, identifier))
+                assert cursor.fetchone()[0] >= 1, f"{identifier} has no unique index"
     identity = uuid.uuid4().hex
     assert insert_missed_issue(config, {
         "missed_issue_id": identity, "description": "alias acceptance report",

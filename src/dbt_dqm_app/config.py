@@ -96,7 +96,7 @@ def resolve_profiles_dir(value: str | Path | None = None) -> Path:
 
 
 def _path(value: str | Path) -> Path:
-    return Path(os.path.expandvars(str(value))).expanduser().resolve()
+    return Path(value).expanduser().resolve()
 
 
 def _read_yaml(path: Path) -> dict:
@@ -111,7 +111,10 @@ def _read_yaml(path: Path) -> dict:
 
 
 def _profile_name(project: dict) -> str:
-    name = os.environ.get("DBT_PROFILE") or project.get("profile")
+    override = os.environ.get("DBT_PROFILE")
+    if override:
+        return override
+    name = project.get("profile")
     if name is None:
         raise AppError("The dbt project does not define a profile. Set DBT_PROFILE or profile.")
     return _plain(name)
@@ -124,7 +127,7 @@ def _selected_profile(profiles_dir: Path, profile_name: str, target: str | None)
     set_invocation_context(os.environ)
     try:
         return Profile.render_profile(profiles[profile_name], profile_name,
-                                      target if target is not None else os.environ.get("DBT_TARGET"),
+                                      target if target is not None else os.environ.get("DBT_TARGET") or None,
                                       ProfileRenderer())
     except Exception as error:  # noqa: BLE001 - normalize dbt rendering failures for the UI.
         raise AppError("Could not resolve the dbt profile or target. Check profiles.yml and "
@@ -135,7 +138,7 @@ def resolve_workspace_path(project_dir: str | Path | None = None, target: str | 
                            profiles_dir: str | Path | None = None) -> Path:
     project_dir = resolve_project_dir(project_dir)
     profile_name = _profile_name(_read_yaml(project_dir / "dbt_project.yml"))
-    target = target if target is not None else os.environ.get("DBT_TARGET")
+    target = target if target is not None else os.environ.get("DBT_TARGET") or None
     if target is None:
         target, _ = _selected_profile(resolve_profiles_dir(profiles_dir), profile_name, None)
     return workspace_path_for(project_dir, profile_name, target)
@@ -144,7 +147,7 @@ def resolve_workspace_path(project_dir: str | Path | None = None, target: str | 
 def _plain(value: object) -> str:
     set_invocation_context(os.environ)
     rendered = get_rendered(str(value), generate_base_context({}), native=True)
-    return os.path.expandvars(os.path.expanduser(str(rendered)))
+    return str(rendered)
 
 
 def load_config(project_dir: str | Path | None = None, profiles_dir: str | Path | None = None,
@@ -161,12 +164,12 @@ def load_config(project_dir: str | Path | None = None, profiles_dir: str | Path 
                                      (project_dir, profiles_dir, target), strict=True):
         if value is not None:
             cli_args.extend((flag, str(resolved)))
-    adapter_type = _plain(output.get("type"))
+    adapter_type = str(output.get("type"))
     if adapter_type not in {"bigquery", "postgres"}:
         raise ValueError("The local app supports BigQuery and Postgres profiles")
     method = output.get("method", "oauth")
     keyfile = (
-        Path(_plain(output["keyfile"]))
+        Path(str(output["keyfile"])).expanduser()
         if adapter_type == "bigquery" and method == "service-account"
         else None
     )
@@ -174,6 +177,7 @@ def load_config(project_dir: str | Path | None = None, profiles_dir: str | Path 
     dqm_vars = variables.get("dbt_dqm", {}) if isinstance(variables.get("dbt_dqm"), dict) else {}
     custom_dataset = dqm_vars.get("schema") or variables.get("dbt_dqm_schema")
     base_schema = output.get("dataset") if adapter_type == "bigquery" else output.get("schema")
+    custom_dataset = _plain(custom_dataset) if custom_dataset is not None else None
     dataset = f"{base_schema}_{custom_dataset}" if custom_dataset else base_schema
     project_id = output.get("project") if adapter_type == "bigquery" else output.get("dbname")
     archive_cache_days = int(os.environ.get("DBT_DQM_ARCHIVE_CACHE_DAYS", "90"))
@@ -190,20 +194,20 @@ def load_config(project_dir: str | Path | None = None, profiles_dir: str | Path 
         target=target,
         profile_name=profile_name,
         adapter_type=adapter_type,
-        project_id=_plain(project_id),
-        dataset=_plain(dataset),
-        location=_plain(output.get("location", "US")),
+        project_id=str(project_id),
+        dataset=str(dataset),
+        location=str(output.get("location", "US")),
         method=method,
         keyfile=keyfile,
-        host=_plain(output.get("host")) if output.get("host") is not None else None,
-        port=int(_plain(output.get("port", 5432))) if adapter_type == "postgres" else None,
-        user=_plain(output.get("user")) if output.get("user") is not None else None,
-        password=_plain(password) if password is not None else None,
-        dbname=_plain(output.get("dbname")) if output.get("dbname") is not None else None,
-        sslmode=_plain(output.get("sslmode")) if output.get("sslmode") is not None else None,
+        host=str(output.get("host")) if output.get("host") is not None else None,
+        port=int(output.get("port", 5432)) if adapter_type == "postgres" else None,
+        user=str(output.get("user")) if output.get("user") is not None else None,
+        password=str(password) if password is not None else None,
+        dbname=str(output.get("dbname")) if output.get("dbname") is not None else None,
+        sslmode=str(output.get("sslmode")) if output.get("sslmode") is not None else None,
         archive_cache_days=archive_cache_days,
-        target_path=project_dir / Path(_plain(os.environ.get("DBT_TARGET_PATH")
-                                             or project.get("target-path", "target"))).expanduser(),
+        target_path=project_dir / Path(os.environ.get("DBT_TARGET_PATH")
+                                       or _plain(project.get("target-path", "target"))).expanduser(),
         dbt_cli_args=tuple(cli_args),
         working_dir=working_dir,
         lock_timeout_seconds=lock_timeout_seconds,
