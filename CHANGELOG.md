@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0a2 - Unreleased
+## 0.2.0a2 - 2026-10-12
 
 - Supports Python 3.11–3.14 (`>=3.11,<3.15`), with Python 3.14 recommended.
 - Requires mashumaro 3.17 and Streamlit 1.52 or newer for Python 3.14 compatibility.

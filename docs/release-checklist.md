@@ -44,7 +44,33 @@ The [0.2.0a1 evidence](release-0.2.0a1.md) records every gate passing on candida
 The maintainer approved the SemVer spelling `0.2.0-a1` for `dbt_project.yml` on 2026-10-11. The
 first preparation candidate, `d0385e6`, was blocked and is superseded.
 
+### 0.2.0a2 migration and publication criteria
+
+The maintainer authorized the Python 3.11–3.14 migration, merging its pull request and publishing
+`v0.2.0a2` on 2026-10-12. Gates 3–6 run on Python 3.14; CI covers all four supported Python minors
+and both Postgres versions. Existing local service-account files are used for live BigQuery gates,
+without new keys, IAM changes or a shared QA reset. The permissions gate runs serially after the
+full BigQuery suite. Existing release approval, trusted publishing and provenance checks remain.
+
 ## Results
+
+Production candidate: `708b6c27460be0669b55d68c7096c43e41f8c5ae` for 0.2.0a2. Full evidence is in
+[the candidate record](release-0.2.0a2.md). A later documentation commit records these results.
+
+| Gate | Candidate | Result | Evidence |
+| --- | --- | --- | --- |
+| 1 | `708b6c2` | CI passed 20/20 | [Run 38344711820](https://github.com/a-adamovich/dbt-dqm/actions/runs/38344711820), Python 3.11–3.14 |
+| 2 | `708b6c2` | Postgres 14 and 16: 32/32 each | Eight CI acceptance jobs pass; Python 3.14/Postgres 14 JUnit 932.733 s; local Postgres 16.11 902.96 s |
+| 3 | `708b6c2` | BigQuery 25/25 in one run, no skips | Six workers, 1,500.85 s, labelled disposable datasets |
+| 4 | `708b6c2` | Passed: one test, 380.95 s; both identities verified with `SESSION_USER()` | Existing restricted runner/reviewer identities, serially after gate 3 |
+| 5 | `708b6c2` | Browser QA passed | Snapshot, busy/retry, Health/Maintenance, warehouse paging/search/filter/edit and offline recovery |
+| 6 | `708b6c2` | Peak RSS 483.0 MiB | [Raw 50,000-issue result](scale-results/candidate-708b6c2-cache-boundary.json) |
+| 7 | `708b6c2` | Python `0.2.0a2`, dbt `0.2.0-a2` | Intended tag `v0.2.0a2`; version agreement and actual tag-check script tested |
+| 8 | 2026-10-12 | No open alerts; both audits clean | 118 normal wheel dependencies, 125 locked packages, zero known vulnerabilities |
+| 9 | — | Existing publisher/approval configuration retained | `release.yml`, `pypi`, required reviewer `a-adamovich`, tag policy `v*` |
+| 10 | — | Pending tag | Observe and satisfy the existing reviewer gate before publication |
+
+## 0.2.0a1 results (historical)
 
 | Gate | Candidate commit | Result | Evidence |
 | --- | --- | --- | --- |

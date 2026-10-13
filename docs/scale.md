@@ -373,3 +373,19 @@ Postgres applies.
 Plans and per-run JSON are in [`scale-results/`](scale-results/). The planner-comparison plan
 files are from the last run that completed each case. The nested-loop mass-pass plan is from the
 20,000-occurrence run, because the larger ones timed out.
+
+
+### Python 3.14 alpha candidate (2026-10-12)
+
+Candidate `708b6c2` for 0.2.0a2, Python 3.14.6, pandas 3.0.6 and PyArrow 25.0.1,
+with the existing 50,000-issue, eight-payload-column Postgres sync harness:
+
+| Issues | Mean payload | Baseline RSS | Peak RSS | Warehouse reads | Total sync |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 50,000 | 408 bytes | 162.3 MiB | 483.0 MiB | 1.99 s | 5.06 s |
+
+This single release-gate run fits the documented 435–585 MiB planning range. It is not an
+allocator comparison or evidence of a systematic memory improvement. Other acceptance suites
+were running concurrently. Serialized cache ceilings are unchanged.
+
+Raw result: [`candidate-708b6c2-cache-boundary.json`](scale-results/candidate-708b6c2-cache-boundary.json).
