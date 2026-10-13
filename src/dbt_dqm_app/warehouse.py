@@ -78,8 +78,15 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_dbt_executable() -> str:
-    executable = (shutil.which("dbt", path=str(Path(sys.executable).parent))
-                  or shutil.which("dbt"))
+    directory = Path(sys.executable).parent.resolve()
+    executable = shutil.which("dbt", path=str(directory))
+    # Python 3.11's Windows which() inserts cwd before even an explicit path.
+    if sys.platform == "win32" and (
+        executable is None or Path(executable).resolve().parent != directory
+    ):
+        executable = next((found for suffix in (".exe", ".cmd", ".bat", ".com")
+                           if (found := shutil.which(str(directory / ("dbt" + suffix))))), None)
+    executable = executable or shutil.which("dbt")
     if executable is None:
         raise AppError("dbt could not be found. Install the selected dbt-dqm adapter extra "
                        "in this Python environment.")

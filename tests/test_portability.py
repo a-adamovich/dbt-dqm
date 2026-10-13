@@ -147,6 +147,7 @@ def test_cli_does_not_invent_overrides(project, monkeypatch):
 def test_executable_search_prefers_interpreter_directory(tmp_path, monkeypatch):
     calls = []
     executable = tmp_path / "Scripts with spaces" / "dbt.exe"
+    monkeypatch.setattr(warehouse.sys, "executable", str(executable.parent / "python.exe"))
     def which(name, path=None):
         calls.append(path)
         return str(executable)
@@ -242,3 +243,23 @@ def test_postgres_preflight_does_not_require_bigquery_staging(tmp_path, monkeypa
     warehouse.check_required_relations(config)
     assert all("dqm_app_change_staging" not in str(call) for call in cursor.execute.call_args_list)
     assert len(cursor.execute.call_args_list) == len(warehouse.REQUIRED_APP_RELATIONS)
+
+
+def test_windows_current_directory_does_not_override_the_venv(tmp_path, monkeypatch):
+    directory = tmp_path / "venv" / "Scripts"
+    expected = directory / "dbt.exe"
+    monkeypatch.setattr(warehouse.sys, "executable", str(directory / "python.exe"))
+    monkeypatch.setattr(warehouse.sys, "platform", "win32")
+    calls = []
+
+    def which(command, path=None):
+        calls.append((command, path))
+        if command == "dbt":
+            return str(tmp_path / "project" / "dbt.exe")
+        if command == str(expected):
+            return str(expected)
+        return None
+
+    monkeypatch.setattr(warehouse.shutil, "which", which)
+    assert warehouse.resolve_dbt_executable() == str(expected)
+    assert calls == [("dbt", str(directory)), (str(expected), None)]
