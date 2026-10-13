@@ -283,7 +283,7 @@ def test_reconciliation_serializes_and_reviewer_edit_survives(demo):
     with ThreadPoolExecutor(3) as pool:
         first = pool.submit(demo.dbt, "run", "--select", "dqm_reconcile", variables={"pause": True})
         locked = False
-        for _ in range(100):
+        for _ in range(300):
             # A separate session must not acquire the transaction's advisory lock.
             with psycopg2.connect(DSN) as conn, conn.cursor() as cursor:
                 cursor.execute(
