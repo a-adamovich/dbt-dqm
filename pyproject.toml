@@ -1,9 +1,9 @@
 [project]
 name = "dbt-dqm"
-version = "0.2.0a1"
+version = "0.2.0a2"
 description = "Persistent dbt test issue tracking and a local review application"
 readme = "README.md"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.11,<3.15"
 license = "Apache-2.0"
 authors = [{ name = "Aliaksei Adamovich" }]
 keywords = ["dbt", "data-quality", "data-testing", "data-observability", "bigquery", "postgres"]
@@ -13,6 +13,9 @@ classifiers = [
   "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Database",
   "Topic :: Software Development :: Quality Assurance",
 ]
@@ -23,13 +26,15 @@ dependencies = [
   "google-cloud-bigquery>=3.25,<4",
   # Security floors for transitive dependencies (#24): wheels don't carry uv.lock, so these keep
   # installs from retaining versions with known advisories.
+  # dbt's older serializer cannot initialize on Python 3.14.
+  "mashumaro>=3.17,<3.18",
   "oauthlib>=4.0.0,<5",  # GHSA advisories fixed in 4.0.0 (reached via pandas-gbq auth)
   "pandas>=2.2,<4",
   "platformdirs>=4,<5",
   "pyarrow>=25.0.1,<26",
   "pyyaml>=6,<7",
   "sqlparse>=0.6.0,<0.7",  # five advisories fixed in 0.6.0; dbt-core 1.12.5 allows <0.7
-  "streamlit>=1.41,<2",
+  "streamlit>=1.52,<2",
   "urllib3>=2.8.0,<3",  # three advisories fixed in 2.8.0
 ]
 

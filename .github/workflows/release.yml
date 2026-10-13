@@ -47,7 +47,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          python-version: "3.11"
+          python-version: "3.14"
       - name: Verify, build, and inspect distributions
         run: |
           uv sync --locked --all-groups

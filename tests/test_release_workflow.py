@@ -165,7 +165,7 @@ def test_release_tag_must_match_both_package_versions(tmp_path):
 
 def test_dbt_spells_a_python_pre_release_with_one_exact_semver_form(tmp_path):
     # dbt's project schema rejects 0.2.0a1, so only the hyphenated SemVer spelling matches.
-    for python_version, dbt_version in [("0.2.0a1", "0.2.0-a1"), ("0.2.0rc2", "0.2.0-rc2"), ("0.2.0", "0.2.0")]:
+    for python_version, dbt_version in [("0.2.0a1", "0.2.0-a1"), ("0.2.0a2", "0.2.0-a2"), ("0.2.0rc2", "0.2.0-rc2"), ("0.2.0", "0.2.0")]:
         assert _tag_check(tmp_path, f"v{python_version}", python_version, dbt_version).returncode == 0
     for dbt_version in ("0.2.0a1", "0.2.0-alpha.1", "0.2.0"):
         result = _tag_check(tmp_path, "v0.2.0a1", dbt_version=dbt_version)

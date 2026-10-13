@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0a2 - Unreleased
+
+- Supports Python 3.11–3.14 (`>=3.11,<3.15`), with Python 3.14 recommended.
+- Requires mashumaro 3.17 and Streamlit 1.52 or newer for Python 3.14 compatibility.
+- Repairs the AI Platform/GenAI dependency branch while retaining other compatible locked versions.
+- Tests every supported Python minor in CI, including clean wheel installs, BigQuery compilation,
+  and Postgres 14/16 acceptance. Release and scheduled BigQuery verification use Python 3.14.
+- No warehouse schema migration is introduced.
+
 ## 0.2.0a1 - 2026-10-11
 
 First Python alpha and matching dbt Git package release. Interfaces may change. The Python

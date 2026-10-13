@@ -9,16 +9,16 @@ runs.
 
 | | |
 | --- | --- |
-| Latest release | `0.2.0a1`, **alpha**, released 2026-10-11: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a1/), Git tag [`v0.2.0a1`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a1). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a1`. |
+| Release candidate | `0.2.0a2`, **alpha**, release candidate: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a2/), Git tag [`v0.2.0a2`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a2). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a2`. |
 | Upgrade from 0.1 | Needs a **fresh DQM schema**: set `dbt_dqm_schema` to a new schema. 0.1 tables are preserved and never reused or migrated. |
 | dbt | dbt-core 1.11 and 1.12, with dbt-bigquery 1.11 or 1.12 and dbt-postgres 1.11 (there is no dbt-postgres 1.12; 1.11 supports dbt-core 1.12) |
 | Warehouses | BigQuery; Postgres 14 and 16 (needs the `pgcrypto` extension) |
-| Review app | Python 3.11, the same two warehouses |
+| Review app | Python 3.11–3.14, the same two warehouses |
 
 The Python app pins dbt-core 1.12.5 and dbt-bigquery 1.12.1, with dbt-postgres 1.11.x;
-the dbt package accepts the wider dbt range above. Python support is `>=3.11,<3.12`.
+the dbt package accepts the wider dbt range above. Python support is `>=3.11,<3.15`.
 The [release checklist](docs/release-checklist.md) lists what must pass before a release is tagged;
-the [0.2.0a1 evidence](docs/release-0.2.0a1.md) records this alpha's results.
+the [0.2.0a2 evidence](docs/release-0.2.0a2.md) records this alpha's results.
 Package contracts (relations, migrations, grants, recovery, retention, maintenance) are in
 [warehouse interfaces](docs/warehouse-interfaces.md).
 
@@ -29,10 +29,10 @@ Install the alpha through Git by adding it to your consumer project's `packages.
 ```yaml
 packages:
   - git: "https://github.com/a-adamovich/dbt-dqm.git"
-    revision: v0.2.0a1
+    revision: v0.2.0a2
 ```
 
-The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a1`, so
+The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a2`, so
 install this alpha through the Git revision above. Hub registration is planned for 0.2.0.
 
 The 0.2 app expects the matching 0.2 package; don't mix it with 0.1.
@@ -45,12 +45,12 @@ privileges): `create extension if not exists pgcrypto;`
 
 ## Install the Python app and start reviewing
 
-In a Python 3.11 environment, install the app separately:
+In a Python 3.14 environment (recommended; 3.11–3.14 supported), install the app separately:
 
 ```bash
-python3.11 -m venv .venv
+python3.14 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'dbt-dqm==0.2.0a1'
+python -m pip install 'dbt-dqm==0.2.0a2'
 ```
 
 Configure your dbt profile, add the Git package above, and set a fresh schema in your

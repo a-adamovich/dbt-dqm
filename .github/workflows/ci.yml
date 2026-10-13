@@ -11,16 +11,22 @@ on:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
 
       - name: Install dependencies
-        run: uv sync --all-groups
+        run: uv sync --locked --all-groups
+      - name: Check dependency consistency
+        run: uv pip check
 
       - name: Ruff
         run: uv run ruff check .
@@ -47,35 +53,45 @@ jobs:
   # BigQuery-specific coverage in CI is wanted later.
   package-smoke:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+      - name: Check dependency consistency
+        run: uv pip check
       - name: Build wheel and source distribution
         run: uv build
       - name: Check distribution metadata
         run: uvx --from twine twine check dist/*
       - name: Install the wheel into a clean environment and smoke-test the CLI
         run: |
-          uv venv /tmp/dbt-dqm-wheel-smoke --python 3.11
+          uv venv /tmp/dbt-dqm-wheel-smoke --python ${{ matrix.python }}
           uv pip install --python /tmp/dbt-dqm-wheel-smoke/bin/python dist/*.whl
+          uv pip check --python /tmp/dbt-dqm-wheel-smoke/bin/python
           /tmp/dbt-dqm-wheel-smoke/bin/dbt-dqm --help
+          /tmp/dbt-dqm-wheel-smoke/bin/dbt --version
       - name: Wheel carries the security floors (#24)
-        run: DBT_DQM_WHEEL="$(ls dist/*.whl)" uv run pytest -q tests/test_dependency_floors.py
+        run: DBT_DQM_WHEEL="$(ls dist/*.whl)" uv run pytest -q tests/test_dependency_floors.py tests/test_python_compatibility.py
       - name: Installing the wheel upgrades older vulnerable versions
         run: |
           wheel="$(pwd)/$(ls dist/*.whl)"
-          uv venv /tmp/dbt-dqm-old-deps --python 3.11
-          uv pip install --python /tmp/dbt-dqm-old-deps/bin/python sqlparse==0.5.5 urllib3==2.7.0 oauthlib==3.3.1
+          uv venv /tmp/dbt-dqm-old-deps --python ${{ matrix.python }}
+          uv pip install --python /tmp/dbt-dqm-old-deps/bin/python sqlparse==0.5.5 urllib3==2.7.0 oauthlib==3.3.1 mashumaro==3.14
           cd /tmp
           uv pip install --python /tmp/dbt-dqm-old-deps/bin/python "$wheel"
           uv pip check --python /tmp/dbt-dqm-old-deps/bin/python
           /tmp/dbt-dqm-old-deps/bin/python - <<'PY'
           from importlib.metadata import version
           from packaging.version import Version
-          floors = {"sqlparse": "0.6.0", "urllib3": "2.8.0", "oauthlib": "4.0.0"}
+          floors = {"sqlparse": "0.6.0", "urllib3": "2.8.0", "oauthlib": "4.0.0", "mashumaro": "3.17"}
           installed = {name: version(name) for name in floors}
           print(installed)
           assert all(Version(installed[n]) >= Version(v) for n, v in floors.items()), installed
@@ -86,6 +102,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
         postgres: ["14", "16"]
     services:
       postgres:
@@ -106,10 +123,12 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
 
       - name: Install dependencies
-        run: uv sync --all-groups
+        run: uv sync --locked --all-groups
+      - name: Check dependency consistency
+        run: uv pip check
 
       - name: Enable pgcrypto
         run: psql -h localhost -U postgres -d dbt_dqm_ci -c "create extension if not exists pgcrypto;"
@@ -187,20 +206,26 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: postgres-${{ matrix.postgres }}-acceptance
+          name: python-${{ matrix.python }}-postgres-${{ matrix.postgres }}-acceptance
           path: acceptance-results/
           if-no-files-found: ignore
 
   bigquery-compile:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
       - name: Install dependencies
-        run: uv sync --all-groups
+        run: uv sync --locked --all-groups
+      - name: Check dependency consistency
+        run: uv pip check
       - name: Write compile-only profile
         run: |
           mkdir -p ~/.dbt
