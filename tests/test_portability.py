@@ -231,3 +231,14 @@ def test_apply_refresh_error_is_serializable_after_commit(tmp_path, monkeypatch)
     assert batch == "committed" and snapshot is None
     assert "dqm_issue_occurrences" in error.message
     assert isinstance(warehouse.worker_error(WarehouseBusy("busy")), WarehouseBusy)
+
+
+def test_postgres_preflight_does_not_require_bigquery_staging(tmp_path, monkeypatch):
+    config = AppConfig(tmp_path, tmp_path, "dev", "demo", "postgres", "db", "schema", "US", "oauth", None)
+    connection = MagicMock()
+    cursor = connection.__enter__.return_value.cursor.return_value.__enter__.return_value
+    cursor.fetchone.return_value = ("present",)
+    monkeypatch.setattr(warehouse, "_postgres_connection", lambda config: connection)
+    warehouse.check_required_relations(config)
+    assert all("dqm_app_change_staging" not in str(call) for call in cursor.execute.call_args_list)
+    assert len(cursor.execute.call_args_list) == len(warehouse.REQUIRED_APP_RELATIONS)

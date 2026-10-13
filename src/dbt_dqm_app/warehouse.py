@@ -129,7 +129,7 @@ def validate_dbt(config: AppConfig) -> None:
 
 REQUIRED_APP_RELATIONS = (
     "dqm_reconciliation_control", "dqm_issue_occurrences", "dqm_all_issues", "dqm_test_health",
-    "dqm_area_health", "dqm_annotation_changes", "dqm_missed_issues", "dqm_app_change_staging",
+    "dqm_area_health", "dqm_annotation_changes", "dqm_missed_issues",
 )
 
 
@@ -137,7 +137,7 @@ def check_required_relations(config: AppConfig) -> None:
     missing = []
     if config.adapter_type == "bigquery":
         client = client_for(config)
-        for name in REQUIRED_APP_RELATIONS:
+        for name in (*REQUIRED_APP_RELATIONS, "dqm_app_change_staging"):
             relation = ".".join(_relation_parts(config, name))
             try:
                 client.get_table(relation)

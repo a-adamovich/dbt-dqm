@@ -1206,6 +1206,7 @@ def test_package_initialization_and_app_with_custom_aliases(demo):
     from alias_checks import NAMING_MACROS, check_alias_app
 
     project = demo.path
+    (project / "macros/generate_schema_name.sql").unlink(missing_ok=True)
     (project / "macros/consumer_naming.sql").write_text(NAMING_MACROS, encoding="utf-8")
     # First install and idempotent reruns must work at the normal four-thread setting.
     for _ in range(3):

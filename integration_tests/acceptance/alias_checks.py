@@ -39,13 +39,13 @@ def check_alias_app(project, profiles):
     assert "model.dbt_dqm.dqm_missed_issues" in nodes[
         "model.dbt_dqm.dqm_reconcile"]["depends_on"]["nodes"]
     issue = snapshot["issues"][0]
-    patch = Patch(issue["occurrence_id"], "reviewer_notes", issue.get("reviewer_notes"),
+    patch = Patch(issue["occurrence_id"], "notes", issue.get("notes"),
                   "alias acceptance note", 1, datetime.now(UTC).isoformat(),
                   issue.get("annotation_version", 0))
     assert apply_patches(config, [patch])
     refreshed = fetch_issues(config)
     assert next(row for row in refreshed if row["occurrence_id"] == issue["occurrence_id"])[
-        "reviewer_notes"] == "alias acceptance note"
+        "notes"] == "alias acceptance note"
     identity = uuid.uuid4().hex
     assert insert_missed_issue(config, {
         "missed_issue_id": identity, "description": "alias acceptance report",
