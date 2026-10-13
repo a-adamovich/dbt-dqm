@@ -275,6 +275,8 @@ def test_profile_secret_is_rendered_once(project, monkeypatch):
 def test_explicit_project_path_preserves_literal_dollar_signs(project, monkeypatch):
     monkeypatch.setenv("DQM_OTHER", "unexpected-expansion")
     renamed = project.with_name("project$DQM_OTHER")
+    # Windows keeps a handle to cwd and cannot rename that directory until we leave it.
+    monkeypatch.chdir(project.parent)
     project.rename(renamed)
     monkeypatch.chdir(renamed)
     assert load_config(project_dir=renamed, profiles_dir=renamed).project_dir == renamed
