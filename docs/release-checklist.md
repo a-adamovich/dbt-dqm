@@ -62,7 +62,15 @@ credentials are used without creating keys, changing IAM or resetting shared QA 
 restricted permissions gate follows the complete BigQuery suite serially. The existing reviewer
 approval, trusted publisher and provenance checks remain in place.
 
-## Results
+## 0.2.0a3 results
+
+Production candidate: `4c362266edd5457dc0bedae6348f455e064fcc90`. The test-only Windows fixture
+correction at `09ac850` passes [CI 28/28](https://github.com/a-adamovich/dbt-dqm/actions/runs/38365848088)
+without changing production files. Full candidate evidence, live warehouse results, browser
+checks, memory and security audits are in [the 0.2.0a3 record](release-0.2.0a3.md).
+All verification gates passed; tagging, the protected reviewer gate and publication remain pending.
+
+## 0.2.0a2 results (historical)
 
 Production candidate: `708b6c27460be0669b55d68c7096c43e41f8c5ae` for 0.2.0a2. Full evidence is in
 [the candidate record](release-0.2.0a2.md). A later documentation commit records these results.

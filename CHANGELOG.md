@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0a3 - 2026-10-13 (release candidate)
+## 0.2.0a3 - 2026-10-13
 
 - Warehouse adapters are optional: install `dbt-dqm[bigquery]`, `dbt-dqm[postgres]`,
   or `dbt-dqm[bigquery,postgres]`. Plain installs include no warehouse adapters.

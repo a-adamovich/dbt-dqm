@@ -1,0 +1,10 @@
+{
+  "issues": 50000,
+  "mean_payload_bytes": 408,
+  "warehouse_read_seconds": 2.27,
+  "total_seconds": 5.67,
+  "baseline_rss_mb": 184.4,
+  "peak_rss_mb": 433.8,
+  "scenario": "supported-cache-boundary-real-postgres-sync",
+  "synthetic_processed_history": true
+}

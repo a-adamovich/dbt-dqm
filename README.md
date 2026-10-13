@@ -9,7 +9,7 @@ runs.
 
 | | |
 | --- | --- |
-| Latest release | `0.2.0a2`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a2/), Git tag [`v0.2.0a2`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a2). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a2`. |
+| Version | `0.2.0a3`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a3/), Git tag [`v0.2.0a3`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a3). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a3`. |
 | Upgrade from 0.1 | Needs a **fresh DQM schema**: set `dbt_dqm_schema` to a new schema. 0.1 tables are preserved and never reused or migrated. |
 | dbt | dbt-core 1.11 and 1.12, with dbt-bigquery 1.11 or 1.12 and dbt-postgres 1.11 (there is no dbt-postgres 1.12; 1.11 supports dbt-core 1.12) |
 | Warehouses | BigQuery; Postgres 14 and 16 (needs the `pgcrypto` extension) |
@@ -18,7 +18,7 @@ runs.
 The Python app pins dbt-core 1.12.5; its optional extras use dbt-bigquery 1.12.1 and dbt-postgres 1.11.x;
 the dbt package accepts the wider dbt range above. Python support is `>=3.11,<3.15`.
 The [release checklist](docs/release-checklist.md) lists what must pass before a release is tagged;
-the [0.2.0a2 evidence](docs/release-0.2.0a2.md) records this alpha's results.
+the [0.2.0a3 evidence](docs/release-0.2.0a3.md) records this alpha's results.
 Package contracts (relations, migrations, grants, recovery, retention, maintenance) are in
 [warehouse interfaces](docs/warehouse-interfaces.md).
 
@@ -29,10 +29,10 @@ Install the alpha through Git by adding it to your consumer project's `packages.
 ```yaml
 packages:
   - git: "https://github.com/a-adamovich/dbt-dqm.git"
-    revision: v0.2.0a2
+    revision: v0.2.0a3
 ```
 
-The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a2`, so
+The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a3`, so
 install this alpha through the Git revision above. Hub registration is planned for 0.2.0.
 
 The 0.2 app expects the matching 0.2 package; don't mix it with 0.1.
@@ -50,12 +50,12 @@ In a Python 3.14 environment (recommended; 3.11–3.14 supported), install the a
 ```bash
 python3.14 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'dbt-dqm==0.2.0a2'
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a3'
 ```
 
-**0.2.0a3 release candidate:** warehouse adapters are optional. In a checkout, install
+Warehouse adapters are optional. In a checkout, install
 only the adapter you need with `uv sync --extra bigquery` or `uv sync --extra postgres`;
-use `uv sync --all-extras` for both. After this candidate is published:
+use `uv sync --all-extras` for both. Select the extra in your installed environment:
 
 ```bash
 python -m pip install 'dbt-dqm[bigquery]==0.2.0a3'          # BigQuery
@@ -63,9 +63,9 @@ python -m pip install 'dbt-dqm[postgres]==0.2.0a3'          # Postgres
 python -m pip install 'dbt-dqm[bigquery,postgres]==0.2.0a3' # Both
 ```
 
-A plain candidate install includes the app and dbt-core but no warehouse adapters.
+A plain install includes the app and dbt-core but no warehouse adapters.
 Shared UI dependencies such as PyArrow remain installed. Existing environments retain adapters
-already installed. Release 0.2.0a2 above still includes both adapters.
+already installed. Earlier 0.2.0a2 installs included both adapters.
 
 On Windows PowerShell, create and activate the environment with:
 
@@ -101,7 +101,7 @@ dbt-dqm app --project-dir . --profiles-dir ~/.dbt --target dev
 In the browser, Sync, edit an issue's notes or review verdict, then Apply. Health shows
 setup, tests and maintenance status.
 
-## Configuration defaults and troubleshooting (0.2.0a3)
+## Configuration defaults and troubleshooting
 
 From your dbt project or a subfolder, launch with `dbt-dqm app`; `dbt-dqm workspace info`
 and `dbt-dqm workspace purge` use the same defaults. Explicit flags take precedence:
