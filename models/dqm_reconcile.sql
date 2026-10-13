@@ -1,3 +1,4 @@
+-- depends_on: {{ ref('dqm_missed_issues') }}
 {#- Postgres replaces this view in place inside the locked reconcile transaction (see
     macros/materializations.sql, #17); BigQuery keeps its adapter's view materialization. #}
 {{ config(schema=var('dbt_dqm_schema', none), materialized=('dqm_entry_view' if target.type == 'postgres' else 'view')) }}

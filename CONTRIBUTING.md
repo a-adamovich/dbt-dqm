@@ -10,3 +10,8 @@ Keep changes small, add regression coverage, and run `ruff`, `pytest`, and the r
 Every commit must include a Developer Certificate of Origin sign-off (`git commit -s`), certifying
 that you have the right to contribute it under Apache-2.0. By submitting a contribution, you agree
 that it is licensed under the repository's Apache-2.0 license.
+
+Install development dependencies and both warehouse extras with
+`uv sync --locked --all-groups --all-extras`. Run checks with
+`uv run --all-extras ruff check .` and `uv run --all-extras pytest -q`.
+For warehouse-specific work, use `--extra postgres` or `--extra bigquery` instead.

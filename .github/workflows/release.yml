@@ -50,7 +50,7 @@ jobs:
           python-version: "3.14"
       - name: Verify, build, and inspect distributions
         run: |
-          uv sync --locked --all-groups
+          uv sync --locked --all-groups --all-extras
           uv run ruff check .
           uv run pytest -q
           uv build --no-create-gitignore
@@ -141,7 +141,7 @@ jobs:
             dbt_version="$(python3 -c 'import re, sys; print(re.sub(r"^(\d+\.\d+\.\d+)((?:a|b|rc)\d+)$", r"\1-\2", sys.argv[1]))' "$version")"
             gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes --verify-tag \
               --prerelease --title "dbt-dqm ${GITHUB_REF_NAME} (pre-release)" \
-              --notes "Pre-release: interfaces may change. Install the Python app with pip install dbt-dqm==${version} and install the dbt package separately from Git revision ${GITHUB_REF_NAME} (its dbt_project.yml spells the version ${dbt_version}). Upgrades from 0.1 require a fresh DQM schema. See README.md and CHANGELOG.md at this tag for supported versions and operating limits."
+              --notes "Pre-release: interfaces may change. Install the Python app with pip install 'dbt-dqm[bigquery]==${version}' or 'dbt-dqm[postgres]==${version}' and install the dbt package separately from Git revision ${GITHUB_REF_NAME} (its dbt_project.yml spells the version ${dbt_version}). Upgrades from 0.1 require a fresh DQM schema. See README.md and CHANGELOG.md at this tag for supported versions and operating limits."
           else
             gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes --verify-tag
           fi

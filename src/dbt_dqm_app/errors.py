@@ -6,12 +6,11 @@ original exception) for the "Technical details" expander and the app log.
 
 from __future__ import annotations
 
+import os
 import re
+import shlex
 import subprocess
 import traceback
-
-from google.api_core.exceptions import GoogleAPICallError
-from psycopg2 import errors as pg_errors
 
 
 class AppError(Exception):
@@ -93,15 +92,27 @@ def classify(error: BaseException) -> AppError:
     if isinstance(error, subprocess.CalledProcessError):
         output = f"{error.stdout or ''}\n{error.stderr or ''}".strip()
         command = " ".join(str(part) for part in error.cmd[:2]) if error.cmd else "dbt"
+        full_command = (subprocess.list2cmdline(error.cmd) if os.name == "nt"
+                        else shlex.join(str(part) for part in error.cmd))
+        details = (f"Command: {full_command}\nExecutable: {error.cmd[0]}\n"
+                   f"Exit code: {error.returncode}\nStdout:\n{error.stdout or ''}\n"
+                   f"Stderr:\n{error.stderr or ''}")
         lowered = _ANSI.sub("", output).lower()
         for markers, message in _DBT_HINTS:
             if any(marker in lowered for marker in markers):
-                return AppError(message, output or details)
-        return AppError(f"`{command}` failed.", output or details)
-    if isinstance(error, pg_errors.LockNotAvailable):
-        return WarehouseBusy(BUSY_MESSAGE, details)
-    if isinstance(error, GoogleAPICallError) and any(
-        marker in str(error).lower() for marker in _BIGQUERY_CONFLICT_MARKERS
-    ):
-        return WarehouseBusy(BUSY_MESSAGE, details)
+                return AppError(message, details)
+        return AppError(f"`{command}` failed.", details)
+    modules = {cls.__module__ for cls in type(error).__mro__}
+    if any(module.startswith("psycopg2") for module in modules):
+        from psycopg2 import errors as pg_errors
+
+        if isinstance(error, pg_errors.LockNotAvailable):
+            return WarehouseBusy(BUSY_MESSAGE, details)
+    if "google.api_core.exceptions" in modules:
+        from google.api_core.exceptions import GoogleAPICallError
+
+        if isinstance(error, GoogleAPICallError) and any(
+            marker in str(error).lower() for marker in _BIGQUERY_CONFLICT_MARKERS
+        ):
+            return WarehouseBusy(BUSY_MESSAGE, details)
     return AppError(f"The background job failed: {error}", details)

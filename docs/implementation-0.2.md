@@ -15,16 +15,16 @@ The four workstreams are implemented in logical commit chunks. Pre-existing work
 3. Recurrence context, timeline, durable before/after payload events, and idempotent missed-issue submissions.
 4. Warehouse health populations/denominators and offline app snapshots.
 
-Run local Python checks with `uv run ruff check .` and `uv run pytest -q`. Warehouse acceptance is opt-in and creates/removes isolated synthetic schemas:
+Run local Python checks with `uv run --all-extras ruff check .` and `uv run --all-extras pytest -q`. Warehouse acceptance is opt-in and creates/removes isolated synthetic schemas:
 
 ```sh
 DBT_DQM_TEST_DSN='host=localhost port=5432 dbname=dbt_dqm_ci user=postgres password=dbtdqm' \
-  uv run pytest -q integration_tests/acceptance/test_postgres.py
+  uv run --extra postgres pytest -q integration_tests/acceptance/test_postgres.py
 ```
 
 CI runs that suite against PostgreSQL 14 and 16. It covers rollback after apply, batched fail/pass/fail, serializing reconciliations, reviewer edits, late skips, retention, future additive migration, schema-only execution, public-view survival, owner conflicts and metadata clearing, structural closures, payload history, verdict audit, and retrying a missed submission.
 
-`uv run python scripts/compile_bigquery.py --profiles-dir …` performs credential-free compilation. dbt-bigquery 1.11 opens an idle connection while closing it; this script prevents that path and rejects all warehouse access. It is restricted to the offline compile process and does not modify runtime adapters. Credentialed BigQuery lifecycle and concurrency acceptance remains a release gate; compilation does not establish parity.
+`uv run --extra bigquery python scripts/compile_bigquery.py --profiles-dir …` performs credential-free compilation. dbt-bigquery 1.11 opens an idle connection while closing it; this script prevents that path and rejects all warehouse access. It is restricted to the offline compile process and does not modify runtime adapters. Credentialed BigQuery lifecycle and concurrency acceptance remains a release gate; compilation does not establish parity.
 
 ## Initial implementation validation (2026-10-07, superseded below)
 

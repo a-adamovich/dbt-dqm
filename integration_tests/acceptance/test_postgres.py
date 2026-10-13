@@ -1473,3 +1473,22 @@ def test_entry_view_refuses_to_replace_a_table(demo):
     failed = demo.dbt("run", "--select", "dqm_reconcile", success=False)
     assert "expected" in failed.stdout and "to be a view" in failed.stdout
     assert demo.sql("select kept from @schema.dqm_reconcile") == [{"kept": "untouched"}]
+
+
+def test_package_initialization_and_app_with_custom_aliases(demo):
+    from alias_checks import NAMING_MACROS, check_alias_app
+
+    project = demo.project
+    # Preserve existing canonical tables when a consumer enables a new alias macro.
+    demo.dbt("run", "--select", "package:dbt_dqm", "--threads", "4")
+    demo.sql("insert into @schema.dqm_missed_issues (missed_issue_id,description) "
+             "values ('kept-before-alias','existing canonical data')")
+    (project / "macros/consumer_naming.sql").write_text(NAMING_MACROS, encoding="utf-8")
+    # First install and idempotent reruns must work at the normal four-thread setting.
+    for _ in range(3):
+        demo.dbt("run", "--select", "package:dbt_dqm", "--threads", "4")
+    demo.capture()
+    demo.dbt("build", "--select", "package:dbt_dqm")
+    check_alias_app(project, demo.profiles)
+    assert demo.sql("select description from @schema.dqm_missed_issues "
+                    "where missed_issue_id='kept-before-alias'")[0]["description"] == "existing canonical data"

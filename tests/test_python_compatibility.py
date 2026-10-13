@@ -2,7 +2,6 @@
 
 import os
 import subprocess
-import sys
 import tomllib
 import zipfile
 from email.parser import Parser
@@ -41,8 +40,9 @@ def test_project_and_lock_advertise_supported_python_range():
 
 
 def test_dbt_cli_initializes_and_loads_both_adapters():
+    from dbt_dqm_app.warehouse import resolve_dbt_executable
     result = subprocess.run(
-        [str(Path(sys.executable).with_name("dbt")), "--version"],
+        [resolve_dbt_executable(), "--version"],
         capture_output=True, text=True, timeout=60, check=False,
         env={**os.environ, "DBT_VERSION_CHECK": "false"},
     )

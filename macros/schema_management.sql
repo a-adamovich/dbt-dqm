@@ -191,7 +191,7 @@
   {% else %}information_schema.tables{% endif %}
 {% endmacro %}
 {% macro table_exists_sql(name) %}
-  exists(select 1 from {{ dbt_dqm.tables_catalog() }} where table_schema={{ dbt_dqm.sql_string(dbt_dqm.dqm_relation(name).schema) }} and table_name={{ dbt_dqm.sql_string(name) }})
+  exists(select 1 from {{ dbt_dqm.tables_catalog() }} where table_schema={{ dbt_dqm.sql_string(dbt_dqm.dqm_relation(name).schema) }} and table_name={{ dbt_dqm.sql_string(dbt_dqm.dqm_relation(name).identifier) }})
 {% endmacro %}
 {% macro default__initial_schema_verify() %}
   {% for name, columns in dbt_dqm.table_schemas().items() if name not in ['dqm_annotation_changes','dqm_missed_issues'] %}
@@ -358,8 +358,14 @@
 {% macro app_table_finish(name) %}
   {% if not execute or dbt_dqm.empty_mode() %}{{ return('') }}{% endif %}
   {% if target.type=='postgres' %}
-    create unique index if not exists {{ name }}_primary on {{ dbt_dqm.dqm_relation(name) }} ({{ dbt_dqm.table_keys()[name]|join(',') }});
-    {% if name=='dqm_annotation_changes' %}create index if not exists dqm_annotation_history on {{ dbt_dqm.dqm_relation(name) }} (occurrence_id,changed_at);{% endif %}
+    {% set relation = dbt_dqm.dqm_relation(name) %}
+    {# Keep canonical index names; aliases need their own bounded schema-wide index names. #}
+    {% set index_prefix = name if relation.identifier == name else 'dqm_alias_' ~ local_md5(relation.identifier) %}
+    create unique index if not exists {{ adapter.quote(index_prefix ~ '_primary') }} on {{ relation }} ({{ dbt_dqm.table_keys()[name]|join(',') }});
+    {% if name=='dqm_annotation_changes' %}
+      {% set history_index = 'dqm_annotation_history' if relation.identifier == name else index_prefix ~ '_history' %}
+      create index if not exists {{ adapter.quote(history_index) }} on {{ relation }} (occurrence_id,changed_at);
+    {% endif %}
   {% endif %}
   {{ dbt_dqm.table_grants_sql(name,var('dbt_dqm_table_grants',{}).get(name,{})) }}
 {% endmacro %}

@@ -389,3 +389,19 @@ allocator comparison or evidence of a systematic memory improvement. Other accep
 were running concurrently. Serialized cache ceilings are unchanged.
 
 Raw result: [`candidate-708b6c2-cache-boundary.json`](scale-results/candidate-708b6c2-cache-boundary.json).
+
+
+### Windows compatibility alpha candidate (2026-10-13)
+
+Production candidate `4c36226` for 0.2.0a3, Python 3.14.6, pandas 3.0.6 and
+PyArrow 25.0.1, with the same 50,000-issue, eight-payload-column Postgres harness:
+
+| Issues | Mean payload | Baseline RSS | Peak RSS | Warehouse reads | Total sync |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 50,000 | 408 bytes | 184.4 MiB | 433.8 MiB | 2.27 s | 5.67 s |
+
+This single release-gate result stays within the supported boundary and below the previous
+alpha's measured peak. It does not establish a systematic allocator improvement. Other
+acceptance suites were running concurrently; serialized cache ceilings are unchanged.
+
+Raw result: [`candidate-4c36226-cache-boundary.json`](scale-results/candidate-4c36226-cache-boundary.json).

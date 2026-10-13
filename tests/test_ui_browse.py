@@ -119,7 +119,7 @@ def test_pages_forward_and_back_and_filters_restart_paging(harness):
     next(box for box in app.multiselect if box.label == "Workflow status").select("BLOCKED").run()
     assert card_titles(app)[:2] == ["test 0", "test 3"]  # back on page 1 of the new filter
     # Only Health ran in the background; no full snapshot sync.
-    assert {call.args[0].__name__ for call in executor.submit.call_args_list} == {
+    assert {call.args[1].__name__ for call in executor.submit.call_args_list} == {
         "browse_refresh_worker"}
 
 
@@ -134,7 +134,7 @@ def test_an_edit_on_page_two_survives_navigation_and_applies(harness):
     assert "Unsaved local changes" in next(c.value for c in app.caption if "Active" in c.value)
     click(app, "Apply and sync")
     apply_call = executor.submit.call_args_list[-1]
-    assert apply_call.args[0].__name__ == "apply_worker" and apply_call.args[3] is True
+    assert apply_call.args[1].__name__ == "apply_worker" and apply_call.args[4] is True
 
 
 def test_pending_only_shows_edits_from_any_page(harness):
@@ -193,7 +193,7 @@ def test_auto_mode_switches_to_warehouse_paging_above_the_snapshot_limits(harnes
     # The reason stays on screen after the one-time notice.
     assert any("above the local snapshot limits" in text.value for text in app.markdown)
     assert card_titles(app)[:1] == ["test 0"]
-    workers = [call.args[0].__name__ for call in executor.submit.call_args_list]
+    workers = [call.args[1].__name__ for call in executor.submit.call_args_list]
     assert workers[:2] == ["sync_worker", "browse_refresh_worker"]
 
 

@@ -24,7 +24,7 @@ jobs:
           python-version: ${{ matrix.python }}
 
       - name: Install dependencies
-        run: uv sync --locked --all-groups
+        run: uv sync --locked --all-groups --all-extras
       - name: Check dependency consistency
         run: uv pip check
 
@@ -64,20 +64,29 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Install dependencies
-        run: uv sync --locked --all-groups
+        run: uv sync --locked --all-groups --all-extras
       - name: Check dependency consistency
         run: uv pip check
       - name: Build wheel and source distribution
         run: uv build
       - name: Check distribution metadata
         run: uvx --from twine twine check dist/*
-      - name: Install the wheel into a clean environment and smoke-test the CLI
+      - name: Verify base and optional-adapter wheel installations
         run: |
-          uv venv /tmp/dbt-dqm-wheel-smoke --python ${{ matrix.python }}
-          uv pip install --python /tmp/dbt-dqm-wheel-smoke/bin/python dist/*.whl
-          uv pip check --python /tmp/dbt-dqm-wheel-smoke/bin/python
-          /tmp/dbt-dqm-wheel-smoke/bin/dbt-dqm --help
-          /tmp/dbt-dqm-wheel-smoke/bin/dbt --version
+          wheel="$(pwd)/$(ls dist/*.whl)"
+          smoke="$(pwd)/scripts/check_optional_install.py"
+          for variant in base bigquery postgres both; do
+            environment="/tmp/dbt-dqm-wheel-${variant}"
+            requirement="$wheel"
+            case "$variant" in
+              bigquery|postgres) requirement="${wheel}[${variant}]" ;;
+              both) requirement="${wheel}[bigquery,postgres]" ;;
+            esac
+            uv venv "$environment" --python ${{ matrix.python }}
+            uv pip install --python "$environment/bin/python" "$requirement"
+            uv pip check --python "$environment/bin/python"
+            "$environment/bin/python" "$smoke" "$variant"
+          done
       - name: Wheel carries the security floors (#24)
         run: DBT_DQM_WHEEL="$(ls dist/*.whl)" uv run pytest -q tests/test_dependency_floors.py tests/test_python_compatibility.py
       - name: Installing the wheel upgrades older vulnerable versions
@@ -86,7 +95,7 @@ jobs:
           uv venv /tmp/dbt-dqm-old-deps --python ${{ matrix.python }}
           uv pip install --python /tmp/dbt-dqm-old-deps/bin/python sqlparse==0.5.5 urllib3==2.7.0 oauthlib==3.3.1 mashumaro==3.14
           cd /tmp
-          uv pip install --python /tmp/dbt-dqm-old-deps/bin/python "$wheel"
+          uv pip install --python /tmp/dbt-dqm-old-deps/bin/python "${wheel}[bigquery,postgres]"
           uv pip check --python /tmp/dbt-dqm-old-deps/bin/python
           /tmp/dbt-dqm-old-deps/bin/python - <<'PY'
           from importlib.metadata import version
@@ -126,7 +135,7 @@ jobs:
           python-version: ${{ matrix.python }}
 
       - name: Install dependencies
-        run: uv sync --locked --all-groups
+        run: uv sync --locked --all-groups --extra postgres
       - name: Check dependency consistency
         run: uv pip check
 
@@ -223,7 +232,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Install dependencies
-        run: uv sync --locked --all-groups
+        run: uv sync --locked --all-groups --extra bigquery
       - name: Check dependency consistency
         run: uv pip check
       - name: Write compile-only profile
@@ -247,3 +256,27 @@ jobs:
           uv run dbt deps
           uv run dbt parse
           uv run python ../../scripts/compile_bigquery.py
+
+  portability:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install adapters and development dependencies
+        run: uv sync --locked --all-groups --all-extras
+      - name: Native configuration, process pool and authentication checks
+        run: uv run pytest -q tests/test_portability.py tests/test_config.py tests/test_cli.py tests/test_credentials.py tests/test_dependency_floors.py tests/test_python_compatibility.py tests/test_wif.py
+      - name: Build and check each installed wheel variant
+        run: |
+          uv build --no-create-gitignore
+          uv run python scripts/check_wheel_variants.py dist/*.whl

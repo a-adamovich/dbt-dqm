@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install dependencies
-        run: uv sync --locked --all-groups
+        run: uv sync --locked --all-groups --extra bigquery
       - name: Write profile (Application Default Credentials from the step above)
         run: |
           mkdir -p ~/.dbt

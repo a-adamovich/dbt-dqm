@@ -14,9 +14,9 @@ def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="dbt-dqm")
     commands = root.add_subparsers(dest="command", required=True)
     app = commands.add_parser("app", help="Launch the local review application")
-    app.add_argument("--project-dir", required=True)
-    app.add_argument("--profiles-dir", required=True)
-    app.add_argument("--target", required=True)
+    app.add_argument("--project-dir", default=None)
+    app.add_argument("--profiles-dir", default=None)
+    app.add_argument("--target", default=None)
     app.add_argument("--port", type=int, default=8501)
     app.add_argument("--max-cache-issues", type=int, default=MAX_CACHE_ISSUES,
                      help="Issue cache ceiling, configurable downward from 50000")
@@ -47,15 +47,16 @@ def parser() -> argparse.ArgumentParser:
         ("purge", "Permanently delete the local snapshot and pending patches"),
     ):
         command = workspace_commands.add_parser(name, help=help_text)
-        command.add_argument("--project-dir", required=True)
-        command.add_argument("--target", required=True)
+        command.add_argument("--project-dir")
+        command.add_argument("--target")
+        command.add_argument("--profiles-dir")
     return root
 
 
 def main() -> None:
     args = parser().parse_args()
     if args.command == "workspace":
-        workspace_path = resolve_workspace_path(args.project_dir, args.target)
+        workspace_path = resolve_workspace_path(args.project_dir, args.target, args.profiles_dir)
         related_paths = [
             workspace_path,
             Path(f"{workspace_path}-wal"),
@@ -90,9 +91,6 @@ def main() -> None:
         environment = os.environ.copy()
         environment.update(
             {
-                "DBT_DQM_PROJECT_DIR": str(Path(args.project_dir).expanduser().resolve()),
-                "DBT_DQM_PROFILES_DIR": str(Path(args.profiles_dir).expanduser().resolve()),
-                "DBT_DQM_TARGET": args.target,
                 "STREAMLIT_BROWSER_GATHER_USAGE_STATS": "false",
                 "DBT_DQM_ARCHIVE_CACHE_DAYS": str(args.archive_cache_days),
                 "DBT_DQM_LOCK_TIMEOUT_SECONDS": str(args.lock_timeout),
@@ -102,6 +100,13 @@ def main() -> None:
                 "DBT_DQM_BROWSE": args.browse,
             }
         )
+        for key, value in (("DBT_DQM_PROJECT_DIR", args.project_dir),
+                           ("DBT_DQM_PROFILES_DIR", args.profiles_dir),
+                           ("DBT_DQM_TARGET", args.target)):
+            environment.pop(key, None)
+            if value is not None:
+                environment[key] = (value if key.endswith("TARGET")
+                                    else str(Path(value).expanduser().resolve()))
         app_path = Path(__file__).with_name("streamlit_app.py")
         command = [
             sys.executable,
