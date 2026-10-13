@@ -1588,6 +1588,9 @@ def test_dedicated_preflight_failure_codes_and_default_limit(demo):
     assert execution["failure_limit"] == 1 and execution["collection_status"] == "limit_reached"
     assert demo.sql("select 1 from @schema.dqm_reconciliation_receipts where invocation_id=%s",
                     [execution["invocation_id"]])
+    tampered = dedicated(demo, variables={"tamper": True}, code=2)
+    assert "collection_error" in tampered.stderr and "Stored failures changed before capture" in tampered.stderr
+    assert _latest_execution(demo, "demo_order_amount_invalid")["collection_status"] == "success"
 
 
 def test_dedicated_full_refresh_aliases_grants_and_external_dependency_failure(demo):

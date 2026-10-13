@@ -48,7 +48,16 @@
     {% if node is none %}{{ exceptions.raise_compiler_error('DQM test manifest changed before capture: ' ~ row.unique_id) }}{% endif %}
     {% do results.append({'node':node,'status':row.status,'failures':row.failures,'execution_time':row.execution_time,'message':row.message}) %}
   {% endfor %}
-  {% do run_query(dbt_dqm.capture_test_results(results, payload.invocation_id, initialized=true)) %}
+  {% set summary_sql %}
+    select test_name,collection_status,collection_message
+    from {{ dbt_dqm.dqm_relation('dqm_test_executions') }}
+    where invocation_id={{ dbt_dqm.sql_string(payload.invocation_id) }}
+      and collection_status not in ('success','not_applicable','limit_reached')
+  {% endset %}
+  {% set failures=run_query(dbt_dqm.capture_test_results(results,payload.invocation_id,initialized=true) ~ ';' ~ summary_sql) %}
+  {% set errors=[] %}
+  {% for row in failures.rows %}{% do errors.append({'test_name':row[0],'status':row[1],'message':row[2]}) %}{% endfor %}
+  {% do log('DQM_COLLECTION_ERRORS=' ~ tojson(errors),info=false) %}
 {% endmacro %}
 
 {% macro maintain_dqm() %}

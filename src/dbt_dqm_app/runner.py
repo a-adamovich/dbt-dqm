@@ -84,6 +84,7 @@ class Workflow:
             raise ValueError("--threads must be positive")
         self.settings = {}
         self.columns = []
+        self.collection_errors = []
         self.factory = factory or dbtRunner
         self.runner = self.factory(callbacks=[self.event])
         self.timings = {}
@@ -100,6 +101,8 @@ class Workflow:
         message = getattr(event.data, "msg", "")
         if message.startswith("DQM_SETTINGS="):
             self.settings = json.loads(message.removeprefix("DQM_SETTINGS="))
+        if message.startswith("DQM_COLLECTION_ERRORS="):
+            self.collection_errors = json.loads(message.removeprefix("DQM_COLLECTION_ERRORS="))
         if message.startswith("DQM_COLUMNS="):
             self.columns = json.loads(message.removeprefix("DQM_COLUMNS="))
 
@@ -174,6 +177,7 @@ class Workflow:
             full_refresh(config, manifest, self)
         self.checked(["run-operation", "dbt_dqm.initialize_dqm"])
         tests = None
+        capture_failed = False
         if nodes:
             arguments = ["test", "--select", *selectors]
             if self.request.get("threads") is not None:
@@ -193,7 +197,18 @@ class Workflow:
             payload = {"invocation_id": metadata["invocation_id"], "results": [
                 {"unique_id": r.node.unique_id, "status": str(r.status), "failures": r.failures,
                  "execution_time": r.execution_time, "message": r.message} for r in results]}
-            self.checked(["run-operation", "dbt_dqm.collect_results", "--args", json.dumps({"payload": payload})])
+            try:
+                self.checked(["run-operation", "dbt_dqm.collect_results", "--args", json.dumps({"payload": payload})])
+            except RuntimeError as error:
+                # Earlier tests can already have committed evidence. Reconcile those commits;
+                # pending/error executions remain unusable and never imply resolution.
+                capture_failed = True
+                print(f"DQM collection error: {error}", file=sys.stderr, flush=True)
+            if self.collection_errors:
+                capture_failed = True
+                for error in self.collection_errors:
+                    print(f"DQM collection error: {error['test_name']}: {error['status']}: {error['message']}",
+                          file=sys.stderr, flush=True)
         models = ["run", "--select", "package:dbt_dqm"]
         if self.request.get("threads") is not None:
             models += ["--threads", str(self.request["threads"])]
@@ -211,7 +226,7 @@ class Workflow:
             "phase_seconds": self.timings, "sql_calls": self.sql_calls, "query_jobs": self.query_jobs}),
             encoding="utf-8")
         print("DQM phase seconds: " + json.dumps(self.timings), flush=True)
-        if tests and (tests.exception or any(str(r.status) in ("error", "skipped")
+        if capture_failed or tests and (tests.exception or any(str(r.status) in ("error", "skipped")
                                             for r in tests.result.results)):
             return 2
         return 1 if tests and not tests.success else 0
