@@ -68,7 +68,13 @@ Production candidate: `4c362266edd5457dc0bedae6348f455e064fcc90`. The test-only 
 correction at `09ac850` passes [CI 28/28](https://github.com/a-adamovich/dbt-dqm/actions/runs/38365848088)
 without changing production files. Full candidate evidence, live warehouse results, browser
 checks, memory and security audits are in [the 0.2.0a3 record](release-0.2.0a3.md).
-All verification gates passed; tagging, the protected reviewer gate and publication remain pending.
+All gates passed. PR #63 was squash-merged at `b36dfd793e4e7c7448b8b53734a7e9b6ab271cae`, whose
+tree equals final tested head `c32b999` ([CI 28/28](https://github.com/a-adamovich/dbt-dqm/actions/runs/38369686165)).
+The protected reviewer pause was observed with no steps started, then approved by `a-adamovich`.
+[Release run 38373244267](https://github.com/a-adamovich/dbt-dqm/actions/runs/38373244267) published
+`v0.2.0a3` through the existing trusted publisher and verified provenance. Both public artifacts,
+all 16 fresh PyPI installation combinations and Git-based dbt installation/parse at the tag pass;
+hashes and exact source revisions are in [the release record](release-0.2.0a3.md#publication-and-public-verification).
 
 ## 0.2.0a2 results (historical)
 
