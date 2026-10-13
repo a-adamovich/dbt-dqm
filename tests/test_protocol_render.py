@@ -73,6 +73,7 @@ def render(protocol_project, monkeypatch, macro, arguments=""):
             str(project),
             "--profiles-dir",
             str(profiles),
+            "--vars", "{dqm_enabled: true}",
         ]
     )
     assert result.success, result.exception
@@ -84,7 +85,7 @@ def test_bigquery_apply_fences_and_protects_annotations(protocol_project, monkey
     update = sql.split("when matched then update set", 1)[1].split("when not matched", 1)[0]
     for field in (
         "notes",
-        "poc_responsible",
+        "dqm_owner",
         "review_verdict",
         "annotation_version",
         "annotation_updated_at",
@@ -280,6 +281,7 @@ def test_dbt_dqm_schema_places_every_package_model(protocol_project):
                 str(project),
                 "--profiles-dir",
                 str(profiles),
+                "--vars", "{dqm_enabled: true}",
                 *args,
             ]
         )
@@ -287,6 +289,6 @@ def test_dbt_dqm_schema_places_every_package_model(protocol_project):
         return {json.loads(line)["name"]: json.loads(line)["schema"] for line in result.result}
 
     assert set(schemas().values()) == {"dqm"}
-    selected = schemas("--vars", "{dbt_dqm_schema: governance}")
+    selected = schemas("--vars", "{dbt_dqm_schema: governance, dqm_enabled: true}")
     assert len(selected) == len(list((ROOT / "models").glob("*.sql")))
     assert set(selected.values()) == {"dqm_governance"}

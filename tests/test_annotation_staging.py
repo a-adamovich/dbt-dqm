@@ -15,14 +15,16 @@ def config(tmp_path):
 
 
 def patch(**kwargs):
-    return replace(Patch("one", "notes", None, "pending", 1, "2026-10-09T00:00:00Z", 0), **kwargs)
+    return replace(Patch("one", "notes", None, "pending", 1, "2026-10-09T00:00:00Z", 0, installation_id="test"), **kwargs)
 
 
 def client(monkeypatch):
     fake = MagicMock()
     fake.get_table.return_value.schema = [bigquery.SchemaField("upload_id", "STRING"),
-                                         bigquery.SchemaField("staged_at", "TIMESTAMP")]
+                                         bigquery.SchemaField("staged_at", "TIMESTAMP"),
+                                         bigquery.SchemaField("installation_id", "STRING")]
     monkeypatch.setattr(warehouse, "client_for", lambda _: fake)
+    monkeypatch.setattr(warehouse, "installation_id", lambda _: "test")
     return fake
 
 
@@ -76,6 +78,6 @@ def test_uncertain_failures_do_not_clean_staging(tmp_path, monkeypatch, failure)
 def test_old_staging_schema_requires_migration_before_upload(tmp_path, monkeypatch):
     fake = client(monkeypatch)
     fake.get_table.return_value.schema = []
-    with pytest.raises(Exception, match="migration 0004"):
+    with pytest.raises(Exception, match="dbt-dqm run --full-refresh"):
         warehouse.apply_patches(config(tmp_path), [patch()])
     fake.load_table_from_json.assert_not_called()

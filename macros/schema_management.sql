@@ -79,6 +79,7 @@
       new_value string, changed_at timestamp, changed_by string, base_annotation_version int64
     );
     alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} add column if not exists base_annotation_version int64;
+    alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} add column if not exists installation_id string;
   {% endif %}
 {% endmacro %}
 {% macro default__app_change_staging_verify() %}
@@ -147,7 +148,7 @@
 {% endmacro %}
 
 {#- 0007: warehouse browsing reads Active issues in the review app's sort order (priority rank,
-    workflow-status rank, first seen, occurrence id) one keyset page at a time. On Postgres a
+    first seen, occurrence id) one keyset page at a time. On Postgres a
     partial expression index on exactly those keys turns each page into a short index range scan
     instead of sorting every Active issue (measured at 1M occurrences / 100k Active: first page
     ~0.5 s to ~0.05 s). The expressions must match the app's (src/dbt_dqm_app/browse.py) character
@@ -155,11 +156,10 @@
     table's clustering isn't available in SQL, so this migration only records the version there;
     BigQuery page costs are documented in docs/scale.md. #}
 {% macro browse_priority_rank_sql() %}(case lower(coalesce(test_priority, '')) when 'critical' then 0 when 'high' then 1 when 'medium' then 2 when 'low' then 3 else 4 end){% endmacro %}
-{% macro browse_status_rank_sql() %}(case upper(coalesce(workflow_status, 'NEW')) when 'NEW' then 0 when 'BLOCKED' then 1 when 'IN_PROGRESS' then 2 when 'TRIAGED' then 3 when 'RESOLVED' then 4 when 'ACCEPTED_RISK' then 5 when 'FALSE_POSITIVE' then 6 else 99 end){% endmacro %}
 {% macro default__browse_keyset_index_apply() %}
   {% if target.type == 'postgres' %}
     create index if not exists dqm_occurrence_browse_active on {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }}
-      (({{ dbt_dqm.browse_priority_rank_sql() }}), ({{ dbt_dqm.browse_status_rank_sql() }}), first_seen_at, occurrence_id)
+      (({{ dbt_dqm.browse_priority_rank_sql() }}), first_seen_at, occurrence_id)
       where record_status = 'Active';
   {% endif %}
 {% endmacro %}
@@ -227,6 +227,22 @@
   {% set install = dbt_dqm.dqm_relation('dqm_install') %}
   {% set control = dbt_dqm.dqm_relation('dqm_reconciliation_control') %}
   {% set ledger = dbt_dqm.dqm_relation('dqm_schema_migrations') %}
+  {% set installed = adapter.get_relation(database=install.database,schema=install.schema,identifier=install.identifier) if flags.INTROSPECT|default(true) else none %}
+  {% if installed %}
+    {% set marker = run_query('select marker from ' ~ install) %}
+    {% if marker.rows|length != 1 or marker.rows[0][0] != 'dqm-full-v1' %}
+      {{ exceptions.raise_compiler_error('Incompatible DQM schema. Run dbt-dqm run --full-refresh. Existing history is not migrated.') }}
+    {% endif %}
+    {% set state = run_query('select setup_status,schema_version from ' ~ control) %}
+    {% if state.rows|length == 1 and state.rows[0][0]=='ready' and state.rows[0][1]==dbt_dqm.latest_migration() %}
+      {% set ready %}{{ dbt_dqm.ready_sql() }}
+        {% for name, table_grant in (var('dbt_dqm_table_grants',{}).items() if grants else []) %}
+          {% if name not in ['dqm_annotation_changes','dqm_missed_issues'] %}{{ dbt_dqm.table_grants_sql(name,table_grant) }}{% endif %}
+        {% endfor %}
+      {% endset %}
+      {{ return(ready) }}
+    {% endif %}
+  {% endif %}
   {% set lease = dbt_dqm.positive_integer_var('dbt_dqm_reconcile_timeout_minutes', 60) %}
   {% set legacy = ['dqm_test_executions','dqm_issue_observations','dqm_issue_occurrences','dqm_reconciliation_state','dqm_schema_migrations','dqm_annotation_changes'] %}
   {% set legacy_checks = [] %}
@@ -239,15 +255,15 @@
   {#- 1-2. A 0.1 schema has tracking tables but no install marker. #}
   {{ dbt_dqm.assert_sql(
     '(' ~ dbt_dqm.table_exists_sql('dqm_install') ~ ') or not (' ~ legacy_checks | join(' or ') ~ ')',
-    dbt_dqm.sql_string('dbt-dqm 0.2 requires a fresh DQM schema. Set dbt_dqm_schema to a new schema; existing 0.1 history is not migrated.')) }}
-  create table if not exists {{ install }} as select 'dqm-0.2' as marker, {{ dbt.current_timestamp() }} as created_at;
+    dbt_dqm.sql_string('dbt-dqm 0.2 requires a fresh DQM schema. Set dbt_dqm_schema to a new schema; run dbt-dqm run --full-refresh; existing history is not migrated.')) }}
+  create table if not exists {{ install }} as select 'dqm-full-v1' as marker, {{ dbt.current_timestamp() }} as created_at, {{ dbt_dqm.sql_string(invocation_id) }} as installation_id, cast(null as {{ dbt.type_string() }}) as pending_view_grants;
   create table if not exists {{ control }} as select cast(0 as {{ dbt.type_bigint() }}) as generation,
     'ready' as setup_status, cast(null as {{ dbt.type_string() }}) as migration_owner,
     cast(null as {{ dbt.type_timestamp() }}) as migration_lease_until, cast(null as {{ dbt.type_string() }}) as schema_version, cast(null as {{ dbt.type_timestamp() }}) as raw_pruned_before;
   create table if not exists {{ ledger }} (migration_id {{ dbt.type_string() }} not null {% if target.type == 'postgres' %}primary key{% endif %}, applied_at {{ dbt.type_timestamp() }});
   {{ dbt_dqm.assert_sql(
-    '(select count(*) from ' ~ install ~ ")=1 and (select marker from " ~ install ~ ")='dqm-0.2' and (select count(*) from " ~ control ~ ')=1',
-    dbt_dqm.sql_string('Invalid DQM install marker or singleton control table.')) }}
+    '(select count(*) from ' ~ install ~ ")=1 and (select marker from " ~ install ~ ")='dqm-full-v1' and (select count(*) from " ~ control ~ ')=1',
+    dbt_dqm.sql_string('Incompatible DQM schema. Run dbt-dqm run --full-refresh.')) }}
   {{ dbt_dqm.assert_sql(
     'not exists(select 1 from ' ~ control ~ ' where schema_version > ' ~ dbt_dqm.sql_string(dbt_dqm.latest_migration()) ~ ')',
     dbt_dqm.sql_string('DQM schema is newer than this package. Upgrade the package.')) }}
@@ -296,7 +312,7 @@
       The control and app staging tables are created by setup rather than table_schemas(), but
       the review app reads control to verify syncs and writes staging rows, so they're grantable. #}
   {% for name, table_grant in (var('dbt_dqm_table_grants', {}).items() if grants else []) %}
-    {% if name not in dbt_dqm.table_schemas() and name not in ['dqm_reconciliation_control', 'dqm_app_change_staging', 'dqm_maintenance_log'] %}
+    {% if name not in dbt_dqm.table_schemas() and name not in ['dqm_install', 'dqm_reconciliation_control', 'dqm_app_change_staging', 'dqm_maintenance_log'] %}
       {{ exceptions.raise_compiler_error('Unknown DQM grant table: ' ~ name) }}
     {% endif %}
     {% if name not in ['dqm_annotation_changes','dqm_missed_issues'] %}{{ dbt_dqm.table_grants_sql(name, table_grant) }}{% endif %}
@@ -317,7 +333,7 @@
 {% endmacro %}
 
 {% macro empty_preflight() %}
-  {% if execute and dbt_dqm.empty_mode() %}
+  {% if execute and var('dqm_enabled',false) and dbt_dqm.empty_mode() %}
     {% set r=dbt_dqm.dqm_relation('dqm_reconciliation_control') %}
     {% if adapter.get_relation(database=r.database,schema=r.schema,identifier=r.identifier) is none %}
       {{ exceptions.raise_compiler_error('--empty requires an initialized dbt-dqm 0.2 schema. Run a normal package build first.') }}

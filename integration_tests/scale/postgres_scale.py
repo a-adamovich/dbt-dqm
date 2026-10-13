@@ -216,7 +216,7 @@ def load_history(project: Project, args: argparse.Namespace) -> None:
            archived_at, record_status, close_reason, first_seen_invocation, last_seen_invocation,
            last_evaluated_invocation, workflow_status, test_status, annotation_version,
            granularity_signature, identity_scheme_signature, review_verdict, test_priority,
-           poc_responsible)
+           dqm_owner)
         select md5('occurrence-' || g), ({ids})[1 + g % {args.tests}], 'scale_synthetic',
           md5('identity-' || g), 1, {payload_sql(args.payload_columns)}, 1,
           {VARIED_TAGS},
@@ -288,7 +288,7 @@ def browse_probe(project: Project, output: Path, label: str) -> dict:
 
 def rebuild_browse_index(project: Project, drop: bool) -> float:
     """Drop (or rebuild) migration 0007's browse index, to measure browsing without it."""
-    from dbt_dqm_app.browse import _priority_rank_sql, _status_rank_sql
+    from dbt_dqm_app.browse import _priority_rank_sql
 
     started = time.perf_counter()
     if drop:
@@ -296,7 +296,7 @@ def rebuild_browse_index(project: Project, drop: bool) -> float:
     else:
         project.sql(
             "create index dqm_occurrence_browse_active on @schema.dqm_issue_occurrences "
-            f"(({_priority_rank_sql()}), ({_status_rank_sql()}), first_seen_at, occurrence_id) "
+            f"(({_priority_rank_sql()}), first_seen_at, occurrence_id) "
             "where record_status = 'Active'; analyze @schema.dqm_issue_occurrences;"
         )
     return round(time.perf_counter() - started, 2)

@@ -28,12 +28,7 @@
 
 {# Decide whether a result node is an explicitly tagged, stored-failure dbt data test. #}
 {% macro tracked_test(node) -%}
-  {%- set tracked_tag = var('dbt_dqm_test_tag', 'dqm') -%}
-  {{ return(
-    node.resource_type == 'test'
-    and node.config.store_failures == true
-    and tracked_tag in node.config.tags
-  ) }}
+  {{ return(node.resource_type == 'test' and 'dbt_dqm' in (node.config.meta or {})) }}
 {%- endmacro %}
 
 {# Resolve a dbt-dqm warehouse relation using the target and optional schema override.

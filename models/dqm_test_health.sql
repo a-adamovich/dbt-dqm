@@ -1,6 +1,6 @@
 -- depends_on: {{ ref('dqm_reconcile') }}
 -- depends_on: {{ ref('dqm_missed_issues') }}
-{{ config(schema=var('dbt_dqm_schema', none), materialized='view') }}
+{{ config(enabled=var('dqm_enabled',false), schema=var('dbt_dqm_schema', none), materialized='view') }}
 {% set window=dbt_dqm.positive_integer_var('dbt_dqm_metrics_window_days',30) %}
 {% set stale=dbt_dqm.positive_integer_var('dbt_dqm_stale_days',14) %}
 with tracked as ({{ dbt_dqm.health_tests_sql() }}),
@@ -33,10 +33,11 @@ lifecycle as (
 executions as (
   select execution.test_unique_id,count(*) as recorded_execution_count,
     sum(case when {{ dbt_dqm.conclusive_sql() }} then 1 else 0 end) as conclusive_execution_count,
-    sum(case when receipt.outcome='applied' then 1 else 0 end) as applied_execution_count,
+    sum(case when receipt.outcome='applied' and {{ dbt_dqm.conclusive_sql() }} then 1 else 0 end) as applied_execution_count,
     sum(case when execution.collection_status in ('configuration_error','collection_error','inconclusive') then 1 else 0 end) as collection_problem_count,
     sum(case when execution.collection_status='configuration_error' then 1 else 0 end) as configuration_error_count,
     sum(case when execution.collection_status='collection_error' then 1 else 0 end) as collection_error_count,
+    sum(case when execution.collection_status='limit_reached' then 1 else 0 end) as limit_reached_count,
     sum(case when execution.collection_status='inconclusive' then 1 else 0 end) as inconclusive_count,
     sum(coalesce(owner_conflict_identity_count,0)) as owner_conflict_identity_count,
     sum(case when failure_count>0 then 1 else 0 end) as failing_execution_count,
@@ -45,11 +46,15 @@ executions as (
   left join {{ dbt_dqm.dqm_relation('dqm_reconciliation_receipts') }} receipt using(test_unique_id,invocation_id)
   where execution.captured_at >= {{ dbt_dqm.health_window_start() }} group by execution.test_unique_id
 ),
+latest as (
+  select execution.*,row_number() over(partition by test_unique_id order by captured_at desc,invocation_id desc) as recency
+  from {{ dbt_dqm.dqm_relation('dqm_test_executions') }} execution
+),
 outstanding as (
   select execution.test_unique_id,
     sum(case when execution.collection_status='pending' then 1 else 0 end) as pending_collection_count,
-    sum(case when {{ dbt_dqm.conclusive_sql() }} and receipt.invocation_id is null then 1 else 0 end) as processing_lag_count,
-    min(case when {{ dbt_dqm.conclusive_sql() }} and receipt.invocation_id is null then execution.captured_at end) as oldest_unprocessed_at,
+    sum(case when {{ dbt_dqm.usable_capture_sql() }} and receipt.invocation_id is null then 1 else 0 end) as processing_lag_count,
+    min(case when {{ dbt_dqm.usable_capture_sql() }} and receipt.invocation_id is null then execution.captured_at end) as oldest_unprocessed_at,
     max(execution.captured_at) as latest_execution_at
   from {{ dbt_dqm.dqm_relation('dqm_test_executions') }} execution
   left join {{ dbt_dqm.dqm_relation('dqm_reconciliation_receipts') }} receipt using(test_unique_id,invocation_id)
@@ -72,16 +77,20 @@ counts as (
     {% for name in ['active_issues','stale_new_issues','accepted_risk_count'] %}coalesce(backlog.{{ name }},0) as {{ name }},{% endfor %}
     backlog.avg_active_age_days,coalesce(resolution.passed_closure_count,0) as passed_closure_count,resolution.avg_hours_to_pass,
     coalesce(lifecycle.recurrence_count,0) as recurrence_count,coalesce(lifecycle.potential_regression_count,0) as potential_regression_count,
-    {% for name in ['configuration_error_count','collection_error_count','inconclusive_count','recorded_execution_count','conclusive_execution_count','applied_execution_count','collection_problem_count','owner_conflict_identity_count','failing_execution_count'] %}coalesce(executions.{{ name }},0) as {{ name }},{% endfor %}
+    {% for name in ['configuration_error_count','collection_error_count','inconclusive_count','limit_reached_count','recorded_execution_count','conclusive_execution_count','applied_execution_count','collection_problem_count','owner_conflict_identity_count','failing_execution_count'] %}coalesce(executions.{{ name }},0) as {{ name }},{% endfor %}
     coalesce(outstanding.pending_collection_count,0) as pending_collection_count,
     coalesce(outstanding.processing_lag_count,0) as processing_lag_count,
     outstanding.latest_execution_at,outstanding.oldest_unprocessed_at,
+    latest.collection_status as latest_collection_status, latest.failure_limit, latest.captured_issue_count,
+    latest.failure_count as latest_observed_failure_count,
     {{ dbt.datediff("outstanding.latest_execution_at",dbt.current_timestamp(),"hour") }} as hours_since_latest_execution,
     coalesce(gaps.skipped_evidence_count,0) as skipped_evidence_count,
     coalesce(misses.known_missed_issue_count,0) as known_missed_issue_count
   from tracked left join review using(test_unique_id) left join backlog using(test_unique_id)
   left join resolution using(test_unique_id) left join lifecycle using(test_unique_id)
-  left join executions using(test_unique_id) left join outstanding using(test_unique_id) left join gaps using(test_unique_id) left join misses using(test_unique_id)
+  left join executions using(test_unique_id) left join outstanding using(test_unique_id)
+  left join gaps using(test_unique_id) left join misses using(test_unique_id)
+  left join latest on latest.test_unique_id=tracked.test_unique_id and latest.recency=1
 ), rates as (
   select *,tp_count+fp_count as assessed_count,review_population_count-tp_count-fp_count as unreviewed_count,
     {{ dbt_dqm.safe_rate('tp_count','tp_count+fp_count') }} as reviewed_precision,
@@ -95,6 +104,7 @@ counts as (
 select *,concat(
   case when fp_share>=0.3 and assessed_count>=5 then 'noisy,' else '' end,
   case when stale_new_issues>0 then 'stale_backlog,' else '' end,
+  case when limit_reached_count>0 then 'limited_collection,' else '' end,
   case when collection_problem_count>0 then 'collection_problems,' else '' end,
   case when processing_lag_count>0 then 'lag,' else '' end,
   case when skipped_evidence_count>0 then 'skipped_evidence,' else '' end,

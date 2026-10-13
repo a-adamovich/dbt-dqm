@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0a4 - 2026-10-13
+
+- Add explicitly enabled `dbt-dqm run`; remove automatic capture/retention end hooks. Package models
+  and configured DQM tests remain disabled during ordinary commands. Membership uses `meta.dbt_dqm`.
+- Capture every output attribute; native positive test limits default to 100, with deterministic
+  samples and incomplete-evidence handling. Limited runs never infer resolution from omitted rows.
+- Replace ownership with `dqm_owner`, falling back to `meta.dbt_dqm.owner` then `meta.owner`.
+  Obsolete ownership/granularity/tag aliases are unsupported; capture mode settings warn and are ignored.
+- Require explicit full refresh for the new schema contract, preserving unrelated warehouse objects
+  and table access. Installation identities reject stale reviewer submissions after reset.
+- Keep issue cards ordered by priority, creation time and ID during edits and Apply. Hide the old
+  `dqm` marker from business-tag displays. Remove unsupported macro argument documentation types.
+
+
 ## 0.2.0a3 - 2026-10-13
 
 - Warehouse adapters are optional: install `dbt-dqm[bigquery]`, `dbt-dqm[postgres]`,

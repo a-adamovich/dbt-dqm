@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .errors import AppError
 from .limits import MAX_CACHE_ISSUES, MAX_CACHE_MIB, check_cache_size, issue_json
 
 # Warehouse browsing keeps only recently loaded pages (and issues with pending edits) locally.
@@ -20,7 +21,7 @@ EDITABLE_FIELDS = (
     "call_to_action",
     "ticket_url",
     "notes",
-    "poc_responsible",
+    "dqm_owner",
 )
 
 
@@ -33,6 +34,7 @@ class Patch:
     version: int
     changed_at: str
     base_annotation_version: int = 0
+    installation_id: str = ""
 
 
 class Workspace:
@@ -103,10 +105,28 @@ class Workspace:
                     "alter table pending_changes add column "
                     "base_annotation_version integer not null default 0"
                 )
+            if "installation_id" not in columns:
+                connection.execute("alter table pending_changes add column installation_id text not null default ''")
             connection.execute(
                 "update pending_changes set field_name='workflow_status' "
                 "where field_name='test_status'"
             )
+
+    @staticmethod
+    def _check_installation(connection, row):
+        installation = row.get("_installation_id")
+        if not installation:
+            return
+        previous = connection.execute("select value from metadata where key='installation_id'").fetchone()
+        pending = connection.execute("select count(*) from pending_changes").fetchone()[0]
+        if pending and (previous is None or previous[0] != installation):
+            raise AppError("This workspace belongs to an earlier DQM installation. "
+                           "Clear the old workspace before reviewing after full refresh.")
+        if previous is not None and previous[0] != installation:
+            connection.execute("delete from snapshot")
+            connection.execute("delete from health_snapshot")
+        connection.execute("insert into metadata values ('installation_id',?) "
+                           "on conflict(key) do update set value=excluded.value", (installation,))
 
     def _replace_snapshot(self, connection, rows, now, max_issues, max_bytes) -> None:
         # Stage in SQLite instead of duplicating the entire incoming Python snapshot. The
@@ -115,6 +135,8 @@ class Workspace:
         connection.execute("create unique index incoming_id on incoming(occurrence_id)")
         size = 0
         for count, row in enumerate(rows, start=1):
+            if count == 1:
+                self._check_installation(connection, row)
             payload = issue_json(row)
             size += len(payload.encode("utf-8"))
             check_cache_size(count, size, max_issues, max_bytes)
@@ -148,12 +170,14 @@ class Workspace:
                          max_issues=MAX_CACHE_ISSUES, max_bytes=MAX_CACHE_MIB * 2**20) -> None:
         self.replace_synced_data(rows, None, max_issues=max_issues, max_bytes=max_bytes)
 
-    def replace_synced_data(self, rows, health, *,
+    def replace_synced_data(self, rows, health, *, installation_id=None,
                             max_issues=MAX_CACHE_ISSUES, max_bytes=MAX_CACHE_MIB * 2**20) -> None:
         now = datetime.now(UTC).isoformat()
         connection = self._connect_immediate()
         try:
             connection.execute("begin immediate")
+            if installation_id is not None:
+                self._check_installation(connection, {"_installation_id": installation_id})
             self._replace_snapshot(connection, rows, now, max_issues, max_bytes)
             if health is not None:
                 connection.execute("delete from health_snapshot")
@@ -168,9 +192,12 @@ class Workspace:
         finally:
             connection.close()
 
-    def replace_health(self, health: dict[str, Any]) -> None:
+    def replace_health(self, health: dict[str, Any], *, installation_id=None) -> None:
         now = datetime.now(UTC).isoformat()
         with self.connect() as connection:
+            connection.execute("begin immediate")
+            if installation_id is not None:
+                self._check_installation(connection, {"_installation_id": installation_id})
             connection.execute("delete from health_snapshot")
             connection.executemany(
                 "insert into health_snapshot(kind,payload_json,synced_at) values (?,?,?)",
@@ -227,6 +254,8 @@ class Workspace:
         connection = self._connect_immediate()
         try:
             connection.execute("begin immediate")
+            if rows:
+                self._check_installation(connection, rows[0])
             connection.executemany(
                 "insert into snapshot(occurrence_id,payload_json,synced_at) values (?,?,?) "
                 "on conflict(occurrence_id) do update set payload_json=excluded.payload_json, "
@@ -303,7 +332,8 @@ class Workspace:
             connection.execute("begin immediate")
             row = connection.execute(
                 "select json_extract(payload_json, ?) as value, "
-                "json_extract(payload_json, '$.annotation_version') as annotation_version "
+                "json_extract(payload_json, '$.annotation_version') as annotation_version, "
+                "coalesce(json_extract(payload_json, '$._installation_id'),'') as installation_id "
                 "from snapshot where occurrence_id=?", ("$." + field_name, occurrence_id)
             ).fetchone()
             if row is None:
@@ -327,8 +357,8 @@ class Workspace:
                 """
                 insert into pending_changes
                   (occurrence_id, field_name, old_value, new_value, version, changed_at,
-                   base_annotation_version)
-                values (?, ?, ?, ?, ?, ?, ?)
+                   base_annotation_version, installation_id)
+                values (?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(occurrence_id, field_name) do update set
                   new_value=excluded.new_value,
                   version=excluded.version,
@@ -342,6 +372,7 @@ class Workspace:
                     version,
                     now,
                     base_annotation_version,
+                    row["installation_id"],
                 ),
             )
             connection.commit()

@@ -288,9 +288,10 @@ def run_app() -> None:
 
 def _install_snapshot(workspace, config, snapshot) -> None:
     if "issues" not in snapshot:  # warehouse mode refreshes Health only
-        workspace.replace_health(snapshot["health"])
+        workspace.replace_health(snapshot["health"], installation_id=snapshot.get("installation_id"))
         return
     workspace.replace_synced_data(snapshot["issues"], snapshot["health"],
+                                  installation_id=snapshot.get("installation_id"),
                                   max_issues=config.max_cache_issues,
                                   max_bytes=config.max_cache_bytes)
 
@@ -558,7 +559,7 @@ def _render_warehouse_issues(workspace, pending, config) -> None:
             st.caption(f"Page {index + 1} · showing {len(page_rows)} of "
                        f"{summary['matching']:,} matching issue record(s)")
 
-    owners_for_editor = [*options["owners"], *(row.get("poc_responsible") for row in page_rows)]
+    owners_for_editor = [*options["owners"], *(row.get("dqm_owner") for row in page_rows)]
     editor_owner_options = owner_editor_options(
         [owner for owner in owners_for_editor if owner != "Unassigned"])
     staged_change = False
@@ -643,10 +644,10 @@ def _render_issues(workspace, pending, config) -> None:
     )
     frame["workflow_status"] = frame["workflow_status"].fillna("NEW").astype(str).str.upper()
     frame["_created_date"] = frame["first_seen_at"].map(calendar_date)
-    if "poc_responsible" not in frame:
-        frame["poc_responsible"] = None
-    frame["owner"] = frame["poc_responsible"].map(owner_label)
-    editor_owner_options = owner_editor_options(frame["poc_responsible"])
+    if "dqm_owner" not in frame:
+        frame["dqm_owner"] = None
+    frame["owner"] = frame["dqm_owner"].map(owner_label)
+    editor_owner_options = owner_editor_options(frame["dqm_owner"])
 
     active_count = int((frame["record_status"] == "Active").sum())
     new_count = int(
@@ -761,26 +762,16 @@ def _render_issues(workspace, pending, config) -> None:
             lambda column: column.str.contains(search, case=False, na=False)
         )
         visible = visible[searchable.any(axis=1)]
-    priority = {
-        "NEW": 0,
-        "BLOCKED": 1,
-        "IN_PROGRESS": 2,
-        "TRIAGED": 3,
-        "RESOLVED": 4,
-        "ACCEPTED_RISK": 5,
-        "FALSE_POSITIVE": 6,
-    }
     if pending_only:
         visible = frame[frame["_dirty"]]
     visible = visible.copy()
     visible["_priority"] = visible.get(
         "test_priority", pd.Series(index=visible.index, dtype=object)
     ).map(priority_rank)
-    visible["_status_priority"] = visible["workflow_status"].map(priority).fillna(99)
     visible["_created_sort"] = pd.to_datetime(visible.get("first_seen_at"), errors="coerce")
     visible = visible.sort_values(
-        ["_dirty", "_priority", "_status_priority", "_created_sort", "occurrence_id"],
-        ascending=[False, True, True, True, True],
+        ["_priority", "_created_sort", "occurrence_id"],
+        ascending=[True, True, True],
         na_position="last",
     )
 
@@ -835,19 +826,19 @@ def _render_issue_card(workspace, row, widget_prefix, editor_owner_options) -> b
                 state_text += " · Unsaved local changes"
             st.caption(state_text)
         with owner_col:
-            current_owner = owner_value_from_selection(row.get("poc_responsible"))
+            current_owner = owner_value_from_selection(row.get("dqm_owner"))
             owner_selection = st.selectbox(
                 "Owner",
                 editor_owner_options,
                 index=editor_owner_options.index(
                     current_owner if current_owner is not None else "— Unassigned —"
                 ),
-                key=f"{widget_prefix}-poc_responsible",
+                key=f"{widget_prefix}-dqm_owner",
                 accept_new_options=True,
                 placeholder="Select or type an owner",
                 help="Choose an existing owner or type a new one.",
             )
-            poc_responsible = owner_value_from_selection(owner_selection)
+            dqm_owner = owner_value_from_selection(owner_selection)
         with workflow_col:
             current_status = str(row.get("workflow_status") or "NEW").upper()
             status_choices = workflow_status_options(current_status)
@@ -936,7 +927,7 @@ def _render_issue_card(workspace, row, widget_prefix, editor_owner_options) -> b
         edited_values = {
             "workflow_status": workflow_status,
             "review_verdict": review_verdict,
-            "poc_responsible": poc_responsible,
+            "dqm_owner": dqm_owner,
             "ticket_url": ticket_url,
             "call_to_action": call_to_action,
             "notes": notes,
@@ -972,13 +963,14 @@ def _render_health(workspace) -> None:
                 )
                 frame = frame.sort_values("_flags", ascending=False).drop(columns="_flags")
             st.dataframe(frame, hide_index=True)
+    st.caption("Limited collections reached the raw-row limit: total failures are unknown, and omitted issues remain active.")
     st.caption(
         "Area totals overlap: a test belongs to each direct model/source dependency. Known misses are reported observations, not a false-negative rate."
     )
     st.subheader("Maintenance")
     maintenance = maintenance_table(health.get("maintenance"))
     if maintenance is None:
-        st.info("Maintenance health needs the current package. Build package:dbt_dqm, then sync.")
+        st.info("Maintenance health needs the current package. Run dbt-dqm run, then sync.")
     elif not maintenance:
         st.info("No optional maintenance is configured for this warehouse.")
     else:

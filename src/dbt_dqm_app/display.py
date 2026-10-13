@@ -211,7 +211,7 @@ def tag_list(value: Any) -> list[str]:
             return []
     if not isinstance(value, list):
         return []
-    return list(dict.fromkeys(tag.strip() for tag in value if isinstance(tag, str) and tag.strip()))
+    return list(dict.fromkeys(tag.strip() for tag in value if isinstance(tag, str) and tag.strip() and tag.strip().lower() != "dqm"))
 
 
 def priority_rank(value: Any) -> int:

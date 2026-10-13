@@ -17,7 +17,7 @@
 - dbt-dqm tracks data tests with the configured tag (`dqm` by default) and
   `store_failures: true`.
 - The package captures conclusive test executions and configured stored-failure fields in an
-  `on-run-end` hook. It never interprets an unselected, skipped, interrupted, or collection-error
+  explicit dedicated workflow. It never interprets an unselected, skipped, interrupted, or collection-error
   test as a pass.
 - `meta.dbt_dqm.granularity` is the only source of issue identity columns. It is mandatory for
   every tracked test (including passing tests), must be a non-empty list of distinct non-empty
@@ -66,7 +66,7 @@
   no credentials.
 - Local SQLite contains failed-row snapshot data and field-level patches, uses owner-only filesystem
   permissions, and can be inspected or purged from the CLI. Reviewers may edit `workflow_status`,
-  `call_to_action`, `ticket_url`, `notes`, and `poc_responsible`; `test_status` is a deprecated
+  `call_to_action`, `ticket_url`, `notes`, and `dqm_owner`; `test_status` is a deprecated
   compatibility alias.
 - Workflow status is selected from `NEW`, `TRIAGED`, `IN_PROGRESS`, `BLOCKED`, `RESOLVED`,
   `ACCEPTED_RISK`, and `FALSE_POSITIVE`. Historical custom values remain selectable during

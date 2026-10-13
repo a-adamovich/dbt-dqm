@@ -1,7 +1,8 @@
+{{ config(enabled=var('dqm_enabled',false)) }}
 -- Scripted lifecycle assertions for the demo walkthrough documented in README.md, replacing what
 -- was previously a manual, human-verified visual check. Assumes the documented, reset-then-ordered
 -- sequence: `dbt run-operation reset_demo_dqm`, then initial -> passed -> recurrence, running
--- `dbt test --select tag:dqm && dbt build --select package:dbt_dqm` between each `demo_scenario`
+-- `dbt-dqm run` between each `demo_scenario`
 -- change. Run this after each step with the same `--vars '{demo_scenario: ...}'` used for that
 -- step: `dbt test --select assert_scenario_outcomes --vars '{demo_scenario: initial}'`. Any
 -- returned row is a mismatch between the documented expected outcome and the actual state of

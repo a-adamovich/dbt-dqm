@@ -13,6 +13,15 @@ from dbt_dqm_app.limits import MAX_CACHE_ISSUES, MAX_CACHE_MIB, validate_limits
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="dbt-dqm")
     commands = root.add_subparsers(dest="command", required=True)
+    run = commands.add_parser("run", help="Run the separate DQM test, capture and review workflow")
+    for flag in ("project-dir", "profiles-dir", "target"):
+        run.add_argument(f"--{flag}")
+    run.add_argument("--select", nargs="+")
+    run.add_argument("--exclude", nargs="+")
+    run.add_argument("--vars", default="{}")
+    run.add_argument("--threads", type=int)
+    run.add_argument("--full-refresh", action="store_true",
+                     help="Reset DQM history and annotations; preserve unrelated relations")
     app = commands.add_parser("app", help="Launch the local review application")
     app.add_argument("--project-dir", default=None)
     app.add_argument("--profiles-dir", default=None)
@@ -55,6 +64,10 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = parser().parse_args()
+    if args.command == "run":
+        from dbt_dqm_app.runner import launch
+
+        raise SystemExit(launch(args))
     if args.command == "workspace":
         workspace_path = resolve_workspace_path(args.project_dir, args.target, args.profiles_dir)
         related_paths = [

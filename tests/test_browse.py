@@ -33,7 +33,7 @@ def test_user_input_is_never_part_of_the_sql(adapter):
         priorities=(HOSTILE,), tags=(HOSTILE,), search=HOSTILE[:150],
         created_from=date(2026, 1, 1), created_to=date(2026, 1, 31),
     )
-    cursor = Cursor(1, 2, datetime(2026, 1, 1, tzinfo=UTC), HOSTILE)
+    cursor = Cursor(1, datetime(2026, 1, 1, tzinfo=UTC), HOSTILE)
     for query in (page_query(adapter, "issues", "true", filters, cursor, 25),
                   count_query(adapter, "issues", "true", filters)):
         assert "drop table" not in query.sql and "ünïcode" not in query.sql
@@ -72,7 +72,7 @@ def test_created_bounds_cover_whole_local_days():
 
 
 def test_bigquery_keyset_and_metrics_shape():
-    cursor = Cursor(0, 1, datetime(2026, 1, 1, tzinfo=UTC), "abc")
+    cursor = Cursor(0, datetime(2026, 1, 1, tzinfo=UTC), "abc")
     sql = page_query("bigquery", "`p.d.v`", "true", Filters(), cursor, 50).sql
     assert "@after_priority" in sql and "@after_id" in sql and " or " in sql
     assert "countif" in metrics_query("bigquery", "`p.d.v`", "true").sql
@@ -98,7 +98,7 @@ def _rows(seed=7, count=1500):
             "record_status": rng.choice(["Active", "Active", "Archived"]),
             "workflow_status": rng.choice(STATUSES),
             "test_priority": rng.choice(PRIORITIES),
-            "poc_responsible": rng.choice(OWNERS),
+            "dqm_owner": rng.choice(OWNERS),
             "test_tags": rng.choice(TAGS),
             "is_recurrence": rng.choice([None, True, False]),
             # Coarse times give many ties, which the keyset must break by occurrence_id.
@@ -123,7 +123,7 @@ def _reference(rows, filters):
             continue
         if filters.statuses and status not in filters.statuses:
             continue
-        if filters.owners and owner_label(row["poc_responsible"]) not in filters.owners:
+        if filters.owners and owner_label(row["dqm_owner"]) not in filters.owners:
             continue
         if filters.priorities and (row["test_priority"] or "unset") not in filters.priorities:
             continue
@@ -138,10 +138,8 @@ def _reference(rows, filters):
             if filters.search.strip().lower() not in text:
                 continue
         selected.append(row)
-    ranks = {"NEW": 0, "BLOCKED": 1, "IN_PROGRESS": 2, "TRIAGED": 3, "RESOLVED": 4,
-             "ACCEPTED_RISK": 5, "FALSE_POSITIVE": 6}
     selected.sort(key=lambda row: (
-        priority_rank(row["test_priority"]), ranks.get((row["workflow_status"] or "NEW").upper(), 99),
+        priority_rank(row["test_priority"]),
         row["first_seen_at"], row["occurrence_id"],
     ))
     return [row["occurrence_id"] for row in selected]
@@ -179,7 +177,7 @@ def test_postgres_pages_match_the_snapshot_filters():
         cur.execute(f'create schema "{schema}"')
         try:
             cur.execute(f'''create table "{schema}".issues (occurrence_id text, record_status text,
-                workflow_status text, test_priority text, poc_responsible text, test_tags text,
+                workflow_status text, test_priority text, dqm_owner text, test_tags text,
                 is_recurrence boolean, first_seen_at timestamp, test_name text, unique_id text,
                 record_values_json text, call_to_action text, notes text, ticket_url text)''')
             for row in rows:
@@ -213,7 +211,7 @@ def test_postgres_pages_match_the_snapshot_filters():
             cur.execute(options_query("postgres", relation, "true").sql)
             options = cur.fetchone()
             assert set(options["statuses"]) == {(r["workflow_status"] or "NEW").upper() for r in rows}
-            assert set(options["owners"]) == {owner_label(r["poc_responsible"]) for r in rows}
+            assert set(options["owners"]) == {owner_label(r["dqm_owner"]) for r in rows}
             assert set(options["tags"]) == {tag for r in rows for tag in tag_list(r["test_tags"])}
             assert options["first_seen_min"] == min(r["first_seen_at"] for r in rows).replace(tzinfo=None)
             metrics = metrics_query("postgres", relation, "true")
@@ -246,7 +244,7 @@ def test_bigquery_two_phase_pages_match_the_snapshot_filters():
     try:
         schema = [bigquery.SchemaField(name, kind) for name, kind in (
             ("occurrence_id", "STRING"), ("record_status", "STRING"), ("workflow_status", "STRING"),
-            ("test_priority", "STRING"), ("poc_responsible", "STRING"), ("test_tags", "STRING"),
+            ("test_priority", "STRING"), ("dqm_owner", "STRING"), ("test_tags", "STRING"),
             ("is_recurrence", "BOOL"), ("first_seen_at", "TIMESTAMP"), ("test_name", "STRING"),
             ("unique_id", "STRING"), ("record_values_json", "STRING"), ("call_to_action", "STRING"),
             ("notes", "STRING"), ("ticket_url", "STRING"),
@@ -292,7 +290,7 @@ def test_bigquery_two_phase_pages_match_the_snapshot_filters():
             assert got == expected, filters
             assert run(count_query("bigquery", relation, "true", filters))[0]["matching"] == len(expected)
         options = run(options_query("bigquery", relation, "true"))[0]
-        assert set(options["owners"]) == {owner_label(r["poc_responsible"]) for r in rows}
+        assert set(options["owners"]) == {owner_label(r["dqm_owner"]) for r in rows}
         assert set(options["tags"]) == {tag for r in rows for tag in tag_list(r["test_tags"])}
         values = run(metrics_query("bigquery", relation, "true"))[0]
         active = [row for row in rows if row["record_status"] == "Active"]
@@ -306,9 +304,9 @@ def test_the_migration_indexes_exactly_the_app_sort_expressions():
     """Migration 0007's Postgres index only helps if its expressions match the page query's."""
     from pathlib import Path
 
-    from dbt_dqm_app.browse import _priority_rank_sql, _status_rank_sql
+    from dbt_dqm_app.browse import _priority_rank_sql
 
     macros = (Path(__file__).parents[1] / "macros/schema_management.sql").read_text()
     assert ("{% macro browse_priority_rank_sql() %}" + _priority_rank_sql() + "{% endmacro %}"
             in macros)
-    assert "{% macro browse_status_rank_sql() %}" + _status_rank_sql() + "{% endmacro %}" in macros
+    assert "browse_status_rank_sql() }}), first_seen_at" not in macros

@@ -3,15 +3,12 @@
 {{
   config(
     tags=['dqm', 'Demo', 'Finance'],
-    store_failures=true,
+    store_failures=true, enabled=var('dqm_enabled',false), limit=var('dbt_dqm_default_test_limit',100),
     severity='warn',
     meta={
       'dbt_dqm': {
         'granularity': ['customer_id', 'order_id'],
-        'owner_column': 'assigned_owner',
-        'capture_mode': 'allowlist',
-        'context_columns': ['amount', 'currency', 'reason'],
-        'poc_responsible': 'finance_data_owner',
+        'owner': 'finance_data_owner',
         'call_to_action': 'Investigate the invalid settled amount'
       }
     }
@@ -19,6 +16,6 @@
 }}
 
 select customer_id, order_id, amount, currency, reason,
-  cast(null as {{ dbt.type_string() }}) as assigned_owner
+  cast(null as {{ dbt.type_string() }}) as dqm_owner
 from {{ ref('demo_records') }}
 where issue_family = 'order_amount'

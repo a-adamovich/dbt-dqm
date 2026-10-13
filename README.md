@@ -9,8 +9,8 @@ runs.
 
 | | |
 | --- | --- |
-| Latest release | `0.2.0a3`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a3/), Git tag [`v0.2.0a3`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a3). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a3`. |
-| Upgrade from 0.1 | Needs a **fresh DQM schema**: set `dbt_dqm_schema` to a new schema. 0.1 tables are preserved and never reused or migrated. |
+| Latest release | `0.2.0a4`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a4/), Git tag [`v0.2.0a4`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a4). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a4`. |
+| Upgrade | **Breaking schema change:** stop reviewer apps and run `dbt-dqm run --full-refresh`. Tracking history is reset, with no migration. Consumer models and stored test failures are preserved. |
 | dbt | dbt-core 1.11 and 1.12, with dbt-bigquery 1.11 or 1.12 and dbt-postgres 1.11 (there is no dbt-postgres 1.12; 1.11 supports dbt-core 1.12) |
 | Warehouses | BigQuery; Postgres 14 and 16 (needs the `pgcrypto` extension) |
 | Review app | Python 3.11–3.14, the same two warehouses |
@@ -18,7 +18,7 @@ runs.
 The Python app pins dbt-core 1.12.5; its optional extras use dbt-bigquery 1.12.1 and dbt-postgres 1.11.x;
 the dbt package accepts the wider dbt range above. Python support is `>=3.11,<3.15`.
 The [release checklist](docs/release-checklist.md) lists what must pass before a release is tagged;
-the [0.2.0a3 evidence](docs/release-0.2.0a3.md) records this alpha's results.
+the [0.2.0a4 evidence](docs/release-0.2.0a4.md) records this alpha's results.
 Package contracts (relations, migrations, grants, recovery, retention, maintenance) are in
 [warehouse interfaces](docs/warehouse-interfaces.md).
 
@@ -29,10 +29,10 @@ Install the alpha through Git by adding it to your consumer project's `packages.
 ```yaml
 packages:
   - git: "https://github.com/a-adamovich/dbt-dqm.git"
-    revision: v0.2.0a3
+    revision: v0.2.0a4
 ```
 
-The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a3`, so
+The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a4`, so
 install this alpha through the Git revision above. Hub registration is planned for 0.2.0.
 
 The 0.2 app expects the matching 0.2 package; don't mix it with 0.1.
@@ -50,7 +50,7 @@ In a Python 3.14 environment (recommended; 3.11–3.14 supported), install the a
 ```bash
 python3.14 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a3'
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a4'
 ```
 
 Warehouse adapters are optional. In a checkout, install
@@ -58,9 +58,9 @@ only the adapter you need with `uv sync --extra bigquery` or `uv sync --extra po
 use `uv sync --all-extras` for both. Select the extra in your installed environment:
 
 ```bash
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a3'          # BigQuery
-python -m pip install 'dbt-dqm[postgres]==0.2.0a3'          # Postgres
-python -m pip install 'dbt-dqm[bigquery,postgres]==0.2.0a3' # Both
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a4'          # BigQuery
+python -m pip install 'dbt-dqm[postgres]==0.2.0a4'          # Postgres
+python -m pip install 'dbt-dqm[bigquery,postgres]==0.2.0a4' # Both
 ```
 
 A plain install includes the app and dbt-core but no warehouse adapters.
@@ -72,7 +72,7 @@ On Windows PowerShell, create and activate the environment with:
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a3'
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a4'
 ```
 
 Activation is optional: `uv run --extra bigquery dbt-dqm app` uses the checkout environment.
@@ -86,17 +86,16 @@ vars:
   dbt_dqm_schema: dqm_alpha
 ```
 
-After adding a tracked test as shown below, run these steps separately. A test that finds
-failures can return a nonzero exit code; reconciliation must still run afterward:
+After adding a DQM test as shown below, run it separately from your regular model workflow:
 
 ```bash
 dbt deps
-dbt parse
-dbt run --select package:dbt_dqm  # initialize tracking tables and public views
-dbt test --select tag:dqm
-dbt build --select package:dbt_dqm
-dbt-dqm app --project-dir . --profiles-dir ~/.dbt --target dev
+dbt-dqm run
+dbt-dqm app
 ```
+
+The dedicated command initializes tracking relations, captures results, and reconciles even when
+quality tests fail. Project, profiles and target flags remain optional for both commands.
 
 In the browser, Sync, edit an issue's notes or review verdict, then Apply. Health shows
 setup, tests and maintenance status.
@@ -116,7 +115,7 @@ and `dbt-dqm workspace purge` use the same defaults. Explicit flags take precede
 flags to dbt. Paths use the native operating system's conventions; quote paths containing spaces.
 The app uses dbt beside its own Python interpreter before searching PATH, and logs that
 executable and its version. Technical details include failed commands, exit codes and both output
-streams. If tracking relations are missing, run `dbt run --select package:dbt_dqm` first.
+streams. If tracking relations are missing, run `dbt-dqm run` first.
 This package command works at the normal multithreaded setting; its setup models are ordered.
 
 Custom `generate_schema_name` and `generate_alias_name` macros are supported for package models.
@@ -160,60 +159,105 @@ simulated responses. It does not verify live WIF or IAM. Live release QA uses ex
 local service-account credentials; no new keys are created or downloaded. Optional
 [scheduled BigQuery verification](docs/scheduled-bigquery.md) stays inactive until configured.
 
-## Configure a tracked test
+## Migrating existing tests
+
+DQM is disabled by default and runs as a separate workflow. Install the matching warehouse extra,
+update the Git package revision above, and run `dbt deps`. Existing installations require these steps:
+
+1. Stop reviewer apps and preserve any annotations you need outside the package. No history migration is provided.
+2. Mark each DQM test with a `meta.dbt_dqm` object. Tags are optional business categories; the legacy
+   `dqm` tag remains stored but is excluded from app displays and tag filters.
+3. Set `enabled=var('dqm_enabled', false)`, `store_failures=true`, and
+   `meta.dbt_dqm.granularity` to the output columns identifying the failed record.
+4. Use native `limit`, normally `limit=var('dbt_dqm_default_test_limit', 100)`.
+   Set `dbt_dqm_default_test_limit` in `dbt_project.yml` to change that default, or give an individual
+   test its own positive integer limit. A missing native limit warns and uses the project default.
+   Keep `fail_calc=count(*)` and table failure storage.
+5. Set ownership using a nonblank output column `dqm_owner`, `meta.dbt_dqm.owner`, or `meta.owner`,
+   in that order. Blank values fall through. Conflicting row owners use the metadata fallback and
+   produce a Health diagnostic. Ownership initializes new issues; later reviewer edits persist.
+6. All output keys and attributes are captured. Remove `capture_mode`, `dbt_dqm_capture_mode`, and
+   `context_columns`; they warn and are ignored. Remove `poc_responsible`, `owner_column`,
+   `dqm_granularity`, and `dbt_dqm_test_tag`; these obsolete aliases are unsupported.
+7. Configure retention for captured observations and event payloads. The dedicated workflow warns
+   when either full-value history has no corresponding retention setting.
+8. Run `dbt-dqm run --full-refresh`. This explicitly resets known DQM tracking tables and
+   manifest-resolved package relations, assigns a fresh installation identity, then runs DQM.
+   It preserves consumer models, stored-failure relations, unrelated tables, and the dataset.
+   On PostgreSQL an external dependent view prevents reset; deletion never cascades to consumer objects.
+   On BigQuery empty replacement copies preserve destination table access; reset verifies table policies.
+9. Clear each old local workspace with `dbt-dqm workspace purge`, then restart reviewer apps.
+   Old annotation submissions are bound to the previous installation and cannot be applied after reset.
+
+Example singular test (the same configuration belongs under `config:` for a generic YAML test):
 
 ```sql
-{{
-  config(
-    tags=['dqm'],
+{{ config(
+    enabled=var('dqm_enabled', false),
     store_failures=true,
-    meta={'dbt_dqm': {
-      'granularity': ['customer_id'],
-      'capture_mode': 'allowlist',
-      'context_columns': ['reason']
+    limit=var('dbt_dqm_default_test_limit', 100),
+    tags=['customer', 'contact'],
+    meta={'owner': 'analytics', 'dbt_dqm': {
+      'granularity': ['customer_id'], 'owner': 'customer_support', 'priority': 'high'
     }}
-  )
-}}
-
-select customer_id, reason from {{ ref('customers') }} where is_invalid
+) }}
+select customer_id, reason, assigned_team as dqm_owner
+from {{ ref('customers') }} where is_invalid
 ```
 
-- `meta.dbt_dqm.granularity` is mandatory and is the only source of issue identity. Every failed
-  row must return those columns; text identity comparisons are case-insensitive.
-- Capture modes: `identity_only` (the default), `allowlist` (adds the named `context_columns`), and
-  `full` (explicitly stores complete failed rows).
-
-**Row owners and review metadata.** A failed row's `DQM_OWNER` column (or `owner_column`) sets its
-owner, falling back to `poc_responsible` when blank or conflicting:
-
-```sql
-{{ config(tags=['dqm'], store_failures=true, severity='warn',
-    meta={'dbt_dqm': {'granularity': ['campaign_id'], 'owner_column': 'DQM_OWNER',
-      'poc_responsible': 'analytics', 'priority': 'high', 'criticality': 'customer reporting'}}) }}
-select campaign_id, case when region='EU' then 'eu_team' else 'global_team' end as DQM_OWNER
-from {{ ref('campaigns') }} where invalid_flag
+```yaml
+# dbt_project.yml
+vars:
+  dbt_dqm_default_test_limit: 100
+  dbt_dqm_retention_days: 30
+  dbt_dqm_event_retention_days: 90
 ```
 
-Ownership is set only for new occurrences, and reviewer edits persist. Priority and tags are
-visible and filterable; review verdicts (true/false positive) are separate from workflow status.
+## Run the dedicated workflow
 
-## Collect and reconcile
-
-Run two separate dbt steps, so a failing test command never prevents reconciliation:
+From your dbt project, after your regular models have run:
 
 ```bash
-dbt test --select tag:dqm             # collection: an on-run-end hook captures tracked results
-dbt build --select package:dbt_dqm    # reconciliation, public views and health views
+dbt-dqm run                         # enable DQM, validate, test, capture, reconcile, maintain
+dbt-dqm run --select tag:customer --exclude tag:experimental --threads 4
+dbt-dqm run --vars '{dbt_dqm_default_test_limit: 250}'
+dbt-dqm run --full-refresh          # explicit reset; tracking history is discarded
 ```
 
-Captures sharing stored-failure tables must be serialized: equal row counts do not prove
-that the captured rows belong to the invocation. BigQuery supports one reconciliation per
-dataset at a time; overlapping reconciliations are detected, not queued.
+PowerShell uses the same commands. To avoid shell differences for YAML variables:
 
-`dbt run --select dbt_dqm.dqm_reconcile` runs reconciliation alone. The package publishes
-`dqm_current_issues`, `dqm_all_issues`, `dqm_issue_timeline`, the health views and the tracking
-tables in the DQM schema. `dbt_dqm_test_tag` and `dbt_dqm_schema` override the defaults; with
-dbt's standard schema naming, `dbt_dqm_schema: governance` produces `<target_dataset>_governance`.
+```powershell
+dbt-dqm run --vars "dbt_dqm_default_test_limit: 250"
+dbt-dqm run --full-refresh
+dbt-dqm workspace purge
+```
+
+Project, profiles and target flags are optional and follow the dbt/environment defaults described
+above. The worker uses dbt's programmatic runner in this Python environment, preserving the launch
+working directory and inherited credentials. Large selections and result payloads stay out of the
+Windows subprocess command line. Only metadata-marked tests matching the selection run; invalid
+selected configurations stop before initialization or reset. App startup only parses metadata and reads
+warehouse state; it does not run tests, capture results or execute package models.
+
+Test failures still produce captured evidence and reconciliation. Exit codes are `0` for success,
+`1` for failed tests, and `2` for configuration or execution errors. A dbt `warn` result retains dbt's
+successful exit behavior. Automatic capture and retention `on-run-end` hooks have been removed.
+Ordinary dbt commands leave DQM disabled unless you explicitly enable it.
+
+Limits apply to raw failed rows before deduplication. Samples are ordered by granularity identity
+and full payload before the native limit. Reaching the exact limit is ambiguous: the full failure
+count is unknown. Such executions have `collection_status=limit_reached`, plus `failure_limit`
+and `captured_issue_count`. They reconcile observed positive evidence but never close omitted
+issues through absence. A later complete execution can resolve them. Health shows limited collections.
+
+Serialize DQM workflows sharing stored-failure tables: equal counts do not prove two invocations
+read the same rows. BigQuery supports one reconciliation per dataset at a time. Per-test capture
+commits preserve earlier successful captures if a later test fails during collection.
+
+`dbt_dqm_schema` optionally chooses the tracking schema. With standard dbt schema naming,
+`dbt_dqm_schema: governance` produces `<target_dataset>_governance`. Package model relations respect
+custom schema and alias macros; macro-owned tracking identifiers remain fixed under the
+reconciliation node's database and schema. Changing naming macros does not migrate or delete old tables.
 
 ## Retention and maintenance
 
@@ -221,15 +265,15 @@ dbt's standard schema naming, `dbt_dqm_schema: governance` produces `<target_dat
   reconciliation has already processed, and old run-ledger rows.
 - `dbt_dqm_event_retention_days` prunes the `dqm_issue_events` history.
 
-These run as optional maintenance after invocations that captured tracked tests or reconciled, or
-on demand with `dbt run-operation cleanup_dqm_logs`. A SQL error inside a maintenance step never
+These run as the last phase of `dbt-dqm run`, or on demand with
+`dbt run-operation cleanup_dqm_logs --vars "{dqm_enabled: true}"`. A SQL error inside a maintenance step never
 fails the dbt run; outcomes are logged and shown in `dqm_maintenance_health` and the app's Health
 tab. The exact guarantee and its limits are in
 [warehouse interfaces](docs/warehouse-interfaces.md#optional-maintenance).
 
 > **Event values outlive raw logs by default.** With `dbt_dqm_event_payloads: full` (the default)
 > and no `dbt_dqm_event_retention_days`, captured before/after values are kept forever. Under
-> `allowlist` or `full` capture they can contain personal data. Set event retention, or choose
+> full capture they can contain personal data. Set event retention, or choose
 > `changed_columns` (column names plus hashes, which are not anonymization) or `none`.
 
 ## Local review app
@@ -283,12 +327,11 @@ dbt deps
 dbt run-operation reset_demo_dqm
 dbt seed
 dbt run --select demo_records --vars '{demo_scenario: initial}'
-dbt test --select tag:dqm --vars '{demo_scenario: initial}'
-dbt build --select package:dbt_dqm --vars '{demo_scenario: initial}'
-dbt test --select assert_scenario_outcomes --vars '{demo_scenario: initial}'
+dbt-dqm run --vars '{demo_scenario: initial}'
+dbt test --select assert_scenario_outcomes --vars '{demo_scenario: initial, dqm_enabled: true}'
 ```
 
-Repeat the last four commands with `demo_scenario: passed` (every issue archives as a genuine
+Repeat the last three commands with `demo_scenario: passed` (every issue archives as a genuine
 pass), then `demo_scenario: recurrence` (fresh occurrences for selected identities). The scenario
 assertion checks the exact active and archived counts, and assumes this reset → initial → passed →
 recurrence order.

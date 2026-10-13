@@ -19,7 +19,7 @@
 -- still be running, and a later-marker success supersedes an older trigger's missing outcome.
 -- Missing observations are never reported as healthy.
 -- depends_on: {{ ref('dqm_reconcile') }}
-{{ config(schema=var('dbt_dqm_schema', none), materialized='view') }}
+{{ config(enabled=var('dqm_enabled',false), schema=var('dbt_dqm_schema', none), materialized='view') }}
 {% set steps = dbt_dqm.maintenance_steps(
   dbt_dqm.positive_integer_var('dbt_dqm_retention_days', none),
   dbt_dqm.positive_integer_var('dbt_dqm_event_retention_days', none)) %}

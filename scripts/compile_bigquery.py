@@ -34,6 +34,7 @@ if __name__ == "__main__":
             "--no-introspect",
             "--project-dir",
             str(project),
+            "--vars", "{dqm_enabled: true}",
             *sys.argv[1:],
         ]
     )

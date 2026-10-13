@@ -68,7 +68,7 @@ models:
         description: Reviewer-editable link to an external work item.
       - name: notes
         description: Reviewer-editable free-form investigation notes.
-      - name: poc_responsible
+      - name: dqm_owner
         description: Reviewer-editable owner, optionally initialized from test meta.
       - name: annotation_updated_at
         description: Timestamp of the most recent local-app annotation apply.

@@ -1,3 +1,4 @@
+{{ config(enabled=var('dqm_enabled',false)) }}
 -- Golden vectors for the byte-level issue identity contract. This singular test runs unchanged on
 -- every supported adapter; a returned row means that adapter no longer produces the documented,
 -- cross-warehouse SHA-256 identity.

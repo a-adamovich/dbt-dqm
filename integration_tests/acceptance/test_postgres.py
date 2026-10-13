@@ -43,9 +43,12 @@ class Demo:
             "--profiles-dir",
             str(self.profiles),
         ]
-        if variables:
-            command += ["--vars", json.dumps(variables)]
+        command += ["--vars", json.dumps({"dqm_enabled": True, **(variables or {})})]
         result = subprocess.run(command, capture_output=True, text=True, timeout=90, check=False)
+        if args[0] in ("test", "build", "run"):
+            from explicit_capture import collect
+
+            result = collect(command, result, self.project / "target")
         (self.project / "latest-command.log").write_text(result.stdout + result.stderr)
         if success:
             assert result.returncode == 0, result.stdout + result.stderr
@@ -187,8 +190,8 @@ def test_lifecycle_annotations_history_and_health(demo):
     initial = demo.occurrences()
     assert len(initial) == 7
     email = [row for row in initial if row["test_name"] == "demo_customer_email_invalid"]
-    assert {row["poc_responsible"] for row in email} == {"customer_success", "customer_data_owner"}
-    assert all("dqm_owner" not in row["record_values_json"].lower() for row in email)
+    assert {row["dqm_owner"] for row in email} == {"customer_success", "customer_data_owner"}
+    assert all("dqm_owner" in row["record_values_json"].lower() for row in email)
     assert all(row["test_priority"] == "high" for row in email)
     assert demo.sql("select count(*) n from @schema.dqm_reconciliation_receipts")[0]["n"] == 3
     health = demo.sql(
@@ -387,20 +390,20 @@ def test_owner_conflicts_payload_events_and_structural_closures(demo):
     emails = demo.sql(
         "select * from @schema.dqm_issue_occurrences where test_name='demo_customer_email_invalid'"
     )
-    assert all(row["poc_responsible"] == "customer_data_owner" for row in emails)
+    assert all(row["dqm_owner"] == "customer_data_owner" for row in emails)
     conflicts = demo.sql(
         "select owner_conflict_identity_count from @schema.dqm_test_executions where test_name='demo_customer_email_invalid'"
     )
     assert conflicts[0]["owner_conflict_identity_count"] == 1
     demo.sql(
-        "update @schema.dqm_issue_occurrences set poc_responsible='reviewer' where test_name='demo_customer_email_invalid'"
+        "update @schema.dqm_issue_occurrences set dqm_owner='reviewer' where test_name='demo_customer_email_invalid'"
     )
     demo.capture("recurrence")  # No intervening pass: continuing failure with different payload.
     demo.dbt("run", "--select", "dqm_reconcile")
     current = demo.sql(
         "select * from @schema.dqm_current_issues where test_name='demo_customer_email_invalid'"
     )
-    assert current[0]["poc_responsible"] == "reviewer" and not current[0]["is_recurrence"]
+    assert current[0]["dqm_owner"] == "reviewer" and not current[0]["is_recurrence"]
     changed = demo.sql("select * from @schema.dqm_issue_events where event_type='VALUES_CHANGED'")
     assert changed and all(
         row["previous_record_values_json"] != row["record_values_json"] for row in changed
@@ -443,7 +446,7 @@ select customer_id from {{ ref('demo_records') }} where false
         1,
         datetime.now(UTC).isoformat(),
         row["annotation_version"],
-    )
+     installation_id=row.get("_installation_id") or demo.sql("select installation_id from @schema.dqm_install")[0]["installation_id"])
     batch = apply_patches(config, [patch])
     assert apply_patches(config, [patch]) == batch
     audited = demo.sql(
@@ -621,7 +624,7 @@ def test_app_write_fails_fast_while_reconciliation_holds_the_table(demo):
         1,
         datetime.now(UTC).isoformat(),
         row["annotation_version"],
-    )
+     installation_id=row.get("_installation_id") or demo.sql("select installation_id from @schema.dqm_install")[0]["installation_id"])
     with ThreadPoolExecutor(1) as pool:
         # The post-hook sleeps inside the reconciliation transaction, holding its table lock.
         running = pool.submit(
@@ -727,6 +730,7 @@ def test_restricted_runner_and_reviewer_use_only_documented_grants(demo):
     project = yaml.safe_load(config_path.read_text())
     project["models"]["dbt_dqm"]["+grants"] = {"select": [reviewer]}
     project.setdefault("vars", {})["dbt_dqm_table_grants"] = {
+        "dqm_install": {"select": [reviewer]},
         "dqm_reconciliation_control": {"select": [reviewer]},
         "dqm_issue_occurrences": {"select": [reviewer], "update": [reviewer]},
         "dqm_annotation_changes": {"select": [reviewer], "insert": [reviewer]},
@@ -757,7 +761,7 @@ def test_restricted_runner_and_reviewer_use_only_documented_grants(demo):
             1,
             datetime.now(UTC).isoformat(),
             row["annotation_version"],
-        )
+         installation_id=row.get("_installation_id") or demo.sql("select installation_id from @schema.dqm_install")[0]["installation_id"])
         apply_patches(config, [patch])
         insert_missed_issue(
             config,
@@ -1492,3 +1496,139 @@ def test_package_initialization_and_app_with_custom_aliases(demo):
     check_alias_app(project, demo.profiles)
     assert demo.sql("select description from @schema.dqm_missed_issues "
                     "where missed_issue_id='kept-before-alias'")[0]["description"] == "existing canonical data"
+
+
+def dedicated(demo, *options, variables=None, code=0):
+    """Exercise the actual isolated product command, without the protocol-harness phases."""
+    command = [str(Path(sys.executable).with_name("dbt-dqm")), "run",
+               "--project-dir", str(demo.project), "--profiles-dir", str(demo.profiles), *options]
+    if variables:
+        command += ["--vars", json.dumps(variables)]
+    result = subprocess.run(command, text=True, capture_output=True, timeout=120, check=False)
+    assert result.returncode == code, result.stdout + result.stderr
+    return result
+
+
+def test_dedicated_native_limits_complete_pass_and_stale_edits(demo):
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.errors import AppError
+    from dbt_dqm_app.store import Workspace
+    from dbt_dqm_app.warehouse import apply_patches, fetch_issues, validate_dbt
+
+    demo.dbt("run", "--select", "demo_records")
+    # An ordinary command with DQM disabled runs neither package models nor consumers' DQM tests.
+    ordinary = subprocess.run([str(Path(sys.executable).with_name("dbt")), "build", "--select", "package:dbt_dqm",
+                               "--project-dir", str(demo.project), "--profiles-dir", str(demo.profiles)],
+                              capture_output=True, text=True, timeout=90, check=False)
+    assert ordinary.returncode == 0, ordinary.stdout + ordinary.stderr
+    assert not demo.sql("select 1 from information_schema.tables where table_schema=%s and table_name='dqm_install'", [demo.schema])
+    dedicated(demo, "--threads", "4")
+    assert len(demo.occurrences()) == 7
+    original = json.loads((demo.project / "target/dqm_run_results.json").read_text())
+    invocation = original["metadata"]["invocation_id"]
+    executions = demo.sql("select test_unique_id,invocation_id from @schema.dqm_test_executions")
+    assert {row["invocation_id"] for row in executions} == {invocation}
+    assert {row["test_unique_id"] for row in executions} == {
+        row["unique_id"] for row in original["results"] if row["unique_id"].startswith("test.")}
+    config = load_config(demo.project, demo.profiles, "dev")
+    workspace = Workspace(demo.project.parent / "review.sqlite")
+    workspace.replace_snapshot(fetch_issues(config))
+    workspace.set_change(workspace.rows()[0]["occurrence_id"], "notes", "stale after reset")
+    patches = workspace.pending()
+    epoch = patches[0].installation_id
+    limited = dedicated(demo, variables={"dbt_dqm_default_test_limit": 2})
+    assert "DQM phase seconds" in limited.stdout
+    rows = demo.sql("select * from @schema.dqm_test_executions where failure_limit=2")
+    assert len(rows) == 3 and {row["collection_status"] for row in rows} == {"limit_reached"}
+    assert sorted(row["captured_issue_count"] for row in rows) == [1, 2, 2]
+    assert all(row["record_status"] == "Active" for row in demo.occurrences())
+    sample = demo.sql("select test_unique_id,unique_id,record_values_json from @schema.dqm_issue_observations "
+                      "where invocation_id=%s order by test_unique_id,unique_id", [rows[0]["invocation_id"]])
+    dedicated(demo, variables={"dbt_dqm_default_test_limit": 2})
+    latest = demo.sql("select invocation_id from @schema.dqm_test_executions order by captured_at desc limit 1")[0]["invocation_id"]
+    assert demo.sql("select test_unique_id,unique_id,record_values_json from @schema.dqm_issue_observations "
+                    "where invocation_id=%s order by test_unique_id,unique_id", [latest]) == sample
+    health = demo.sql("select * from @schema.dqm_test_health")
+    assert all(row["limit_reached_count"] == 2 for row in health)
+    demo.dbt("run", "--select", "demo_records", variables={"demo_scenario": "passed"})
+    dedicated(demo)
+    assert all(row["record_status"] == "Archived" for row in demo.occurrences())
+    demo.sql("create table @schema.consumer_keep as select 42 as value")
+    dedicated(demo, "--full-refresh")
+    assert demo.sql("select * from @schema.consumer_keep") == [{"value": 42}]
+    assert demo.sql("select installation_id from @schema.dqm_install")[0]["installation_id"] != epoch
+    with pytest.raises(AppError, match="Stale DQM installation"):
+        apply_patches(config, patches)
+    # App parsing re-enables manifest relations without executing models or tests.
+    before = demo.tracking()
+    validate_dbt(config)
+    assert demo.tracking() == before
+
+
+def test_dedicated_preflight_failure_codes_and_default_limit(demo):
+    demo.dbt("run", "--select", "demo_records")
+    dedicated(demo)
+    initial = demo.sql("select * from @schema.dqm_install")
+    invalid = dedicated(demo, "--select", "demo_invalid_empty_grain", "--full-refresh",
+                        variables={"demo_invalid_configurations": True}, code=2)
+    assert "demo_invalid_empty_grain" in invalid.stderr and "tests/demo_invalid_empty_grain.sql" in invalid.stderr
+    assert demo.sql("select * from @schema.dqm_install") == initial
+    missing = dedicated(demo, "--select", "demo_invalid_missing_column", "--full-refresh",
+                        variables={"demo_invalid_configurations": True}, code=2)
+    assert "missing_identity_column" in missing.stdout + missing.stderr
+    assert demo.sql("select * from @schema.dqm_install") == initial
+    test = demo.project / "tests/demo_customer_email_invalid.sql"
+    source = test.read_text().replace("limit=var('dbt_dqm_default_test_limit',100),", "")
+    source = source.replace("severity='warn'", "severity='error'")
+    test.write_text(source)
+    failed = dedicated(demo, "--select", "demo_customer_email_invalid",
+                       variables={"dbt_dqm_default_test_limit": 1}, code=1)
+    assert "native limit missing; using 1" in failed.stdout
+    execution = _latest_execution(demo, "demo_customer_email_invalid")
+    assert execution["failure_limit"] == 1 and execution["collection_status"] == "limit_reached"
+    assert demo.sql("select 1 from @schema.dqm_reconciliation_receipts where invocation_id=%s",
+                    [execution["invocation_id"]])
+
+
+def test_dedicated_full_refresh_aliases_grants_and_external_dependency_failure(demo):
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.warehouse import fetch_issues, validate_dbt
+
+    base = demo.schema
+    demo.dbt("run", "--select", "demo_records")
+    (demo.project / "macros/naming.sql").write_text("""
+{% macro generate_alias_name(custom_alias_name=none,node=none) %}
+{{ ('reviewer_' if node.package_name=='dbt_dqm' else '') ~ (custom_alias_name|trim if custom_alias_name else node.name) }}
+{% endmacro %}
+{% macro generate_schema_name(custom_schema_name,node) %}
+{{ target.schema ~ '_review' if node.package_name=='dbt_dqm' else target.schema ~ ('_' ~ custom_schema_name|trim if custom_schema_name else '') }}
+{% endmacro %}
+""")
+    demo.schema = base + "_review"
+    try:
+        dedicated(demo)
+        assert len(demo.occurrences()) == 7
+        demo.sql("grant select on @schema.reviewer_dqm_all_issues to public")
+        demo.sql("grant select on @schema.dqm_issue_observations to public")
+        before = demo.sql("select * from @schema.dqm_install")
+        demo.sql("create view @schema.consumer_dependent as select occurrence_id from @schema.reviewer_dqm_all_issues")
+        refused = dedicated(demo, "--full-refresh", code=2)
+        assert "depend" in refused.stderr.lower()
+        assert demo.sql("select * from @schema.dqm_install") == before
+        assert demo.sql("select count(*) n from @schema.consumer_dependent")[0]["n"] == 7
+        demo.sql("drop view @schema.consumer_dependent")
+        demo.sql("create table @schema.consumer_keep as select 'preserved'::text as value")
+        dedicated(demo, "--full-refresh")
+        assert demo.sql("select * from @schema.consumer_keep") == [{"value": "preserved"}]
+        grants = demo.sql("select table_name from information_schema.table_privileges "
+                          "where table_schema=%s and grantee='PUBLIC' and privilege_type='SELECT'", [demo.schema])
+        assert {row["table_name"] for row in grants} >= {"reviewer_dqm_all_issues", "dqm_issue_observations"}
+        assert not demo.sql("select pending_view_grants from @schema.dqm_install")[0]["pending_view_grants"]
+        config = load_config(demo.project, demo.profiles, "dev")
+        validate_dbt(config)
+        assert len(fetch_issues(config)) == 7
+        assert demo.sql(f'select count(*) n from "{base}".demo_records')[0]["n"] > 0
+        assert demo.sql(f'select count(*) n from "{base}_dbt_test__audit".demo_customer_email_invalid')[0]["n"] == 3
+    finally:
+        demo.sql("drop schema if exists @schema cascade")
+        demo.schema = base

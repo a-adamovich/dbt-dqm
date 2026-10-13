@@ -75,10 +75,8 @@ jobs:
           uv run dbt seed
           for scenario in initial passed recurrence; do
             uv run dbt run --select demo_records --vars "{demo_scenario: $scenario}"
-            uv run dbt test --select tag:dqm --vars "{demo_scenario: $scenario}"
-            uv run dbt test --select assert_collection_guardrail_fixtures
-            uv run dbt build --select package:dbt_dqm --vars "{demo_scenario: $scenario}"
-            uv run dbt test --select assert_scenario_outcomes --vars "{demo_scenario: $scenario}"
+            uv run dbt-dqm run --vars "{demo_scenario: $scenario}"
+            uv run dbt test --select assert_scenario_outcomes --vars "{demo_scenario: $scenario, dqm_enabled: true}"
           done
       - name: Credentialed acceptance suite (parallel, disposable datasets)
         shell: bash

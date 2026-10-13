@@ -110,17 +110,17 @@ def _read_yaml(path: Path) -> dict:
     return value
 
 
-def _profile_name(project: dict) -> str:
+def _profile_name(project: dict, cli_vars=None) -> str:
     override = os.environ.get("DBT_PROFILE")
     if override:
         return override
     name = project.get("profile")
     if name is None:
         raise AppError("The dbt project does not define a profile. Set DBT_PROFILE or profile.")
-    return _plain(name)
+    return _plain(name, cli_vars)
 
 
-def _selected_profile(profiles_dir: Path, profile_name: str, target: str | None):
+def _selected_profile(profiles_dir: Path, profile_name: str, target: str | None, cli_vars=None):
     profiles = _read_yaml(profiles_dir / "profiles.yml")
     if profile_name not in profiles:
         raise AppError("The selected dbt profile was not found in profiles.yml.")
@@ -128,7 +128,7 @@ def _selected_profile(profiles_dir: Path, profile_name: str, target: str | None)
     try:
         return Profile.render_profile(profiles[profile_name], profile_name,
                                       target if target is not None else os.environ.get("DBT_TARGET") or None,
-                                      ProfileRenderer())
+                                      ProfileRenderer(cli_vars or {}))
     except Exception as error:  # noqa: BLE001 - normalize dbt rendering failures for the UI.
         raise AppError("Could not resolve the dbt profile or target. Check profiles.yml and "
                        "its environment variables.", str(error)) from None
@@ -144,21 +144,21 @@ def resolve_workspace_path(project_dir: str | Path | None = None, target: str | 
     return workspace_path_for(project_dir, profile_name, target)
 
 
-def _plain(value: object) -> str:
+def _plain(value: object, cli_vars=None) -> str:
     set_invocation_context(os.environ)
-    rendered = get_rendered(str(value), generate_base_context({}), native=True)
+    rendered = get_rendered(str(value), generate_base_context(cli_vars or {}), native=True)
     return str(rendered)
 
 
 def load_config(project_dir: str | Path | None = None, profiles_dir: str | Path | None = None,
-                target: str | None = None) -> AppConfig:
+                target: str | None = None, *, cli_vars=None) -> AppConfig:
     working_dir = Path.cwd()
     explicit = (project_dir, profiles_dir, target)
     project_dir = resolve_project_dir(project_dir)
     profiles_dir = resolve_profiles_dir(profiles_dir)
     project = _read_yaml(project_dir / "dbt_project.yml")
-    profile_name = _profile_name(project)
-    target, output = _selected_profile(profiles_dir, profile_name, target)
+    profile_name = _profile_name(project, cli_vars)
+    target, output = _selected_profile(profiles_dir, profile_name, target, cli_vars)
     cli_args = []
     for flag, value, resolved in zip(("--project-dir", "--profiles-dir", "--target"), explicit,
                                      (project_dir, profiles_dir, target), strict=True):
@@ -177,7 +177,7 @@ def load_config(project_dir: str | Path | None = None, profiles_dir: str | Path 
     dqm_vars = variables.get("dbt_dqm", {}) if isinstance(variables.get("dbt_dqm"), dict) else {}
     custom_dataset = dqm_vars.get("schema") or variables.get("dbt_dqm_schema")
     base_schema = output.get("dataset") if adapter_type == "bigquery" else output.get("schema")
-    custom_dataset = _plain(custom_dataset) if custom_dataset is not None else None
+    custom_dataset = _plain(custom_dataset, cli_vars) if custom_dataset is not None else None
     dataset = f"{base_schema}_{custom_dataset}" if custom_dataset else base_schema
     project_id = output.get("project") if adapter_type == "bigquery" else output.get("dbname")
     archive_cache_days = int(os.environ.get("DBT_DQM_ARCHIVE_CACHE_DAYS", "90"))
@@ -207,7 +207,7 @@ def load_config(project_dir: str | Path | None = None, profiles_dir: str | Path 
         sslmode=str(output.get("sslmode")) if output.get("sslmode") is not None else None,
         archive_cache_days=archive_cache_days,
         target_path=project_dir / Path(os.environ.get("DBT_TARGET_PATH")
-                                       or _plain(project.get("target-path", "target"))).expanduser(),
+                                       or _plain(project.get("target-path", "target"), cli_vars)).expanduser(),
         dbt_cli_args=tuple(cli_args),
         working_dir=working_dir,
         lock_timeout_seconds=lock_timeout_seconds,

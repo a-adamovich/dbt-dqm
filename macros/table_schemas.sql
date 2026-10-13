@@ -26,7 +26,7 @@
       ('call_to_action', 'string'),
       ('ticket_url', 'string'),
       ('notes', 'string'),
-      ('poc_responsible', 'string'),
+      ('dqm_owner', 'string'),
       ('annotation_updated_at', 'timestamp'),
       ('annotation_version', 'int'),
       ('granularity_signature', 'string'),
@@ -59,7 +59,8 @@
       ('test_priority', 'string'),
       ('test_criticality', 'string'),
       ('owner_conflict_identity_count', 'int'),
-      ('capture_mode', 'string')
+      ('failure_limit', 'int'),
+      ('captured_issue_count', 'int')
     ],
     'dqm_issue_observations': [
       ('invocation_id', 'string'),
@@ -69,7 +70,7 @@
       ('unique_id', 'string'),
       ('record_values_json', 'string'),
       ('failure_row_count', 'int'),
-      ('initial_poc_responsible', 'string'),
+      ('initial_dqm_owner', 'string'),
       ('initial_call_to_action', 'string'),
       ('test_tags', 'string'),
       ('owner_conflict', 'int')

@@ -42,7 +42,7 @@ def check_alias_app(project, profiles):
     issue = snapshot["issues"][0]
     patch = Patch(issue["occurrence_id"], "notes", issue.get("notes"),
                   "alias acceptance note", 1, datetime.now(UTC).isoformat(),
-                  issue.get("annotation_version", 0))
+                  issue.get("annotation_version", 0), installation_id=issue["_installation_id"])
     assert apply_patches(config, [patch])
     refreshed = fetch_issues(config)
     assert next(row for row in refreshed if row["occurrence_id"] == issue["occurrence_id"])[

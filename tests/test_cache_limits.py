@@ -65,7 +65,7 @@ def test_full_128_mib_snapshot_boundary_is_atomic(tmp_path):
 
 def test_preflight_overflow_never_downloads(tmp_path, monkeypatch):
     monkeypatch.setattr(warehouse, "_snapshot_state", lambda *a: {
-        "setup_status": "ready", "generation": 1, "issue_count": 3})
+        "installation_marker": "dqm-full-v1", "installation_id": "test", "setup_status": "ready", "generation": 1, "issue_count": 3})
     download = MagicMock()
     monkeypatch.setattr(warehouse, "_iter_issue_rows", download)
     with pytest.raises(CacheLimitExceeded, match="3 issues"):
@@ -75,7 +75,7 @@ def test_preflight_overflow_never_downloads(tmp_path, monkeypatch):
 
 def test_stream_stops_on_first_oversized_row_and_closes(tmp_path, monkeypatch):
     monkeypatch.setattr(warehouse, "_snapshot_state", lambda *a: {
-        "setup_status": "ready", "generation": 1, "issue_count": 1})
+        "installation_marker": "dqm-full-v1", "installation_id": "test", "setup_status": "ready", "generation": 1, "issue_count": 1})
     seen = []
 
     def download(*args):
@@ -95,7 +95,7 @@ def test_stream_stops_on_first_oversized_row_and_closes(tmp_path, monkeypatch):
 
 def test_count_race_cannot_install_partial_snapshot(tmp_path, monkeypatch):
     monkeypatch.setattr(warehouse, "_snapshot_state", lambda *a: {
-        "setup_status": "ready", "generation": 1, "issue_count": 2})
+        "installation_marker": "dqm-full-v1", "installation_id": "test", "setup_status": "ready", "generation": 1, "issue_count": 2})
     monkeypatch.setattr(warehouse, "_iter_issue_rows", lambda *a: (issue(str(i)) for i in range(3)))
     with pytest.raises(CacheLimitExceeded):
         warehouse.fetch_issues(config(tmp_path, max_cache_issues=2))

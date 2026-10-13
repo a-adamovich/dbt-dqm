@@ -198,7 +198,7 @@ class Harness:
                archived_at, record_status, close_reason, first_seen_invocation,
                last_seen_invocation, last_evaluated_invocation, workflow_status, test_status,
                annotation_version, granularity_signature, identity_scheme_signature, review_verdict,
-               test_priority, poc_responsible)
+               test_priority, dqm_owner)
             select to_hex(md5(concat('occurrence-', cast(g as string)))), {test_of % "g"},
               'scale_synthetic', to_hex(md5(concat('identity-', cast(g as string)))), 1, {payload},
               1, {VARIED_TAGS},

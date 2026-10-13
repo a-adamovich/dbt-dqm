@@ -5,11 +5,12 @@
   failing test must declare meta.dbt_dqm.granularity, and every named key must be present in the
   stored-failure relation. Invalid configurations are recorded without making lifecycle changes.
 #}
-{% macro capture_test_results(results) %}
-  {% if not execute or dbt_dqm.empty_mode() or flags.WHICH not in ['test', 'build'] %}
+{% macro capture_test_results(results, source_invocation_id=none, initialized=false) %}
+  {% if not execute or dbt_dqm.empty_mode() or not var('dqm_enabled', false) %}
     {{ return('') }}
   {% endif %}
 
+  {% if source_invocation_id %}{% set invocation_id = source_invocation_id %}{% endif %}
   {% set tracked = [] %}
   {% for result in results %}
     {% if dbt_dqm.tracked_test(result.node) %}
@@ -23,14 +24,14 @@
   {% set capture_sql = [] %}
   {% set setup %}{% if target.type=='postgres' %}begin; {{ dbt_dqm.reconcile_lock() }}{% endif %}
     {{ dbt_dqm.setup_sql() }}{% if target.type=='postgres' %}commit;{% endif %}{% endset %}
-  {% do capture_sql.append(setup) %}
+  {% if not initialized %}{% do capture_sql.append(setup) %}{% endif %}
 
   {% set execution_columns = [
     'invocation_id', 'captured_at', 'command', 'test_unique_id', 'test_name', 'test_status',
     'failure_count', 'test_tags', 'test_meta', 'execution_time', 'message', 'failure_relation',
     'collection_status', 'collection_message', 'granularity_signature',
     'identity_scheme_signature', 'source_unique_id', 'source_relation', 'test_severity',
-    'test_priority', 'test_criticality', 'owner_conflict_identity_count', 'capture_mode'
+    'test_priority', 'test_criticality', 'owner_conflict_identity_count', 'failure_limit', 'captured_issue_count'
   ] %}
   {% set execution_rows = [] %}
   {% for result in tracked %}
@@ -69,7 +70,7 @@
       select
         {{ dbt_dqm.sql_string(invocation_id) }} as invocation_id,
         {{ dbt.current_timestamp() }} as captured_at,
-        {{ dbt_dqm.sql_string(flags.WHICH) }} as command,
+        {{ dbt_dqm.sql_string('test') }} as command,
         {{ dbt_dqm.sql_string(node.unique_id) }} as test_unique_id,
         {{ dbt_dqm.sql_string(node.name) }} as test_name,
         {{ dbt_dqm.sql_string(result.status) }} as test_status,
@@ -89,7 +90,8 @@
         {{ dbt_dqm.sql_string(dqm_meta.get('priority')|trim|lower if dqm_meta.get('priority') is string and dqm_meta.get('priority')|trim|lower != 'unset' else none) }} as test_priority,
         {{ dbt_dqm.sql_string(dqm_meta.get('criticality')|trim if dqm_meta.get('criticality') is string else none) }} as test_criticality,
         0 as owner_conflict_identity_count,
-        {{ dbt_dqm.sql_string(dqm_meta.get('capture_mode',var('dbt_dqm_capture_mode','identity_only'))) }} as capture_mode
+        {{ node.config.limit if node.config.limit is not none else var('dbt_dqm_default_test_limit', 100) }} as failure_limit,
+        0 as captured_issue_count
     {% endset %}
     {% do execution_rows.append(row) %}
   {% endfor %}
@@ -106,7 +108,7 @@
 
   {% set observation_columns = [
     'invocation_id', 'observed_at', 'test_unique_id', 'test_name', 'unique_id',
-    'record_values_json', 'failure_row_count', 'initial_poc_responsible', 'initial_call_to_action',
+    'record_values_json', 'failure_row_count', 'initial_dqm_owner', 'initial_call_to_action',
     'test_tags', 'owner_conflict'
   ] %}
 
@@ -123,19 +125,13 @@
     {% set meta = node.config.meta or {} %}
     {% set dqm_meta = meta.get('dbt_dqm', {}) %}
     {% set configured_grain = dqm_meta.get('granularity', []) %}
-    {% set capture_mode = dqm_meta.get('capture_mode', var('dbt_dqm_capture_mode', 'identity_only')) %}
-    {% set context_columns = dqm_meta.get('context_columns', []) %}
-    {% set owner_column = dqm_meta.get('owner_column') %}
+    {% set failure_limit = node.config.limit if node.config.limit is not none else var('dbt_dqm_default_test_limit', 100) %}
     {% set priority = dqm_meta.get('priority') %}
     {% set grain_errors = [] %}
     {% if modules.re.sub('\\s+', '', node.config.fail_calc|lower) != 'count(*)' %}
       {% do grain_errors.append('Tracked tests require fail_calc=count(*).') %}
     {% endif %}
-    {% if node.config.limit is not none %}{% do grain_errors.append('Tracked tests cannot configure limit.') %}{% endif %}
     {% if node.config.store_failures_as not in [none,'table'] %}{% do grain_errors.append('Tracked tests require table failure storage.') %}{% endif %}
-    {% if owner_column is not none and (owner_column is not string or owner_column|trim=='') %}
-      {% do grain_errors.append('owner_column must be a nonblank string.') %}
-    {% endif %}
     {% if priority is not none and (priority is not string or priority|trim|lower not in ['critical','high','medium','low','unset']) %}
       {% do grain_errors.append('priority must be critical, high, medium or low.') %}
     {% endif %}
@@ -159,26 +155,6 @@
         {% endif %}
       {% endfor %}
     {% endif %}
-    {% if capture_mode not in ['identity_only', 'allowlist', 'full'] %}
-      {% do grain_errors.append(
-        "meta.dbt_dqm.capture_mode must be one of: identity_only, allowlist, full."
-      ) %}
-    {% endif %}
-    {% if context_columns is string or context_columns is not sequence %}
-      {% do grain_errors.append('meta.dbt_dqm.context_columns must be a list of column names.') %}
-    {% else %}
-      {% set context_lower = [] %}
-      {% for context_name in context_columns %}
-        {% if context_name is not string or context_name | trim == '' %}
-          {% do grain_errors.append('Every meta.dbt_dqm.context_columns entry must be a non-empty string.') %}
-        {% elif context_name | trim | lower in context_lower %}
-          {% do grain_errors.append('meta.dbt_dqm.context_columns contains a duplicate column: ' ~ context_name) %}
-        {% else %}
-          {% do context_lower.append(context_name | trim | lower) %}
-        {% endif %}
-      {% endfor %}
-    {% endif %}
-
     {% if grain_errors | length > 0 %}
       {% set error_update %}
         update {{ dbt_dqm.relation_name('dqm_test_executions') }}
@@ -225,32 +201,22 @@
             {% if column.name | lower == grain_name %}{% do key_columns.append(column) %}{% endif %}
           {% endfor %}
         {% endfor %}
-        {% set missing_context_columns = [] %}
-        {% if capture_mode == 'allowlist' %}
-          {% for context_name in context_lower %}
-            {% set context_found = [] %}
-            {% for column in columns %}
-              {% if column.name | lower == context_name %}{% do context_found.append(column.name) %}{% endif %}
-            {% endfor %}
-            {% if context_found | length == 0 %}{% do missing_context_columns.append(context_name) %}{% endif %}
-          {% endfor %}
-        {% endif %}
+        {% set owner_errors = [] %}
         {% set resolved_owner = [] %}
         {% for column in columns %}
-          {% if column.name|lower == (owner_column|trim|lower if owner_column is string else 'dqm_owner') %}{% do resolved_owner.append(column) %}{% endif %}
+          {% if column.name|lower == 'dqm_owner' %}{% do resolved_owner.append(column) %}{% endif %}
         {% endfor %}
-        {% if owner_column is not none and resolved_owner|length!=1 %}{% do missing_context_columns.append(owner_column) %}{% endif %}
-        {% if resolved_owner|length>1 %}{% do missing_context_columns.append('ambiguous owner column') %}{% endif %}
-        {% if key_columns | length != grain_lower | length or missing_context_columns | length > 0 %}
+        {% if resolved_owner|length>1 %}{% do owner_errors.append('ambiguous owner column') %}{% endif %}
+        {% if key_columns | length != grain_lower | length or owner_errors | length > 0 %}
           {% set missing_columns_message = '' %}
-          {% if missing_context_columns | length > 0 %}
-            {% set missing_columns_message = '; missing context: ' ~ (missing_context_columns | join(', ')) %}
+          {% if owner_errors | length > 0 %}
+            {% set missing_columns_message = '; owner column: ' ~ (owner_errors | join(', ')) %}
           {% endif %}
           {% set error_update %}
             update {{ dbt_dqm.relation_name('dqm_test_executions') }}
             set collection_status = {{ dbt_dqm.sql_string('configuration_error') }},
                 collection_message = {{ dbt_dqm.sql_string(
-                  'Every configured granularity/context column must exist in the test output. '
+                  'Every configured granularity column must exist in the test output. '
                   ~ 'Granularity: ' ~ (configured_grain | join(', '))
                   ~ missing_columns_message
                 ) }}
@@ -261,7 +227,7 @@
           {% do log('dbt-dqm skipped ' ~ node.unique_id ~ ': a granularity column is missing', info=true) %}
         {% elif result.failures is not none and result.failures|int > 0 %}
           {% set tags_json = dbt_dqm.compact_json(node.config.tags) %}
-          {% set owner = dqm_meta.get('poc_responsible') %}
+          {% set owner = (dqm_meta.get('owner') or '')|trim or (meta.get('owner') or '')|trim or none %}
           {% set action = dqm_meta.get('call_to_action') %}
 
           {% set key_pairs = [] %}
@@ -275,16 +241,7 @@
 
           {% set record_pairs = [] %}
           {% for column in columns %}
-            {% set normalized_column_name = column.name | lower %}
-            {% if capture_mode == 'full'
-              or normalized_column_name in grain_lower
-              or (capture_mode == 'allowlist' and normalized_column_name in context_lower) %}
-              {% set value_sql %}
-                case when {{ adapter.quote(column.name) }} is null then null
-                     else cast({{ adapter.quote(column.name) }} as {{ dbt.type_string() }}) end
-              {% endset %}
-              {% do record_pairs.append((column.name, value_sql)) %}
-            {% endif %}
+            {% do record_pairs.append((column.name, dbt_dqm.column_value_sql(column))) %}
           {% endfor %}
 
           {% set owner_value %}{% if resolved_owner %}nullif(trim(cast({{ adapter.quote(resolved_owner[0].name) }} as {{ dbt.type_string() }})),''){% else %}cast(null as {{ dbt.type_string() }}){% endif %}{% endset %}
@@ -336,7 +293,7 @@
               unique_id,
               record_values_json,
               failure_row_count,
-              case when owner_count>1 then {{ dbt_dqm.sql_string(owner) }} else coalesce(owner_value,{{ dbt_dqm.sql_string(owner) }}) end as initial_poc_responsible,
+              case when owner_count>1 then {{ dbt_dqm.sql_string(owner) }} else coalesce(owner_value,{{ dbt_dqm.sql_string(owner) }}) end as initial_dqm_owner,
               {{ dbt_dqm.sql_string(action) }} as initial_call_to_action,
               {{ dbt_dqm.sql_string(tags_json) }} as test_tags,
               case when owner_count>1 then 1 else 0 end as owner_conflict
@@ -359,16 +316,24 @@
           {% do capture_sql.append(observation_merge ~ ';') %}
           {% set status_update %}
             update {{ dbt_dqm.relation_name('dqm_test_executions') }}
-            set collection_status = case when {{ stage_count }} = {{ expected_rows }}
-                  then {{ dbt_dqm.sql_string('success') }} else {{ dbt_dqm.sql_string('collection_error') }} end,
-                owner_conflict_identity_count=(select coalesce(sum(owner_conflict),0) from {{ dbt_dqm.dqm_relation('dqm_issue_observations') }} where invocation_id={{ dbt_dqm.sql_string(invocation_id) }} and test_unique_id={{ dbt_dqm.sql_string(node.unique_id) }}),
+            set collection_status = case when stats.raw_rows = {{ expected_rows }}
+                  then case when stats.raw_rows >= {{ failure_limit }} then 'limit_reached' else 'success' end else {{ dbt_dqm.sql_string('collection_error') }} end,
+                captured_issue_count=case when stats.raw_rows={{ expected_rows }} then stats.issue_count else 0 end,
+                owner_conflict_identity_count=case when stats.raw_rows={{ expected_rows }} then stats.owner_conflicts else 0 end,
                 collection_message=case
-                  when {{ stage_count }} != {{ expected_rows }} then concat(
+                  when stats.raw_rows != {{ expected_rows }} then concat(
                     'Stored failures changed before capture: dbt reported {{ expected_rows }} rows, the table had ',
-                    cast({{ stage_count }} as {{ dbt.type_string() }}),
+                    cast(stats.raw_rows as {{ dbt.type_string() }}),
                     '. Serialize invocations that share failure tables.')
-                  when exists(select 1 from {{ dbt_dqm.dqm_relation('dqm_issue_observations') }} where invocation_id={{ dbt_dqm.sql_string(invocation_id) }} and test_unique_id={{ dbt_dqm.sql_string(node.unique_id) }} and owner_conflict=1) then 'Conflicting row owners; static owner used.'
+                  when stats.raw_rows >= {{ failure_limit }} then 'Native test limit reached; omitted issues are not resolved and total failures are unknown.'
+                  when stats.owner_conflicts>0 then 'Conflicting row owners; static owner used.'
                   else null end
+            from (
+              select coalesce(sum(raw_rows),0) as raw_rows, count(*) as issue_count,
+                coalesce(sum(case when owner_count>1 then 1 else 0 end),0) as owner_conflicts
+              from (select unique_id,count(*) as raw_rows,count(distinct owner_value) as owner_count
+                    from dqm_capture_stage group by unique_id) identities
+            ) stats
             where invocation_id = {{ dbt_dqm.sql_string(invocation_id) }}
               and test_unique_id = {{ dbt_dqm.sql_string(node.unique_id) }}
               and collection_status = {{ dbt_dqm.sql_string('pending') }}

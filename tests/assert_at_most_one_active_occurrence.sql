@@ -1,3 +1,4 @@
+{{ config(enabled=var('dqm_enabled',false)) }}
 -- Package-level invariant: at most one Active occurrence per (test_unique_id, unique_id).
 -- A violation means two dqm_reconcile runs raced (e.g. overlapping CI jobs) and both created a
 -- simultaneously Active occurrence for the same failure identity. Any returned row is a failure.

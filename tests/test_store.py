@@ -28,7 +28,7 @@ def issue(notes=None):
         "call_to_action": None,
         "ticket_url": None,
         "notes": notes,
-        "poc_responsible": None,
+        "dqm_owner": None,
     }
 
 

@@ -3,14 +3,12 @@
 {{
   config(
     tags=['dqm', 'Demo', 'Operations'],
-    store_failures=true,
+    store_failures=true, enabled=var('dqm_enabled',false), limit=var('dbt_dqm_default_test_limit',100),
     severity='warn',
     meta={
       'dbt_dqm': {
         'granularity': ['customer_id', 'order_id', 'line_id'],
-        'capture_mode': 'allowlist',
-        'context_columns': ['sku', 'quantity', 'unit_price', 'reason', 'source_system'],
-        'poc_responsible': 'order_operations_owner',
+        'owner': 'order_operations_owner',
         'call_to_action': 'Repair the invalid order-line values'
       }
     }

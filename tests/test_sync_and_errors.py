@@ -56,7 +56,7 @@ def issue(occurrence_id):
 
 
 def state(generation=7, setup_status="ready", issue_count=0):
-    return {"generation": generation, "setup_status": setup_status, "issue_count": issue_count}
+    return {"installation_marker": "dqm-full-v1", "installation_id": "test", "generation": generation, "setup_status": setup_status, "issue_count": issue_count}
 
 
 def test_verified_snapshot_is_returned(tmp_path, monkeypatch):
@@ -112,6 +112,7 @@ def test_postgres_connections_carry_the_lock_timeout(tmp_path, monkeypatch):
 
 def test_apply_refresh_failure_still_reports_the_committed_batch(tmp_path, monkeypatch):
     monkeypatch.setattr(warehouse, "validate_dbt", lambda config: None)
+    monkeypatch.setattr(warehouse, "installation_id", lambda config: "test")
     monkeypatch.setattr(warehouse, "apply_patches", lambda config, patches: "batch-1")
 
     def unavailable(config):
