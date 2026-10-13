@@ -135,6 +135,12 @@ class Workflow:
         nodes = [node for key, node in manifest.nodes.items()
                  if key in ids and "dbt_dqm" in (node.config.meta or {})]
         errors = []
+        for other in manifest.nodes.values():
+            if other.resource_type != "test" or other.unique_id in ids or "dbt_dqm" not in (other.config.meta or {}):
+                continue
+            for problem in validate_test(other, default):
+                if "store_failures" in problem or "granularity" in problem:
+                    print(f"WARNING: {other.name} ({other.original_file_path}): {problem} (not selected)", flush=True)
         for node in nodes:
             label = f"{node.name} ({node.original_file_path})"
             errors.extend(f"{label}: {problem}" for problem in validate_test(node, default))
