@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -41,14 +42,23 @@ class Workspace:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.path.parent.chmod(0o700)
+        if sys.platform != "win32":
+            self.path.parent.chmod(0o700)
         self._initialize()
         self._secure_files()
 
     def _secure_files(self) -> None:
+        # Windows chmod changes the read-only attribute, not ACLs, and may fail while SQLite
+        # opens/deletes its journals. Files inherit access from the user-data directory there.
+        if sys.platform == "win32":
+            return
         for path in (self.path, Path(f"{self.path}-wal"), Path(f"{self.path}-shm")):
-            if path.exists():
+            try:
                 path.chmod(0o600)
+            except FileNotFoundError:
+                # SQLite can remove WAL/SHM files between operations on another connection.
+                if path == self.path:
+                    raise
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path)

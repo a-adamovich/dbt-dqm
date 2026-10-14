@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import sys
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,13 @@ ISSUE_COLUMNS = (
     "previous_close_reason", "previous_workflow_status_at_close", "previous_review_verdict",
     "previous_dqm_owner", "previous_ticket_url", "previous_notes",
 )
+
+
+def _private(path, mode):
+    # Windows uses inherited ACLs under the private workspace directory; chmod only changes
+    # the read-only attribute and can conflict with an open SQLite handle.
+    if sys.platform != "win32":
+        path.chmod(mode)
 
 
 def matches_filters(row, filters: Filters) -> bool:
@@ -113,7 +121,7 @@ def write_export(rows, directory, format):
         raise ValueError("Export format must be csv or xlsx")
     directory = Path(directory)
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    directory.chmod(0o700)
+    _private(directory, 0o700)
     spool = directory / "rows.sqlite"
     destination = directory / ("issues." + format)
     columns = set(ISSUE_COLUMNS)
@@ -121,7 +129,7 @@ def write_export(rows, directory, format):
     count = size = 0
     try:
         with closing(sqlite3.connect(spool)) as connection:
-            spool.chmod(0o600)
+            _private(spool, 0o600)
             connection.execute("create table rows (position integer primary key,test_id text,payload text)")
             for row in rows:
                 public = {key: value for key, value in row.items() if not key.startswith("_")}
@@ -142,7 +150,7 @@ def write_export(rows, directory, format):
             headers = [*ISSUE_COLUMNS, *sorted(columns - set(ISSUE_COLUMNS))]
             if format == "csv":
                 with destination.open("w", encoding="utf-8-sig", newline="") as output:
-                    destination.chmod(0o600)
+                    _private(destination, 0o600)
                     writer = csv.writer(output)
                     writer.writerow(headers)
                     for (payload,) in connection.execute("select payload from rows order by position"):
@@ -199,7 +207,7 @@ def _write_excel(connection, destination, headers, tests):
             sheet.freeze_panes(1, 0)
             sheet.autofilter(0, 0, max(1, position), len(titles) - 1)
             sheet.set_column(0, len(titles) - 1, 22)
-    destination.chmod(0o600)
+    _private(destination, 0o600)
 
 
 def _excel_text(sheet, row, column, text, style=None):

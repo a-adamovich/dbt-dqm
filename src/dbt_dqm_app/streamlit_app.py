@@ -508,7 +508,7 @@ def _render_review_tools(workspace, config, page_rows, filters, pending_only,
         for column, label, format in [(csv_col, "Prepare CSV", "csv"), (excel_col, "Prepare Excel", "xlsx")]:
             if column.button(label, disabled=disabled or pending_only):
                 _invalidate_export()
-                directory = tempfile.TemporaryDirectory(prefix="dbt-dqm-export-")
+                directory = tempfile.TemporaryDirectory(prefix="dbt-dqm-export-", dir=workspace.path.parent)
                 st.session_state.export_directory = directory
                 st.session_state.job_kind = "export"
                 st.session_state.job = _get_executor().submit(

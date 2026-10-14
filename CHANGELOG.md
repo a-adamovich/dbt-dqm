@@ -9,6 +9,8 @@
 - Add background CSV and Excel exports of all filtered saved issues across pages. Preserve JSON
   in CSV; expand top-level captured fields on one Excel worksheet per test. Guard size, query
   budgets and installation/generation consistency; do not return partial or truncated reports.
+- Avoid Windows attribute changes on active SQLite journals and tolerate disappearing Unix
+  journal side files; keep exports under the private workspace directory.
 - Upgrading from a4 or a5 requires no warehouse migration or history reset. Scheduled full-refresh
   invocations must now include `--yes`.
 
