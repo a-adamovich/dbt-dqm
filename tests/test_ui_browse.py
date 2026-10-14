@@ -23,7 +23,7 @@ def issue(number, status="NEW"):
         "record_status": "Active", "record_values_json": '{"k": 1}', "workflow_status": status,
         "review_verdict": "UNREVIEWED", "annotation_version": 0,
         "first_seen_at": "2026-10-01T00:00:00", "annotation_updated_at": None,
-        "poc_responsible": None, "call_to_action": None, "notes": None, "ticket_url": None,
+        "dqm_owner": None, "call_to_action": None, "notes": None, "ticket_url": None,
         "test_priority": "high", "test_tags": '["finance"]', "is_recurrence": False,
     }
 

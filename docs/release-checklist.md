@@ -62,6 +62,16 @@ credentials are used without creating keys, changing IAM or resetting shared QA 
 restricted permissions gate follows the complete BigQuery suite serially. The existing reviewer
 approval, trusted publisher and provenance checks remain in place.
 
+### 0.2.0a4 execution and publication criteria
+
+The maintainer authorized the dedicated disabled-by-default workflow, breaking full-capture/ownership
+schema, bounded native limits, stable issue ordering, merging and publishing `v0.2.0a4`.
+All gates remain required. The restricted permissions gate runs serially after complete BigQuery
+acceptance. For this release the maintainer explicitly authorized a scoped DQM full refresh in the
+existing `dbt-dqm.dbt_dqm_qa` dataset. Preserve unrelated QA relations, existing dataset/table access,
+identities and keys; do not create keys or change IAM. Preserve protected approval, trusted publishing
+and provenance verification. The [0.2.0a4 evidence](release-0.2.0a4.md) records exact candidate results.
+
 ## 0.2.0a3 results
 
 Production candidate: `4c362266edd5457dc0bedae6348f455e064fcc90`. The test-only Windows fixture

@@ -1,15 +1,11 @@
 name: dbt_dqm
-version: 0.2.0-a3
+version: 0.2.0-a4
 config-version: 2
 require-dbt-version: [">=1.11.0", "<1.13.0"]
 
 model-paths: ["models"]
 macro-paths: ["macros"]
 clean-targets: ["target", "dbt_packages", "logs"]
-
-on-run-end:
-  - "{{ dbt_dqm.capture_test_results(results) }}"
-  - "{{ dbt_dqm.retention_hook(results) }}"
 
 on-run-start:
   - "{{ dbt_dqm.empty_preflight() }}"

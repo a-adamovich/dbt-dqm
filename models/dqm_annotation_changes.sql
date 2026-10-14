@@ -1,7 +1,7 @@
 -- Field-level audit ledger populated by idempotent local-app apply batches.
 -- The dbt model owns the empty table schema; the application appends immutable change events.
 {{
-  config(
+  config(enabled=var('dqm_enabled',false),
     schema=var('dbt_dqm_schema', none),
     materialized='incremental',
     incremental_strategy=dbt_dqm.incremental_upsert_strategy(),

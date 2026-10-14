@@ -73,6 +73,7 @@ def render(protocol_project, monkeypatch, macro, arguments=""):
             str(project),
             "--profiles-dir",
             str(profiles),
+            "--vars", "{dqm_enabled: true}",
         ]
     )
     assert result.success, result.exception
@@ -84,7 +85,7 @@ def test_bigquery_apply_fences_and_protects_annotations(protocol_project, monkey
     update = sql.split("when matched then update set", 1)[1].split("when not matched", 1)[0]
     for field in (
         "notes",
-        "poc_responsible",
+        "dqm_owner",
         "review_verdict",
         "annotation_version",
         "annotation_updated_at",
@@ -280,6 +281,7 @@ def test_dbt_dqm_schema_places_every_package_model(protocol_project):
                 str(project),
                 "--profiles-dir",
                 str(profiles),
+                "--vars", "{dqm_enabled: true}",
                 *args,
             ]
         )
@@ -287,6 +289,46 @@ def test_dbt_dqm_schema_places_every_package_model(protocol_project):
         return {json.loads(line)["name"]: json.loads(line)["schema"] for line in result.result}
 
     assert set(schemas().values()) == {"dqm"}
-    selected = schemas("--vars", "{dbt_dqm_schema: governance}")
+    selected = schemas("--vars", "{dbt_dqm_schema: governance, dqm_enabled: true}")
     assert len(selected) == len(list((ROOT / "models").glob("*.sql")))
     assert set(selected.values()) == {"dqm_governance"}
+
+
+def test_capture_summary_is_valid_bigquery_script_without_empty_statements(protocol_project, monkeypatch):
+    """A real dbt render catches delimiters that PostgreSQL accepts but BigQuery rejects."""
+    import agate
+    import sqlglot
+    from dbt.adapters.bigquery.connections import BigQueryAdapterResponse
+    from dbt.adapters.bigquery.impl import BigQueryAdapter
+
+    project, profiles = protocol_project
+    scripts = []
+
+    def execute(self, sql, **kwargs):
+        scripts.append(sql)
+        return BigQueryAdapterResponse(_message="OK"), agate.Table([], [])
+
+    def closed(cls, connection):
+        connection.state = ConnectionState.CLOSED
+        return connection
+
+    def reject(*args, **kwargs):
+        raise AssertionError("Script rendering attempted warehouse access")
+
+    monkeypatch.setattr(BigQueryAdapter, "get_relation", lambda *args, **kwargs: None)
+    monkeypatch.setattr(BigQueryConnectionManager, "clear_transaction", lambda self: None)
+    monkeypatch.setattr(BigQueryConnectionManager, "execute", execute)
+    monkeypatch.setattr(BigQueryConnectionManager, "close", classmethod(closed))
+    monkeypatch.setattr(BigQueryConnectionManager, "open", classmethod(reject))
+    payload = {"invocation_id": "test-invocation", "results": [{
+        "unique_id": "test.dbt_dqm_demo.demo_customer_email_invalid", "status": "error",
+        "failures": None, "execution_time": 0, "message": "test execution failed"}]}
+    result = dbtRunner().invoke([
+        "--no-populate-cache", "run-operation", "dbt_dqm.collect_results", "--args",
+        json.dumps({"payload": payload}), "--project-dir", str(project),
+        "--profiles-dir", str(profiles), "--vars", "{dqm_enabled: true}"])
+    assert result.success, result.exception
+    assert len(scripts) == 1
+    parsed = sqlglot.parse(scripts[0], read="bigquery")
+    assert parsed and all(statement is not None for statement in parsed)
+    assert "inconclusive" in scripts[0] and "collection_status not in" in scripts[0]

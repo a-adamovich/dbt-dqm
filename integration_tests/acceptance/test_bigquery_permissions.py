@@ -1,4 +1,4 @@
-"""Opt-in, serial permission gate on the pre-created QA dataset; never deletes history.
+"""Opt-in, serial permission gate on the pre-created QA dataset after authorized reset.
 
 Set DBT_DQM_BIGQUERY_RUNNER_CREDENTIALS and DBT_DQM_BIGQUERY_REVIEWER_CREDENTIALS to
 separate local ADC files. The existing destructive BigQuery fixture is deliberately not reused.
@@ -94,21 +94,21 @@ def test_restricted_bigquery_runner_and_reviewer(tmp_path):
     }}))
     environment = {**os.environ, "GOOGLE_APPLICATION_CREDENTIALS": str(Path(RUNNER_FILE).resolve())}
 
-    def dbt(*args, test_failure=False):
+    def dbt(*args, test_failure=False, dqm=False):
         result = subprocess.run(
-            [str(Path(sys.executable).with_name("dbt")), *args,
+            [str(Path(sys.executable).with_name("dbt-dqm" if dqm else "dbt")), *args,
              "--project-dir", str(path), "--profiles-dir", str(profiles)],
             env=environment, capture_output=True, text=True, timeout=600, check=False,
         )
         assert result.returncode == (1 if test_failure else 0), result.stdout + result.stderr
         if test_failure:
-            results = [r for r in json.loads((path / "target/run_results.json").read_text())["results"]
+            results = [r for r in json.loads((path / ("target/dqm_run_results.json" if dqm else "target/run_results.json")).read_text())["results"]
                        if r["unique_id"].startswith("test.")]
             assert len(results) == 1 and results[0]["status"] == "fail"
 
-    # QA may still be at migration 0003. Upgrade before ordinary model runs invoke cleanup,
-    # and before any new reviewer client can upload annotation attempts.
-    dbt("run", "--select", "package:dbt_dqm")
+    installed = list(runner.query(f"select marker from `{PROJECT}.{DATASET}.dqm_install`").result())
+    assert len(installed) == 1 and installed[0].marker == "dqm-full-v1", (
+        "Prepare the authorized scoped QA full refresh before running this restricted gate")
     migrations = {r.id for r in runner.query(
         f"select migration_id as id from `{PROJECT}.{DATASET}.dqm_schema_migrations`"
     ).result()}
@@ -119,17 +119,18 @@ def test_restricted_bigquery_runner_and_reviewer(tmp_path):
 
     dbt("seed", "--select", fixture)
     dbt("run", "--select", fixture + "_records")
-    dbt("test", "--select", test_name, test_failure=True)
+    dbt("run", "--select", test_name, test_failure=True, dqm=True)
     # A ten-year retention schedules raw and run pruning without deleting shared QA history; run
     # pruning reads the dataset's INFORMATION_SCHEMA.TABLES as the runner.
-    dbt("run", "--select", "package:dbt_dqm", "--vars", '{"dbt_dqm_retention_days": 3650}')
-    invocation = json.loads((path / "target/run_results.json").read_text())["metadata"]["invocation_id"]
+    dbt("run", "--select", test_name, "--vars", '{"dbt_dqm_retention_days": 3650}', test_failure=True, dqm=True)
+    invocation = json.loads((path / "target/dqm_model_run_results.json").read_text())["metadata"]["invocation_id"]
     pruning = {r.step: r.outcome for r in runner.query(
         f"select step, outcome from `{PROJECT}.{DATASET}.dqm_maintenance_log` "
         f"where invocation_id='{invocation}'"
     ).result()}
     assert pruning.get("run_pruning") == "succeeded" and pruning.get("raw_pruning") == "succeeded"
-    dbt("test", "--select", "package:dbt_dqm", "--exclude", "assert_scenario_outcomes")
+    dbt("test", "--select", "package:dbt_dqm", "--exclude", "assert_scenario_outcomes",
+        "--vars", "{dqm_enabled: true}")
 
     config = replace(load_config(path, profiles, "qa"), credentials_file=Path(REVIEWER_FILE))
     snapshot = sync_worker(config)  # Includes reviewer-authenticated dbt debug/parse.
@@ -142,7 +143,7 @@ def test_restricted_bigquery_runner_and_reviewer(tmp_path):
     maintenance = snapshot["health"]["maintenance"]
     assert maintenance is not None and {m["step"] for m in maintenance} >= {"staging_expiry"}
     patches = [Patch(row["occurrence_id"], field, row.get(field), value, 1,
-                     datetime.now(UTC).isoformat(), row["annotation_version"])
+                     datetime.now(UTC).isoformat(), row["annotation_version"], installation_id=row["_installation_id"])
                for field, value in (("notes", "Permissions QA " + token),
                                     ("review_verdict", "TRUE_POSITIVE"))]
     batch = apply_patches(config, patches)

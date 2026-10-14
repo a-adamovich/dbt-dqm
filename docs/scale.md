@@ -405,3 +405,17 @@ alpha's measured peak. It does not establish a systematic allocator improvement.
 acceptance suites were running concurrently; serialized cache ceilings are unchanged.
 
 Raw result: [`candidate-4c36226-cache-boundary.json`](scale-results/candidate-4c36226-cache-boundary.json).
+
+### Dedicated workflow alpha candidate (2026-10-13)
+
+Production candidate `608ce23` for 0.2.0a4, Python 3.14.6, using the same real
+Postgres sync harness at the supported cache boundary:
+
+| Issues | Mean payload | Baseline RSS | Peak RSS | Warehouse reads | Total sync |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 50,000 | 408 bytes | 174.6 MiB | 317.9 MiB | 5.76 s | 15.61 s |
+
+This is one release-gate measurement with acceptance suites running concurrently.
+It does not establish a systematic performance improvement or change the serialized cache ceilings.
+
+Raw result: [`candidate-608ce23-cache-boundary.json`](scale-results/candidate-608ce23-cache-boundary.json).

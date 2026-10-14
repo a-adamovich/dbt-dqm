@@ -1,3 +1,4 @@
+{% macro maintenance_invocation_id() %}{{ return(var('_dbt_dqm_maintenance_invocation_id',invocation_id)) }}{% endmacro %}
 {#
   Optional maintenance (#13): raw-log pruning, event retention, BigQuery staging expiry and stage
   drops, run-ledger pruning and maintenance-log pruning.
@@ -159,7 +160,7 @@
     start of the first step's job, before any step work can prune its source rows. #}
 {% macro bigquery__maintenance_marker_sql() %}
   begin
-    set dqm_trigger_marker = {{ dbt_dqm.maintenance_trigger_marker_sql(invocation_id) }};
+    set dqm_trigger_marker = {{ dbt_dqm.maintenance_trigger_marker_sql(dbt_dqm.maintenance_invocation_id()) }};
   exception when error then
     set dqm_trigger_marker = null;
   end;
@@ -175,7 +176,7 @@
 {% macro default__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression, marker, kind) %}
   insert into {{ dbt_dqm.dqm_relation('dqm_maintenance_log') }}
     (logged_at,invocation_id,step,outcome,description,diagnostic_id,trigger_marker_at,trigger_kind)
-  values ({{ dbt.current_timestamp() }}, {{ dbt_dqm.sql_string(invocation_id) }}, {{ dbt_dqm.sql_string(step_name) }},
+  values ({{ dbt.current_timestamp() }}, {{ dbt_dqm.sql_string(dbt_dqm.maintenance_invocation_id()) }}, {{ dbt_dqm.sql_string(step_name) }},
     case when {{ ok_expression }} then 'succeeded' else 'failed' end,
     case when {{ ok_expression }} then {{ dbt_dqm.sql_string(step_name | replace('_', ' ') ~ ' succeeded') }}
       else {{ dbt_dqm.sql_string(step_name | replace('_', ' ') ~ ' failed') }} end,
@@ -234,7 +235,7 @@
   create temporary table dqm_maintenance_attribution (trigger_marker_at {{ dbt.type_timestamp() }}) on commit drop;
   do $dqm_attribution$ begin
     {% if kind == 'automatic' %}
-      insert into dqm_maintenance_attribution select {{ dbt_dqm.maintenance_trigger_marker_sql(invocation_id) }};
+      insert into dqm_maintenance_attribution select {{ dbt_dqm.maintenance_trigger_marker_sql(dbt_dqm.maintenance_invocation_id()) }};
     {% else %}
       insert into dqm_maintenance_attribution values (null);
     {% endif %}

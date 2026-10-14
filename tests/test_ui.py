@@ -27,7 +27,7 @@ def test_review_health_and_missed_retry_ui(tmp_path, monkeypatch):
         "annotation_version": 0,
         "first_seen_at": "2026-10-06T00:00:00",
         "annotation_updated_at": None,
-        "poc_responsible": None,
+        "dqm_owner": None,
         "call_to_action": None,
         "notes": None,
         "ticket_url": None,

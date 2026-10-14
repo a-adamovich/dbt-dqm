@@ -21,6 +21,29 @@
 
 `dqm_relation(name)` resolves durable tables using the reconcile model's database and schema. The Python application uses the same rule. Package models use static configuration; runtime stages are never model aliases and cannot become stale through partial parsing.
 
+## Dedicated execution and schema contract
+
+`dqm_enabled` defaults to false. Models and consumer tests opt in through this variable; test
+membership is the presence of `meta.dbt_dqm`. The isolated command validates selection and output
+columns before initialization/reset, executes selected tests, captures their exact invocation results,
+reconciles, publishes views and runs maintenance even after quality failures. Test limits use native
+`config.limit`, defaulting to `dbt_dqm_default_test_limit` (100) when missing with a warning. Samples
+sort by granularity identity and payload before limiting raw rows; duplicates can reduce issue counts.
+Full capture stores all output keys and attributes. Deprecated capture mode settings warn and are ignored.
+
+Executions store `failure_limit` and `captured_issue_count`. At the exact cap `limit_reached` is
+incomplete evidence: the full total is unknown. Observed identities can open/update issues; omitted
+identities cannot close through absence. Only complete executions infer resolution. Health exposes
+limited collections separately from failed/inconclusive collection and from complete evidence.
+
+The `dqm-full-v1` marker rejects older installations. `dbt-dqm run --full-refresh` explicitly resets
+known macro-owned relations and current manifest package relations, with a fresh installation UUID.
+There is no history migration or automatic renaming. Consumer relations, stored failures and unrelated
+tables are preserved. PostgreSQL reset uses one transaction and refuses external dependencies without
+CASCADE. BigQuery prepares empty replacement tables, overwrites destinations with matching schemas/
+partitioning/clustering, and checks unchanged table access. Stop apps during reset and clear workspaces;
+patches bind to the installation UUID and are checked transactionally before audit or annotation writes.
+
 ## Evidence and lifecycle
 
 Capture records each tagged, stored-failure test execution. Tracked tests require `fail_calc=count(*)` after whitespace/case normalization, no configured `limit`, and effective table failure storage. Sampling inside test SQL violates this complete-evidence contract. Configuration, collection and inconclusive outcomes never archive issues. A passing test's grain and explicitly configured owner column are checked from column metadata without scanning rows.
@@ -33,11 +56,15 @@ Matched updates preserve all reviewer annotations and annotation versions. `work
 
 ## Annotations and metadata
 
-The six audited editable fields are `workflow_status`, `review_verdict`, `call_to_action`, `ticket_url`, `notes`, and `poc_responsible`. The app uses compare-and-set against `annotation_version` and writes server-derived old values to the audit ledger in the same transaction. `test_status` remains the deprecated synchronized workflow alias through 0.x.
+The six audited editable fields are `workflow_status`, `review_verdict`, `call_to_action`, `ticket_url`, `notes`, and `dqm_owner`. The app uses compare-and-set against `annotation_version` and writes server-derived old values to the audit ledger in the same transaction. `test_status` remains the deprecated synchronized workflow alias through 0.x.
 
 Verdicts are `UNREVIEWED`, `TRUE_POSITIVE`, or `FALSE_POSITIVE`, independently of workflow. New occurrences start unreviewed. The legacy `FALSE_POSITIVE` workflow option remains available during 0.x.
 
-Row ownership uses explicit case-insensitive `meta.dbt_dqm.owner_column`, otherwise a discovered `DQM_OWNER` column. Trimmed blanks fall back to static `poc_responsible`. Multiple distinct nonblank owners for one identity also use that fallback, record an execution warning, and increment `owner_conflict_identity_count`. Ownership initializes only new occurrences; changing test metadata never replaces reviewer assignments. The owner column does not affect identity or expand payload capture.
+Row ownership uses the fixed, case-insensitive output column `dqm_owner`, then nonblank
+`meta.dbt_dqm.owner`, then `meta.owner`, then unassigned. Conflicting nonblank row owners for one
+identity use the metadata fallback, record a warning, and increment `owner_conflict_identity_count`.
+Ownership initializes new occurrences; reviewer assignments persist. Every output column, including
+the row owner, belongs to full payload capture. `owner_column` and `poc_responsible` are unsupported.
 
 `test_priority` is optional `critical`, `high`, `medium`, or `low`; `test_criticality` is an optional string. Active metadata refreshes from the latest processed execution, including clearing removed values. Archived metadata is frozen. Tags remain ordered JSON text.
 
@@ -72,7 +99,9 @@ Raw-log retention is opt-in, receipt-aware and portable. Observations, execution
 
 ### Optional maintenance
 
-The package runs optional maintenance after an invocation that **captured tracked-test results** (`dbt test` or `dbt build`; skipped tracked tests are captured too) or **completed a reconciliation** (`dqm_reconcile` succeeded). Other runs never touch DQM tables, including runs that only rebuild the public or health views, `--empty` runs, and failed reconciliations. Maintenance runs at most once per invocation. The steps are:
+The dedicated `dbt-dqm run` command runs maintenance after capture and package model execution.
+Ordinary dbt commands have no automatic capture or maintenance end hooks. Explicit cleanup remains
+available for operators. The steps are:
 - receipt-aware raw pruning and run-ledger pruning, when `dbt_dqm_retention_days` is set;
 - event retention, when `dbt_dqm_event_retention_days` is set;
 - on BigQuery, expiry of app uploads older than 24 hours, and drops of abandoned stages and completed ones older than 24 hours;
@@ -110,7 +139,7 @@ On BigQuery, a standalone staging delete can still conflict with a reviewer's Ap
 
 ## Capture concurrency
 
-Serialize dbt test invocations that share a stored-failure schema. dbt overwrites each test's failure table, which the on-run-end capture reads; overlapping invocations could otherwise capture another invocation's rows. The reconciliation generation protocol protects apply concurrency, while this capture-side boundary still requires runner coordination.
+Serialize dbt test invocations that share a stored-failure schema. dbt overwrites each test's failure table, which explicit capture reads; overlapping invocations could otherwise capture another invocation's rows. The reconciliation generation protocol protects apply concurrency, while this capture-side boundary still requires runner coordination.
 
 Capture detects some of these races. Each test's stored failures are copied once into a capture stage inside the capture transaction, and the stage's row count must equal the `result.failures` that dbt reported (0 for a passing test). A mismatch records `collection_status = 'collection_error'` with the message "Stored failures changed before capture", writes no observations, and produces no lifecycle evidence; a mismatched pass is never treated as a pass. Matching counts don't prove the rows came from this invocation (two runs can fail the same number of rows differently), so the serialization requirement above still applies.
 
@@ -144,7 +173,7 @@ On BigQuery use native IAM privilege maps, e.g. `roles/bigquery.dataViewer: ["us
 | Runner (dbt test/build) | `roles/bigquery.jobUser` | `roles/bigquery.dataEditor`; `roles/bigquery.dataOwner` instead if `dbt_dqm_table_grants` or view `+grants` are configured, because issuing GRANT needs `setIamPolicy`. Plus `dataViewer` on the datasets the tests read. | — |
 | Reviewer (review app) | `roles/bigquery.jobUser` | `roles/bigquery.dataViewer`: BigQuery views run with the caller's access to their source tables, and the Health views read executions, receipts, events, reconciliation runs and `dqm_maintenance_log` | `roles/bigquery.dataEditor` on `dqm_issue_occurrences`, `dqm_annotation_changes`, `dqm_missed_issues` and `dqm_app_change_staging` |
 
-Setup creates `dqm_app_change_staging` (migration `0003_app_change_staging`), so reviewers never need table-create rights on the dataset; the app only loads rows into it. The Postgres reviewer grant set above is proven by an acceptance test with separate restricted roles. The BigQuery matrix has not yet been proven with separate restricted service accounts (the BigQuery suite runs as one elevated identity); see the verification record.
+Setup creates `dqm_app_change_staging` (migration `0003_app_change_staging`), so reviewers never need table-create rights on the dataset; the app only loads rows into it. The Postgres reviewer grant set above is tested with separate restricted roles. The BigQuery matrix is tested separately with the existing restricted runner and reviewer service accounts; the complete mechanics suite uses a development identity. See the dated release evidence for the exact candidate and results.
 
 **Credential-file overrides in the review app.** When the app is given an explicit credentials
 file for a BigQuery `oauth` profile (as the restricted gate does for its reviewer), it accepts only
@@ -169,7 +198,9 @@ uv run pytest -q integration_tests/acceptance/test_bigquery_permissions.py
 
 Credentials are loaded independently per client and passed explicitly to runner subprocesses;
 the gate verifies both `SESSION_USER()` identities. It creates uniquely named synthetic fixtures,
-leaves history and reports in QA, and never drops or resets that dataset. Do not use the existing
+leaves synthetic fixtures and reports in QA, and never drops the dataset. For 0.2.0a4 the maintainer
+explicitly authorized a scoped DQM full refresh before this gate; preserve unrelated QA relations
+and all existing access. This authorization does not permit key or IAM changes. Do not use the existing
 destructive acceptance fixture on QA. Cloud Shell credential files do not exist automatically on
 a local workstation. Do not commit credentials.
 

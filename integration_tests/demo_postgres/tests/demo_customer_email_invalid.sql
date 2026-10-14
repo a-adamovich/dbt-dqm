@@ -3,16 +3,14 @@
 {{
   config(
     tags=['dqm', 'Demo', 'Customer'],
-    store_failures=true,
+    store_failures=true, enabled=var('dqm_enabled',false), limit=var('dbt_dqm_default_test_limit',100),
     severity='warn',
     meta={
       'dbt_dqm': {
         'granularity': var('demo_grain', ['customer_id']),
         'priority': var('demo_priority', 'high'),
         'criticality': 'customer contact',
-        'capture_mode': 'allowlist',
-        'context_columns': ['email', 'reason'],
-        'poc_responsible': 'customer_data_owner',
+        'owner': 'customer_data_owner',
         'call_to_action': 'Correct the customer email address'
       }
     }

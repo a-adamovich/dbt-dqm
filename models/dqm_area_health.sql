@@ -1,7 +1,7 @@
 -- depends_on: {{ ref('dqm_reconcile') }}
 -- depends_on: {{ ref('dqm_missed_issues') }}
 -- depends_on: {{ ref('dqm_test_health') }}
-{{ config(schema=var('dbt_dqm_schema', none), materialized='view') }}
+{{ config(enabled=var('dqm_enabled',false), schema=var('dbt_dqm_schema', none), materialized='view') }}
 with areas as ({{ dbt_dqm.health_areas_sql() }}),dependencies as ({{ dbt_dqm.health_areas_sql(true) }}),
 test_totals as (
   select dependencies.source_unique_id,count(*) as tracked_test_count,

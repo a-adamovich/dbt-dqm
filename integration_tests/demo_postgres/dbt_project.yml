@@ -10,5 +10,4 @@ seed-paths: ["seeds"]
 clean-targets: ["target", "dbt_packages", "logs"]
 
 vars:
-  dbt_dqm_test_tag: dqm
   demo_scenario: initial

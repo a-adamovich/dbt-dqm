@@ -1,3 +1,4 @@
+{{ config(enabled=var('dqm_enabled',false)) }}
 with fixture_outcomes as (
   select test_name, count(*) as configuration_errors
   from {{ dbt_dqm.relation_name('dqm_test_executions') }}

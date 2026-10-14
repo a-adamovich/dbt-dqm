@@ -73,6 +73,7 @@ def main():
         (root / "dbt_project.yml").write_text("name: smoke\nprofile: smoke\n")
         cli = shutil.which("dbt-dqm", path=str(Path(sys.executable).parent))
         assert cli is not None
+        subprocess.run([cli, "run", "--help"], check=True, capture_output=True, text=True)
         subprocess.run([cli, "--help"], check=True, capture_output=True)
         subprocess.run([cli, "workspace", "info", "--project-dir", directory,
                         "--target", "smoke"], check=True, capture_output=True)

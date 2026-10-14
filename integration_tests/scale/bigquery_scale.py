@@ -38,7 +38,7 @@ from google.cloud import bigquery
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE = "dbt_dqm_demo"
 DEMO_TESTS = ("demo_customer_email_invalid", "demo_order_amount_invalid", "demo_order_line_invalid")
-SCALE_TEST = """{{ config(tags=['dqm'], store_failures=true, meta={'dbt_dqm': {'granularity': ['customer_id']}}) }}
+SCALE_TEST = """{{ config(tags=['scale','dqm'], enabled=var('dqm_enabled',false), store_failures=true, limit=100, meta={'dbt_dqm': {'granularity': ['customer_id']}}) }}
 select customer_id from {{ ref('demo_records') }} where false
 """
 SIGNATURE = '{"granularity":["customer_id"],"version":"dqm-id-v1"}'
@@ -108,7 +108,13 @@ class Harness:
             "--profiles-dir",
             str(self.profiles),
         ]
+        command += ["--vars", "{dqm_enabled: true}"]
         result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if args[0] in ("test", "build", "run"):
+            sys.path.insert(0, str(ROOT / "integration_tests/acceptance"))
+            from explicit_capture import collect
+
+            result = collect(command, result, self.path / "target")
         if result.returncode != 0:
             raise RuntimeError(f"dbt {' '.join(args)} failed:\n{result.stdout}{result.stderr}")
 
@@ -161,11 +167,11 @@ class Harness:
             insert into {self.table("dqm_test_executions")}
               (invocation_id, captured_at, command, test_unique_id, test_name, test_status,
                failure_count, collection_status, granularity_signature, identity_scheme_signature,
-               capture_mode, owner_conflict_identity_count)
+               failure_limit, captured_issue_count, owner_conflict_identity_count)
             select concat('syn-exec-', cast(e as string)),
               timestamp_sub(anchor, interval cast(e * 600 as int64) second), 'test',
               {test_of % "e"}, 'scale_synthetic', 'fail', 1, 'success', '["customer_id"]',
-              '{SIGNATURE}', 'identity_only', 0
+              '{SIGNATURE}', 100, 1, 0
             from unnest(generate_array({e0 + 1}, {e0 + executions})) e;
 
             insert into {self.table("dqm_reconciliation_receipts")}
@@ -198,7 +204,7 @@ class Harness:
                archived_at, record_status, close_reason, first_seen_invocation,
                last_seen_invocation, last_evaluated_invocation, workflow_status, test_status,
                annotation_version, granularity_signature, identity_scheme_signature, review_verdict,
-               test_priority, poc_responsible)
+               test_priority, dqm_owner)
             select to_hex(md5(concat('occurrence-', cast(g as string)))), {test_of % "g"},
               'scale_synthetic', to_hex(md5(concat('identity-', cast(g as string)))), 1, {payload},
               1, {VARIED_TAGS},

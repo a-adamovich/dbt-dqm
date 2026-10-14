@@ -32,6 +32,10 @@
   {{ alias }}.collection_status in ('success','not_applicable') and lower({{ alias }}.test_status) in ('pass','warn','fail')
 {% endmacro %}
 
+{% macro usable_capture_sql(alias='execution') %}
+  {{ alias }}.collection_status in ('success','not_applicable','limit_reached') and lower({{ alias }}.test_status) in ('pass','warn','fail')
+{% endmacro %}
+
 {% macro reconcile_pre() %}
   {% if not execute or dbt_dqm.empty_mode() %}{{ return('') }}{% endif %}
   {% if var('dbt_dqm_reconcile_lookback_days', none) is not none %}
@@ -64,7 +68,7 @@
   insert into {{ inputs }} (run_id,test_unique_id,invocation_id,captured_at)
     select {{ run_id }}, execution.test_unique_id,execution.invocation_id,execution.captured_at
     from {{ dbt_dqm.dqm_relation('dqm_test_executions') }} execution
-    where {{ dbt_dqm.conclusive_sql() }} and execution.test_unique_id in ({{ dbt_dqm.tracked_ids_sql() }})
+    where {{ dbt_dqm.usable_capture_sql() }} and execution.test_unique_id in ({{ dbt_dqm.tracked_ids_sql() }})
       and not exists(select 1 from {{ dbt_dqm.dqm_relation('dqm_reconciliation_receipts') }} receipt
         where receipt.test_unique_id=execution.test_unique_id and receipt.invocation_id=execution.invocation_id);
   {% if target.type == 'bigquery' %}
@@ -127,7 +131,7 @@
   {% for col, kind in dbt_dqm.table_schemas()['dqm_issue_events'] %}{% do event_columns.append(col) %}{% endfor %}
   {#- Reviewer-owned columns: never overwritten on matched rows, so concurrent edits and
       annotation versions survive. workflow_status_at_close is set once, from the target row. #}
-  {% set protected = ['workflow_status','test_status','call_to_action','ticket_url','notes','poc_responsible','review_verdict','annotation_version','annotation_updated_at','workflow_status_at_close','occurrence_id'] %}
+  {% set protected = ['workflow_status','test_status','call_to_action','ticket_url','notes','dqm_owner','review_verdict','annotation_version','annotation_updated_at','workflow_status_at_close','occurrence_id'] %}
   {% set closure_snapshot = 'workflow_status_at_close=case when target.record_status=\'Active\' and {new}.record_status=\'Archived\' then target.workflow_status else target.workflow_status_at_close end' %}
 
   {% if target.type == 'bigquery' %}

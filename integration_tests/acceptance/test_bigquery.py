@@ -42,11 +42,14 @@ class Demo:
             "--log-path",
             str(self.path / ("logs-" + target)),
         ]
-        if variables:
-            command += ["--vars", json.dumps(variables)]
+        command += ["--vars", json.dumps({"dqm_enabled": True, **(variables or {})})]
         # A reconcile is two BigQuery scripts of ~40 statements; each script took 85-126 s in
         # the 2026-10-07 runs, so one dbt command can approach 300 s without anything hanging.
         result = subprocess.run(command, capture_output=True, text=True, timeout=600, check=False)
+        if args[0] in ("test", "build", "run"):
+            from explicit_capture import collect
+
+            result = collect(command, result, self.path / target)
         self.last_output = result.stdout + result.stderr
         if success:
             assert result.returncode == 0, result.stdout + result.stderr
@@ -377,7 +380,7 @@ def test_bigquery_app_audit_missed_retry_and_health(demo):
         1,
         datetime.now(UTC).isoformat(),
         row["annotation_version"],
-    )
+     installation_id=row.get("_installation_id") or demo.sql("select installation_id from @dataset.dqm_install`")[0]["installation_id"])
     batch = apply_patches(config, [patch])
     assert apply_patches(config, [patch]) == batch
     audit = demo.sql(
@@ -653,7 +656,7 @@ def test_bigquery_empty_changes_no_tracking_table(demo):
                 1,
                 datetime.now(UTC).isoformat(),
                 row["annotation_version"],
-            )
+             installation_id=row.get("_installation_id") or demo.sql("select installation_id from @dataset.dqm_install`")[0]["installation_id"])
         ],
     )
     insert_missed_issue(
@@ -744,7 +747,7 @@ def test_bigquery_0004_preserves_history_and_bounds_legacy_staging(demo):
     row = demo.snapshot()[0]
     apply_patches(load_config(demo.path, demo.profiles, "dev"), [
         Patch(row["occurrence_id"], "notes", row["notes"], "keep for 0004", 1,
-              datetime.now(UTC).isoformat(), row["annotation_version"]),
+              datetime.now(UTC).isoformat(), row["annotation_version"], installation_id=row.get("_installation_id") or demo.sql("select installation_id from @dataset.dqm_install`")[0]["installation_id"]),
     ])
     before = demo.snapshot()
     history = demo.sql("select * from @dataset.dqm_issue_events` order by event_id")
@@ -783,7 +786,7 @@ def test_bigquery_annotation_attempts_rollback_expiry_and_retries(demo, monkeypa
     config = load_config(demo.path, demo.profiles, "dev")
     row = demo.snapshot()[0]
     patches = [Patch(row["occurrence_id"], field, row[field], value, 1,
-                     datetime.now(UTC).isoformat(), row["annotation_version"])
+                     datetime.now(UTC).isoformat(), row["annotation_version"], installation_id=row.get("_installation_id") or demo.sql("select installation_id from @dataset.dqm_install`")[0]["installation_id"])
                for field, value in (("notes", "staging check"),
                                     ("review_verdict", "TRUE_POSITIVE"))]
     sql = warehouse._bigquery_annotation_apply_sql(config)
@@ -840,7 +843,7 @@ def test_bigquery_annotation_concurrent_retries_and_independent_batches(demo):
 
     def edit(row, value):
         return [Patch(row["occurrence_id"], "notes", row["notes"], value, 1,
-                      datetime.now(UTC).isoformat(), row["annotation_version"])]
+                      datetime.now(UTC).isoformat(), row["annotation_version"], installation_id=row.get("_installation_id") or demo.sql("select installation_id from @dataset.dqm_install`")[0]["installation_id"])]
 
     first = edit(rows[0], "duplicate retries")
     second = edit(rows[1], "independent batch")
@@ -957,7 +960,7 @@ def test_bigquery_reviewer_apply_during_maintenance_never_fails_dbt(demo):
                 1,
                 datetime.now(UTC).isoformat(),
                 row["annotation_version"],
-            )
+             installation_id=row.get("_installation_id") or demo.sql("select installation_id from @dataset.dqm_install`")[0]["installation_id"])
             try:
                 apply_patches(config, [patch])
                 outcomes.append("applied")
@@ -1214,3 +1217,65 @@ def test_package_initialization_and_app_with_custom_aliases(demo):
     demo.capture("initial")
     demo.dbt("build", "--select", "package:dbt_dqm")
     check_alias_app(project, demo.profiles)
+
+
+def dedicated(demo, *options, variables=None, code=0):
+    command = [str(Path(sys.executable).with_name("dbt-dqm")), "run",
+               "--project-dir", str(demo.path), "--profiles-dir", str(demo.profiles), *options]
+    if variables:
+        command += ["--vars", json.dumps(variables)]
+    result = subprocess.run(command, text=True, capture_output=True, timeout=900, check=False)
+    assert result.returncode == code, result.stdout + result.stderr
+    return result
+
+
+def test_bigquery_dedicated_limits_full_refresh_and_complex_payloads(demo):
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.errors import AppError
+    from dbt_dqm_app.store import Workspace
+    from dbt_dqm_app.warehouse import apply_patches, fetch_issues, validate_dbt
+
+    demo.dbt("run", "--select", "demo_records")
+    # Untagged metadata test proves tags aren't membership; tagged ordinary test must be excluded.
+    (demo.path / "tests/complex_payload.sql").write_text("""
+{{ config(enabled=var('dqm_enabled',false),store_failures=true,limit=100,severity='warn',
+  meta={'owner':'top_owner','dbt_dqm':{'granularity':['id'],'owner':' ','capture_mode':'identity_only','context_columns':['id']}}) }}
+select 'record-1' as id, [1,2] as attributes, struct('nested' as label) as details,
+       cast(null as string) as dqm_owner, b'bytes' as raw_bytes
+""")
+    (demo.path / "tests/ordinary_tagged.sql").write_text("{{ config(tags=['dqm']) }} select 'ordinary' as id")
+    first = dedicated(demo, "--threads", "4")
+    assert "capture_mode is ignored" in first.stdout and "context_columns is ignored" in first.stdout
+    assert len(demo.snapshot()) == 8
+    complex_issue = next(row for row in demo.snapshot() if row["test_name"] == "complex_payload")
+    assert complex_issue["dqm_owner"] == "top_owner"
+    payload = json.loads(complex_issue["record_values_json"])
+    assert set(payload) == {"id", "attributes", "details", "dqm_owner", "raw_bytes"}
+    assert json.loads(payload["attributes"]) == [1, 2]
+    assert json.loads(payload["details"]) == {"label": "nested"}
+    assert not demo.sql("select 1 from @dataset.dqm_test_executions` where test_name='ordinary_tagged'")
+    config = load_config(demo.path, demo.profiles, "dev")
+    validate_dbt(config)
+    workspace = Workspace(demo.path.parent / "review.sqlite")
+    workspace.replace_snapshot(fetch_issues(config))
+    workspace.set_change(workspace.rows()[0]["occurrence_id"], "notes", "stale edit")
+    patches = workspace.pending()
+    old_epoch = patches[0].installation_id
+    dedicated(demo, "--exclude", "complex_payload", variables={"dbt_dqm_default_test_limit": 2})
+    capped = demo.sql("select * from @dataset.dqm_test_executions` where failure_limit=2")
+    assert len(capped) == 3 and {row["collection_status"] for row in capped} == {"limit_reached"}
+    assert sorted(row["captured_issue_count"] for row in capped) == [1, 2, 2]
+    assert all(row["record_status"] == "Active" for row in demo.snapshot())
+    demo.sql("create table @dataset.consumer_keep` as select 42 as value")
+    identities = {table.table_id for table in demo.client.list_tables(f"{PROJECT}.{demo.dataset}")}
+    before = {name: demo.client.get_iam_policy(f"{PROJECT}.{demo.dataset}.{name}").bindings
+              for name in ("dqm_issue_occurrences", "dqm_annotation_changes", "dqm_app_change_staging")}
+    dedicated(demo, "--full-refresh", "--threads", "4")
+    assert len(demo.snapshot()) == 8
+    assert demo.sql("select installation_id from @dataset.dqm_install`")[0]["installation_id"] != old_epoch
+    assert demo.sql("select * from @dataset.consumer_keep`") == [{"value": 42}]
+    assert identities <= {table.table_id for table in demo.client.list_tables(f"{PROJECT}.{demo.dataset}")}
+    for name, policy in before.items():
+        assert demo.client.get_iam_policy(f"{PROJECT}.{demo.dataset}.{name}").bindings == policy
+    with pytest.raises(AppError, match="Stale DQM installation"):
+        apply_patches(config, patches)

@@ -110,14 +110,14 @@ execution_identity_states as (
     execution.source_unique_id,
     execution.source_relation,
     execution.test_severity,
-    execution.test_priority, execution.test_criticality, execution.capture_mode,
+    execution.test_priority, execution.test_criticality,
     execution.test_tags as execution_tags,
     active.record_values_json as prior_payload,
     observation.test_name,
     observation.record_values_json,
     observation.failure_row_count,
     observation.test_tags,
-    observation.initial_poc_responsible,
+    observation.initial_dqm_owner,
     observation.initial_call_to_action,
     observation.observed_at,
     case when observation.unique_id is null then 0 else 1 end as is_failing,
@@ -134,6 +134,7 @@ execution_identity_states as (
     on candidate.test_unique_id = active.test_unique_id
    and candidate.unique_id = active.unique_id
    and candidate.identity_scheme_signature is not distinct from active.identity_scheme_signature
+  where execution.collection_status != 'limit_reached' or observation.unique_id is not null
 ),
 
 states_with_previous as (
@@ -202,7 +203,7 @@ episode_rollup as (
     max(case when first_failure_rank = 1 and is_failing = 1 then test_name end) as first_test_name,
     max(case when first_failure_rank = 1 and is_failing = 1 then invocation_id end) as first_failure_invocation,
     max(case when first_failure_rank = 1 and is_failing = 1 then observed_at end) as first_failure_at,
-    max(case when first_failure_rank = 1 and is_failing = 1 then initial_poc_responsible end) as initial_poc_responsible,
+    max(case when first_failure_rank = 1 and is_failing = 1 then initial_dqm_owner end) as initial_dqm_owner,
     max(case when first_failure_rank = 1 and is_failing = 1 then initial_call_to_action end) as initial_call_to_action,
     max(case when first_failure_rank = 1 and is_failing = 1 then execution_granularity_signature end) as first_granularity_signature,
     max(case when first_failure_rank = 1 and is_failing = 1 then source_unique_id end) as first_source_unique_id,
@@ -268,7 +269,7 @@ episode_occurrences as (
     case when episode.episode_group = 0 then active.call_to_action else episode.initial_call_to_action end as call_to_action,
     case when episode.episode_group = 0 then active.ticket_url else cast(null as {{ dbt.type_string() }}) end as ticket_url,
     case when episode.episode_group = 0 then active.notes else cast(null as {{ dbt.type_string() }}) end as notes,
-    case when episode.episode_group = 0 then active.poc_responsible else episode.initial_poc_responsible end as poc_responsible,
+    case when episode.episode_group = 0 then active.dqm_owner else episode.initial_dqm_owner end as dqm_owner,
     case when episode.episode_group = 0 then active.annotation_updated_at else cast(null as {{ dbt.type_timestamp() }}) end as annotation_updated_at,
     case when episode.episode_group = 0 then coalesce(active.annotation_version, 0) else 0 end as annotation_version,
     coalesce(episode.first_granularity_signature, active.granularity_signature) as granularity_signature,
@@ -316,7 +317,7 @@ orphaned_occurrences as (
     existing.call_to_action,
     existing.ticket_url,
     existing.notes,
-    existing.poc_responsible,
+    existing.dqm_owner,
     existing.annotation_updated_at,
     existing.annotation_version,
     existing.granularity_signature,
@@ -346,7 +347,7 @@ transition_events as (
       when state.is_failing=0 and state.previous_failing=1 then
         case when state.identity_scheme_signature is distinct from state.execution_identity_scheme_signature
           then 'CLOSED_STRUCTURAL' else 'DISAPPEARED' end
-      when state.is_failing=1 and state.previous_failing=1 and state.capture_mode in ('full','allowlist')
+      when state.is_failing=1 and state.previous_failing=1
         and state.record_values_json is distinct from state.previous_payload then 'VALUES_CHANGED'
       else 'STILL_FAILING' end as event_type,
     state.previous_payload as previous_record_values_json,
@@ -363,7 +364,7 @@ transition_events as (
   where (state.is_failing=1 and state.previous_failing=0)
      or (state.is_failing=0 and state.previous_failing=1)
      or (state.is_failing=1 and state.previous_failing=1 and (
-          (state.capture_mode in ('full','allowlist') and state.record_values_json is distinct from state.previous_payload)
+          (state.record_values_json is distinct from state.previous_payload)
           {% if var('dbt_dqm_emit_still_failing_events',false) %}or true{% endif %}))
 ),
 event_changes_full as (

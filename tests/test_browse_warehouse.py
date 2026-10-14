@@ -85,7 +85,7 @@ def test_pages_without_search_have_no_dry_run_or_ceiling(tmp_path, monkeypatch):
 
 
 def _issue(occurrence_id, rank=0, generation=1, setup="ready"):
-    return {"_generation": generation, "_setup_status": setup, "occurrence_id": occurrence_id,
+    return {"_installation_marker": "dqm-full-v1", "_installation_id": "test-installation", "_generation": generation, "_setup_status": setup, "occurrence_id": occurrence_id,
             "first_seen_at": datetime(2026, 1, 1, tzinfo=UTC), "record_values_json": '{"a": 1}',
             "_priority_rank": rank, "_status_rank": 0}
 
@@ -116,17 +116,17 @@ def test_bigquery_page_reads_keys_then_full_rows_in_key_order(tmp_path, monkeypa
     monkeypatch.setattr(warehouse, "_run_browse_query", run)
     page = warehouse.browse_page(config(tmp_path), "true", browse.Filters(search="abc"), None, 25)
     assert [row["occurrence_id"] for row in page.rows] == ["b", "a", "c"]
-    assert page.next_cursor is None and page.generation == 1
+    assert page.next_cursor is None and page.generation == ("test-installation", 1)
     assert "_priority_rank" not in page.rows[0] and "_generation" not in page.rows[0]
     assert run.seen[1][0].params["ids"] == ["b", "a", "c"]
     assert [searched for _, searched in run.seen] == [True, False]  # only phase 1 searches
 
 
 def test_an_empty_page_still_reports_its_generation(tmp_path, monkeypatch):
-    empty = {"_generation": 7, "_setup_status": "ready", "occurrence_id": None}
+    empty = {"_installation_marker": "dqm-full-v1", "_installation_id": "test-installation", "_generation": 7, "_setup_status": "ready", "occurrence_id": None}
     monkeypatch.setattr(warehouse, "_run_browse_query", Statements([empty]))
     page = warehouse.browse_page(config(tmp_path), "true", browse.Filters(), None, 25)
-    assert page.rows == [] and page.generation == 7 and page.next_cursor is None
+    assert page.rows == [] and page.generation == ("test-installation", 7) and page.next_cursor is None
 
 
 def test_page_reports_the_next_cursor(tmp_path, monkeypatch):
@@ -134,7 +134,7 @@ def test_page_reports_the_next_cursor(tmp_path, monkeypatch):
     monkeypatch.setattr(warehouse, "_run_browse_query", Statements(rows))
     page = warehouse.browse_page(config(tmp_path, "postgres"), "true", browse.Filters(), None, 25)
     assert len(page.rows) == 25
-    assert page.next_cursor == browse.Cursor(1, 0, datetime(2026, 1, 1, tzinfo=UTC), "id024")
+    assert page.next_cursor == browse.Cursor(1, datetime(2026, 1, 1, tzinfo=UTC), "id024")
 
 
 def test_a_reconciliation_between_the_two_bigquery_reads_is_retried_once(tmp_path, monkeypatch):
@@ -142,7 +142,7 @@ def test_a_reconciliation_between_the_two_bigquery_reads_is_retried_once(tmp_pat
                      [_issue("a", generation=2)], [_issue("a", generation=2)])
     monkeypatch.setattr(warehouse, "_run_browse_query", run)
     page = warehouse.browse_page(config(tmp_path), "true", browse.Filters(), None, 25)
-    assert page.generation == 2 and len(run.seen) == 4
+    assert page.generation == ("test-installation", 2) and len(run.seen) == 4
 
 
 def test_repeated_reconciliations_are_reported(tmp_path, monkeypatch):
@@ -169,12 +169,12 @@ def test_setup_in_progress_is_reported(tmp_path, monkeypatch):
 
 
 def test_summary_is_one_statement_with_global_metrics_and_the_filtered_count(tmp_path, monkeypatch):
-    run = Statements([{"_generation": 5, "_setup_status": "ready", "active_count": 10,
+    run = Statements([{"_installation_marker": "dqm-full-v1", "_installation_id": "test-installation", "_generation": 5, "_setup_status": "ready", "active_count": 10,
                        "new_count": 4, "blocked_count": None, "recurring_count": 1,
                        "matching": 3}])
     monkeypatch.setattr(warehouse, "_run_browse_query", run)
     summary = warehouse.browse_summary(config(tmp_path), "true", browse.Filters(search="abc"))
     assert summary == {"active_count": 10, "new_count": 4, "blocked_count": 0,
-                       "recurring_count": 1, "matching": 3, "generation": 5}
+                       "recurring_count": 1, "matching": 3, "generation": ("test-installation", 5)}
     assert len(run.seen) == 1 and run.seen[0][1] is True
     assert "countif" in run.seen[0][0].sql and "as matching" in run.seen[0][0].sql

@@ -16,7 +16,7 @@ macros:
       must have the configured tag and store_failures enabled.
     arguments:
       - name: node
-        type: ParsedNode
+        type: any
         description: dbt result or manifest node to inspect.
 
   - name: relation_name
@@ -49,7 +49,7 @@ macros:
       hardcoded migration branches — reuse this for every future additive schema change.
     arguments:
       - name: relation
-        type: Relation
+        type: any
         description: Relation to alter.
       - name: column_name
         type: string
@@ -74,14 +74,20 @@ macros:
 
   - name: capture_test_results
     description: >
-      on-run-end collector that persists tracked test executions and each failing test's
+      Explicit collector that persists tracked test executions and each failing test's
       deduplicated observations, committed per test as it's processed. It validates mandatory
       meta.dbt_dqm.granularity, records collection errors, and never treats inconclusive results as
       evidence that an issue passed.
     arguments:
       - name: results
-        type: list[RunResult]
-        description: dbt invocation results supplied to the on-run-end hook.
+        type: any
+        description: Results of the dedicated DQM test invocation.
+      - name: source_invocation_id
+        type: string
+        description: Original test invocation identity.
+      - name: initialized
+        type: bool
+        description: Whether setup has completed in this workflow.
 
   - name: dual
     description: >
@@ -105,7 +111,7 @@ macros:
       dispatched per adapter since JSON-object construction syntax differs across warehouses.
     arguments:
       - name: pairs
-        type: list[tuple[string, string]]
+        type: any
         description: Ordered (key, value_sql) pairs; value_sql is a SQL expression, already quoted/cast.
 
   - name: canonical_identity_string
@@ -115,7 +121,7 @@ macros:
       supported adapter and is protected by golden hash vectors.
     arguments:
       - name: pairs
-        type: list[tuple[string, string]]
+        type: any
         description: Ordered lowercase key names and normalized nullable SQL string expressions.
 
   - name: insert_new_rows
@@ -125,7 +131,7 @@ macros:
       concept and uses MERGE; Postgres uses INSERT ... ON CONFLICT.
     arguments:
       - name: target_relation
-        type: Relation
+        type: any
         description: Relation to insert into.
       - name: source_sql
         type: string
@@ -143,7 +149,7 @@ macros:
       A no-op on adapters (like BigQuery) that don't need one.
     arguments:
       - name: relation
-        type: Relation
+        type: any
         description: Relation to index.
       - name: columns
         type: list[string]

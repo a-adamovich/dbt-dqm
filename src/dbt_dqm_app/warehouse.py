@@ -124,7 +124,7 @@ def validate_dbt(config: AppConfig) -> None:
     try:
         version = _dbt_version(dbt_executable)
         for operation in ("debug", "parse"):
-            subprocess.run([dbt_executable, operation, *base], check=True, capture_output=True,
+            subprocess.run([dbt_executable, operation, *base, *(["--vars", "{dqm_enabled: true}"] if operation == "parse" else [])], check=True, capture_output=True,
                            text=True, encoding="utf-8", errors="replace", env=environment,
                            cwd=config.working_dir)
     except subprocess.CalledProcessError as error:
@@ -135,7 +135,7 @@ def validate_dbt(config: AppConfig) -> None:
 
 
 REQUIRED_APP_RELATIONS = (
-    "dqm_reconciliation_control", "dqm_issue_occurrences", "dqm_all_issues", "dqm_test_health",
+    "dqm_install", "dqm_reconciliation_control", "dqm_issue_occurrences", "dqm_all_issues", "dqm_test_health",
     "dqm_area_health", "dqm_annotation_changes", "dqm_missed_issues",
 )
 
@@ -158,8 +158,13 @@ def check_required_relations(config: AppConfig) -> None:
                 if cursor.fetchone()[0] is None:
                     missing.append(relation)
     if missing:
-        raise AppError("DQM tracking relations are missing. Run `dbt run --select package:dbt_dqm` "
+        raise AppError("DQM tracking relations are missing. Run `dbt-dqm run` "
                        "first, then Sync again.", "Missing relations:\n" + "\n".join(missing))
+
+    state = _query_rows(config, f"select * from {_table(config, 'dqm_install')}")
+    if len(state) != 1 or state[0]["marker"] != "dqm-full-v1" or not state[0].get("installation_id"):
+        raise AppError("Incompatible DQM schema. Run `dbt-dqm run --full-refresh`, "
+                       "then clear old reviewer workspaces and restart the app.")
 
 
 def client_for(config: AppConfig) -> bigquery.Client:
@@ -265,6 +270,8 @@ def _snapshot_state(config: AppConfig, predicate: str) -> dict[str, Any]:
         config,
         f"select (select max(generation) from {control}) as generation, "
         f"(select max(setup_status) from {control}) as setup_status, "
+        f"(select max(installation_id) from {_table(config, 'dqm_install')}) as installation_id, "
+        f"(select max(marker) from {_table(config, 'dqm_install')}) as installation_marker, "
         f"(select count(*) from {occurrences} where {predicate}) as issue_count",
     )[0]
 
@@ -279,7 +286,7 @@ def fetch_issues(config: AppConfig) -> list[dict[str, Any]]:
     """
     predicate = _issue_predicate(config)
     before = _snapshot_state(config, predicate)
-    if before["setup_status"] != "ready":
+    if before["setup_status"] != "ready" or before["installation_marker"] != "dqm-full-v1":
         raise SnapshotUnavailable(
             "dbt-dqm setup or a migration is in progress, so warehouse data isn't ready yet. "
             "Showing cached data; sync again shortly."
@@ -301,12 +308,12 @@ def fetch_issues(config: AppConfig) -> list[dict[str, Any]]:
     finally:
         downloaded.close()
     after = _snapshot_state(config, predicate)
-    if after["generation"] != before["generation"]:
+    if (after["generation"], after["installation_id"]) != (before["generation"], before["installation_id"]):
         raise SnapshotUnavailable(
             "The warehouse changed while syncing (a reconciliation finished). "
             "Showing cached data; sync again."
         )
-    if after["setup_status"] != "ready":
+    if after["setup_status"] != "ready" or after["installation_marker"] != "dqm-full-v1":
         raise SnapshotUnavailable("DQM setup changed while syncing. Cached data is kept.")
     if len(rows) != after["issue_count"]:
         raise SnapshotUnavailable(
@@ -315,6 +322,8 @@ def fetch_issues(config: AppConfig) -> list[dict[str, Any]]:
             "package:dbt_dqm, then sync again. Showing cached data."
         )
     _validate_issue_rows(rows)
+    for row in rows:
+        row["_installation_id"] = after["installation_id"]
     return rows
 
 
@@ -384,7 +393,7 @@ def _run_browse_query(config: AppConfig, query: browse.Query, *, searched: bool 
         raise
 
 
-STATE_COLUMNS = ("_generation", "_setup_status")
+STATE_COLUMNS = ("_generation", "_setup_status", "_installation_marker")
 SETUP_NOT_READY = (
     "dbt-dqm setup or a migration is in progress, so warehouse data isn't ready yet. "
     "Try again shortly."
@@ -401,14 +410,16 @@ def _read_with_state(config: AppConfig, query: browse.Query, *, order: str | Non
     """
     control = _table(config, "dqm_reconciliation_control")
     state = (f"select max(generation) as _generation, max(setup_status) as _setup_status "
+             f", (select max(installation_id) from {_table(config, 'dqm_install')}) as _installation_id "
+             f", (select max(marker) from {_table(config, 'dqm_install')}) as _installation_marker "
              f"from {control}")
     sql = f"select s.*, q.* from ({state}) s left join ({query.sql}) q on true"
     if order:
         sql += f" order by {order}"
     rows = _run_browse_query(config, browse.Query(sql, query.params), searched=searched)
-    if not rows or rows[0]["_setup_status"] != "ready":
+    if not rows or rows[0]["_setup_status"] != "ready" or rows[0]["_installation_marker"] != "dqm-full-v1":
         raise SnapshotUnavailable(SETUP_NOT_READY)
-    generation = rows[0]["_generation"]
+    generation = (rows[0]["_installation_id"], rows[0]["_generation"])
     return [{key: value for key, value in row.items() if key not in STATE_COLUMNS}
             for row in rows], generation
 
@@ -420,7 +431,7 @@ class Page:
     generation: Any
 
 
-PAGE_ORDER = "q._priority_rank, q._status_rank, q.first_seen_at, q.occurrence_id"
+PAGE_ORDER = "q._priority_rank, q.first_seen_at, q.occurrence_id"
 
 
 def browse_page(config: AppConfig, population: str, filters: browse.Filters,
@@ -479,7 +490,7 @@ def browse_summary(config: AppConfig, population: str, filters: browse.Filters) 
                             {**metrics.params, **count.params})
     rows, generation = _read_with_state(
         config, combined, searched=browse.normalized_search(filters.search) is not None)
-    return {**{key: int(value or 0) for key, value in rows[0].items()}, "generation": generation}
+    return {**{key: int(value or 0) for key, value in rows[0].items() if key != "_installation_id"}, "generation": generation}
 
 
 def browse_options(config: AppConfig, population: str) -> dict[str, Any]:
@@ -584,15 +595,18 @@ def _apply_bigquery_patches(config: AppConfig, patches: Iterable[Patch]) -> str:
     batch_id = _batch_id(patches)
     upload_id = uuid.uuid4().hex
     client = client_for(config)
+    current_installation = installation_id(config)
+    if any(patch.installation_id != current_installation for patch in patches):
+        raise AppError("Stale DQM installation. Clear the old workspace after full refresh.")
     database, schema, _ = _relation_parts(config, "dqm_issue_occurrences")
     staging_id = f"{database}.{schema}.dqm_app_change_staging"
     try:
         table = client.get_table(staging_id)
     except google_errors.NotFound as error:
         raise AppError("App staging is missing. Build package:dbt_dqm before applying.") from error
-    if not {"upload_id", "staged_at"} <= {field.name for field in table.schema}:
-        raise AppError("App staging requires migration 0004. Build package:dbt_dqm, "
-                       "then restart reviewer apps before applying.")
+    if not {"upload_id", "staged_at", "installation_id"} <= {field.name for field in table.schema}:
+        raise AppError("App staging requires the new DQM schema. Run dbt-dqm run --full-refresh, "
+                       "then clear old workspaces and restart reviewer apps.")
     payload = []
     for patch in patches:
         row = {"batch_id": batch_id, "upload_id": upload_id,
@@ -608,7 +622,7 @@ def _apply_bigquery_patches(config: AppConfig, patches: Iterable[Patch]) -> str:
             ("batch_id", "STRING"), ("upload_id", "STRING"), ("occurrence_id", "STRING"),
             ("field_name", "STRING"), ("old_value", "STRING"), ("new_value", "STRING"),
             ("changed_at", "TIMESTAMP"), ("changed_by", "STRING"),
-            ("base_annotation_version", "INT64"))],
+            ("base_annotation_version", "INT64"), ("installation_id", "STRING"))],
     )
     client.load_table_from_json(payload, staging_id, job_config=load_config,
                                 job_id="dqm_annotation_upload_" + upload_id).result()
@@ -653,6 +667,11 @@ def _bigquery_annotation_apply_sql(config: AppConfig) -> str:
       assert not exists(select 1 from attempt group by occurrence_id
         having count(distinct base_annotation_version)>1)
         as 'Inconsistent annotation base versions.';
+      assert (select marker from {_table(config, 'dqm_install')})='dqm-full-v1'
+        as 'DQM reset is in progress; stop reviewer apps until it completes.';
+      assert not exists(select 1 from attempt where installation_id is null or
+        installation_id != (select installation_id from { _table(config, 'dqm_install') }))
+        as 'Stale DQM installation. Clear the old workspace after full refresh.';
       set audited_count=(select count(*) from {audit} where batch_id=@batch_id);
       if audited_count>0 then
         assert audited_count=@patch_count and not exists (
@@ -721,6 +740,11 @@ def _apply_postgres_patches(config: AppConfig, patches: list[Patch]) -> str:
         _postgres_connection(config) as connection,
         connection.cursor(cursor_factory=pg_extras.RealDictCursor) as cursor,
     ):
+        cursor.execute("select pg_advisory_xact_lock(hashtext(%s))", ("dbt_dqm:" + _relation_parts(config, "dqm_install")[1],))
+        cursor.execute(f"select installation_id from {_table(config, 'dqm_install')}")
+        installation = cursor.fetchone()["installation_id"]
+        if any(patch.installation_id != installation for patch in patches):
+            raise AppError("Stale DQM installation. Clear the old workspace after full refresh.")
         cursor.execute(
             f"select occurrence_id, field_name from {audit_table} where batch_id=%s",
             (batch_id,),
@@ -799,15 +823,28 @@ def run_worker(worker, *args):
         raise worker_error(error) from None
 
 
+def installation_id(config: AppConfig) -> str:
+    return _query_rows(config, f"select installation_id from {_table(config, 'dqm_install')}")[0]["installation_id"]
+
+
+def _refresh_snapshot(config: AppConfig, browsing=False) -> dict[str, Any]:
+    epoch = installation_id(config)
+    snapshot = {"health": fetch_health(config)} if browsing else {
+        "issues": fetch_issues(config), "health": fetch_health(config)}
+    if installation_id(config) != epoch:
+        raise SnapshotUnavailable("The DQM installation changed while syncing. Clear the old workspace after full refresh.")
+    return {**snapshot, "installation_id": epoch}
+
+
 def sync_worker(config: AppConfig) -> dict[str, Any]:
     validate_dbt(config)
-    return {"issues": fetch_issues(config), "health": fetch_health(config)}
+    return _refresh_snapshot(config)
 
 
 def browse_refresh_worker(config: AppConfig) -> dict[str, Any]:
     """Warehouse mode's sync: issue pages are read on demand, so only Health is refreshed."""
     validate_dbt(config)
-    return {"health": fetch_health(config)}
+    return _refresh_snapshot(config, browsing=True)
 
 
 def apply_worker(
@@ -820,9 +857,7 @@ def apply_worker(
     validate_dbt(config)
     batch_id = apply_patches(config, patches)
     try:
-        if browsing:
-            return batch_id, {"health": fetch_health(config)}, None
-        return batch_id, {"issues": fetch_issues(config), "health": fetch_health(config)}, None
+        return batch_id, _refresh_snapshot(config, browsing), None
     except Exception as error:  # noqa: BLE001 - the apply already committed; report the refresh.
         return batch_id, None, worker_error(error)
 

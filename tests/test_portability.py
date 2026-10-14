@@ -180,7 +180,8 @@ def test_validation_keeps_only_supplied_flags_and_adc(project, monkeypatch):
                         calls.append((command, kwargs)))
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "existing ADC configuration")
     warehouse.validate_dbt(config)
-    assert all(command[2:] == ["--target", "dev"] for command, _ in calls)
+    assert calls[0][0][2:] == ["--target", "dev"]
+    assert calls[1][0][2:] == ["--target", "dev", "--vars", "{dqm_enabled: true}"]
     assert all(kwargs["cwd"] == project for _, kwargs in calls)
     assert all(kwargs["env"]["GOOGLE_APPLICATION_CREDENTIALS"] == "existing ADC configuration"
                for _, kwargs in calls)
@@ -214,7 +215,7 @@ def test_preflight_distinguishes_missing_relations_from_permissions(tmp_path, mo
     client = MagicMock()
     client.get_table.side_effect = NotFound("missing")
     monkeypatch.setattr(warehouse, "client_for", lambda config: client)
-    with pytest.raises(AppError, match="dbt run --select package:dbt_dqm") as raised:
+    with pytest.raises(AppError, match="dbt-dqm run") as raised:
         warehouse.check_required_relations(config)
     assert "project.schema.dqm_issue_occurrences" in raised.value.details
     client.get_table.side_effect = Forbidden("no access")
@@ -226,6 +227,7 @@ def test_apply_refresh_error_is_serializable_after_commit(tmp_path, monkeypatch)
     import pickle
     config = AppConfig(tmp_path, tmp_path, "dev", "demo", "bigquery", "project", "schema", "US", "oauth", None)
     monkeypatch.setattr(warehouse, "validate_dbt", lambda config: None)
+    monkeypatch.setattr(warehouse, "installation_id", lambda *args: "test")
     monkeypatch.setattr(warehouse, "apply_patches", lambda *args: "committed")
     monkeypatch.setattr(warehouse, "fetch_issues", lambda config: unsafe_failure())
     batch, snapshot, error = pickle.loads(pickle.dumps(warehouse.apply_worker(config, [])))
@@ -240,6 +242,7 @@ def test_postgres_preflight_does_not_require_bigquery_staging(tmp_path, monkeypa
     cursor = connection.__enter__.return_value.cursor.return_value.__enter__.return_value
     cursor.fetchone.return_value = ("present",)
     monkeypatch.setattr(warehouse, "_postgres_connection", lambda config: connection)
+    monkeypatch.setattr(warehouse, "_query_rows", lambda *args: [{"marker": "dqm-full-v1", "installation_id": "test"}])
     warehouse.check_required_relations(config)
     assert all("dqm_app_change_staging" not in str(call) for call in cursor.execute.call_args_list)
     assert len(cursor.execute.call_args_list) == len(warehouse.REQUIRED_APP_RELATIONS)

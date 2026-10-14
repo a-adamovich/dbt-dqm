@@ -8,9 +8,7 @@ interpolated into SQL. Semantics match the snapshot mode's pandas filters in `st
 - workflow status (missing = "NEW", compared upper-case);
 - owner (blank or missing = "Unassigned");
 - created date: an inclusive range of local calendar dates, passed as UTC bounds;
-- order: priority rank, workflow-status rank, created time, occurrence id. Snapshot mode also puts
-  issues with pending edits first; that state is local, so warehouse mode shows pending edits in
-  the pending panel instead.
+- order: priority rank, created time, occurrence id. Edits never affect sort keys.
 """
 
 from __future__ import annotations
@@ -30,11 +28,11 @@ STATUS_ORDER = (
 )
 PRIORITY_ORDER = ("critical", "high", "medium", "low")
 SEARCH_COLUMNS = (
-    "test_name", "unique_id", "record_values_json", "workflow_status", "poc_responsible",
+    "test_name", "unique_id", "record_values_json", "workflow_status", "dqm_owner",
     "call_to_action", "notes", "ticket_url", "test_priority", "test_tags",
 )
 # Phase 1 of a BigQuery page reads only these (plus filter columns) to choose the page's ids.
-KEY_COLUMNS = ("occurrence_id", "first_seen_at", "test_priority", "workflow_status")
+KEY_COLUMNS = ("occurrence_id", "first_seen_at", "test_priority")
 
 
 class InvalidSearch(ValueError):
@@ -59,7 +57,6 @@ class Cursor:
     """The last row of the previous page, in sort-key order."""
 
     priority_rank: int
-    status_rank: int
     first_seen_at: datetime
     occurrence_id: str
 
@@ -119,13 +116,8 @@ def _status_sql() -> str:
     return "upper(coalesce(workflow_status, 'NEW'))"
 
 
-def _status_rank_sql() -> str:
-    cases = " ".join(f"when '{value}' then {rank}" for rank, value in enumerate(STATUS_ORDER))
-    return f"(case {_status_sql()} {cases} else 99 end)"
-
-
 def _owner_sql() -> str:
-    return "coalesce(nullif(trim(poc_responsible), ''), 'Unassigned')"
+    return "coalesce(nullif(trim(dqm_owner), ''), 'Unassigned')"
 
 
 def _tags_exist_sql(builder: _Builder, tags: tuple[str, ...]) -> str:
@@ -191,13 +183,12 @@ def _naive_if_postgres(builder: _Builder, moment: datetime) -> datetime:
 
 
 def _order_and_keyset(builder: _Builder, cursor: Cursor | None) -> tuple[str, str | None]:
-    keys = (_priority_rank_sql(), _status_rank_sql(), "first_seen_at", "occurrence_id")
+    keys = (_priority_rank_sql(), "first_seen_at", "occurrence_id")
     order = ", ".join(keys)
     if cursor is None:
         return order, None
     values = (
         builder.param("after_priority", cursor.priority_rank),
-        builder.param("after_status", cursor.status_rank),
         builder.param("after_seen", _naive_if_postgres(builder, cursor.first_seen_at)),
         builder.param("after_id", cursor.occurrence_id),
     )
@@ -221,7 +212,7 @@ def page_query(adapter: str, relation: str, population: str, filters: Filters,
     order, keyset = _order_and_keyset(builder, cursor)
     if keyset:
         builder.where.append(keyset)
-    ranks = f"{_priority_rank_sql()} as _priority_rank, {_status_rank_sql()} as _status_rank"
+    ranks = f"{_priority_rank_sql()} as _priority_rank"
     limit = builder.param("page_limit", page_size + 1)  # one extra row says whether a next page exists
     sql = (f"select {columns}, {ranks} from {relation} where {' and '.join(builder.where)} "
            f"order by {order} limit {limit}")
@@ -231,7 +222,7 @@ def page_query(adapter: str, relation: str, population: str, filters: Filters,
 def rows_by_id_query(adapter: str, relation: str, ids: list[str]) -> Query:
     builder = _Builder(adapter)
     condition = builder.in_list("occurrence_id", "ids", tuple(ids))
-    ranks = f"{_priority_rank_sql()} as _priority_rank, {_status_rank_sql()} as _status_rank"
+    ranks = f"{_priority_rank_sql()} as _priority_rank"
     return Query(f"select *, {ranks} from {relation} where {condition}", builder.params)
 
 
@@ -266,14 +257,14 @@ def cursor_from_row(row: dict[str, Any]) -> Cursor:
         seen = datetime.fromisoformat(seen)
     if seen.tzinfo is None:
         seen = seen.replace(tzinfo=UTC)
-    return Cursor(int(row["_priority_rank"]), int(row["_status_rank"]), seen, str(row["occurrence_id"]))
+    return Cursor(int(row["_priority_rank"]), seen, str(row["occurrence_id"]))
 
 
 def options_query(adapter: str, relation: str, population: str, limit: int = 500) -> Query:
     """Filter choices over the whole population: statuses, owners, tags and the created range."""
     if adapter == "bigquery":
         tags = (f"select distinct trim(tag) from {relation}, unnest(json_value_array(test_tags)) tag "
-                f"where {population} and tag is not null and trim(tag) <> ''")
+                f"where {population} and tag is not null and trim(tag) <> '' and lower(trim(tag)) <> 'dqm'")
     else:
         elements = (
             "case when jsonb_typeof(test_tags::jsonb) = 'array' then test_tags::jsonb "
@@ -281,7 +272,7 @@ def options_query(adapter: str, relation: str, population: str, limit: int = 500
         )
         tags = (f"select distinct trim(tag) from {relation} "
                 f"cross join lateral jsonb_array_elements_text({elements}) tag "
-                f"where {population} and trim(tag) <> ''")
+                f"where {population} and trim(tag) <> '' and lower(trim(tag)) <> 'dqm'")
     return Query(
         f"select array(select distinct {_status_sql()} from {relation} where {population} "
         f"order by 1 limit {limit}) as statuses, "

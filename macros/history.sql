@@ -4,7 +4,7 @@ select cur.*, prev.occurrence_id is not null as has_previous_occurrence,
   coalesce(prev.close_reason='Passed' and prev.workflow_status_at_close='RESOLVED',false) as is_potential_regression,
   prev.occurrence_id as previous_occurrence_id, prev.archived_at as previous_archived_at,
   prev.close_reason as previous_close_reason, prev.workflow_status_at_close as previous_workflow_status_at_close,
-  prev.review_verdict as previous_review_verdict, prev.poc_responsible as previous_poc_responsible,
+  prev.review_verdict as previous_review_verdict, prev.dqm_owner as previous_dqm_owner,
   prev.ticket_url as previous_ticket_url, prev.notes as previous_notes
 from {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} cur
 left join {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} prev
