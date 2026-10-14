@@ -1,6 +1,9 @@
 import json
+import os
 import stat
 import threading
+
+import pytest
 
 from dbt_dqm_app.display import (
     calendar_date,
@@ -148,6 +151,7 @@ def test_set_change_survives_concurrent_writers_without_losing_an_update(tmp_pat
     assert final[0].version == 2
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits do not describe Windows ACLs")
 def test_workspace_uses_owner_only_permissions(tmp_path):
     workspace = Workspace(tmp_path / "private" / "workspace.sqlite")
     assert stat.S_IMODE(workspace.path.parent.stat().st_mode) == 0o700
