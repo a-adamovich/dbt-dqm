@@ -490,12 +490,10 @@ def _render_review_tools(workspace, config, page_rows, filters, pending_only,
         if st.button("Stage changes", disabled=disabled or not selection.rows or not changes):
             try:
                 affected = workspace.stage_bulk(selection.baselines(), changes)
-                # Cards must initialize from the new pending overlay, not their old widget
-                # values. Otherwise the next rerun stages those old values back over the batch.
-                for key in list(st.session_state):
-                    if (any(key.startswith(identity + "-") for identity in selection.rows) and
-                            any(key.endswith("-" + field) for field in changes)):
-                        del st.session_state[key]
+                # A new widget identity forces the browser to initialize all visible editors
+                # from the pending overlay. Deleting session-state keys alone lets Streamlit
+                # restore the old frontend values and silently undo part of the bulk batch.
+                st.session_state.bulk_widget_generation = st.session_state.get("bulk_widget_generation", 0) + 1
                 _clear_selection()
                 st.session_state.review_notice = f"Staged changes for {affected} issue(s). Use Apply and sync to save."
                 st.rerun()
@@ -721,7 +719,7 @@ def _render_warehouse_issues(workspace, pending, config) -> None:
                          population, state.get("browse_generation"), stale_generation)
     staged_change = False
     for row in page_rows:
-        widget_prefix = f"{row['occurrence_id']}-{row.get('annotation_version')}-w"
+        widget_prefix = f"{row['occurrence_id']}-{row.get('annotation_version')}-w-{st.session_state.get('bulk_widget_generation', 0)}"
         staged_change |= _render_issue_card(workspace, row, widget_prefix, editor_owner_options)
     if staged_change:
         st.rerun()
@@ -941,7 +939,7 @@ def _render_issues(workspace, pending, config) -> None:
     staged_change = False
     sync_token = workspace.last_sync() or "never"
     for _, row in page_rows.iterrows():
-        widget_prefix = f"{row['occurrence_id']}-{sync_token}"
+        widget_prefix = f"{row['occurrence_id']}-{sync_token}-{st.session_state.get('bulk_widget_generation', 0)}"
         staged_change |= _render_issue_card(workspace, row, widget_prefix, editor_owner_options)
 
     if staged_change:

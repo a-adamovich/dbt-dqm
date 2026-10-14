@@ -319,7 +319,10 @@ def test_snapshot_bulk_stage_survives_card_rerenders(harness):
     click(app,'Select current page')
     assert len(app.session_state['bulk_selection'].rows)==25
     next(box for box in app.selectbox if box.label=='Bulk workflow status').set_value('TRIAGED').run()
+    keys_before = {box.key for box in app.selectbox if box.label == 'Status'}
     click(app,'Stage changes')
+    keys_after = {box.key for box in app.selectbox if box.label == 'Status'}
+    assert not keys_before & keys_after
     assert len(workspace.pending())==25
     assert all(p.new_value=='TRIAGED' for p in workspace.pending())
     next(box for box in app.number_input if box.label=='Page').set_value(2).run()
@@ -345,6 +348,9 @@ def test_warehouse_bulk_apply_is_available_above_configured_snapshot_limit(harne
         connection.execute("update snapshot set payload_json=json_set(payload_json,'$._installation_id','installed')")
     click(app,'Select current page')
     next(box for box in app.selectbox if box.label=='Bulk review verdict').set_value('TRUE_POSITIVE').run()
+    keys_before = {box.key for box in app.selectbox if box.label == 'Status'}
     click(app,'Stage changes')
+    keys_after = {box.key for box in app.selectbox if box.label == 'Status'}
+    assert not keys_before & keys_after
     assert len(workspace.pending())==25
     assert not next(button for button in app.button if button.label=='Apply and sync').disabled
