@@ -34,7 +34,9 @@
 {% macro initialize_dqm() %}
   {% if not execute or not var('dqm_enabled',false) %}{{ return('') }}{% endif %}
   {% set anchor=dbt_dqm.dqm_relation('dqm_install') %}
-  {% do adapter.create_schema(anchor) %}
+  {% if not adapter.check_schema_exists(anchor.database, anchor.schema) %}
+    {% do adapter.create_schema(anchor) %}
+  {% endif %}
   {% set script %}{% if target.type=='postgres' %}begin; {{ dbt_dqm.reconcile_lock() }}{% endif %}
     {{ dbt_dqm.setup_sql() }}{% if target.type=='postgres' %}commit;{% endif %}{% endset %}
   {% do run_query(script) %}
