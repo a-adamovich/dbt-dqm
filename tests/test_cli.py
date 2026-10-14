@@ -1,6 +1,44 @@
 from dbt_dqm_app.cli import parser
 
 
+def test_run_flags_and_boolean_defaults():
+    options = parser().parse_args(["run"])
+    assert options.defer is options.favor_state is options.state is options.target_path is None
+    assert options.verbose is False
+    options = parser().parse_args(["run", "--full-refresh", "--defer", "--favor-state",
+                                   "--state", "prod state", "--target-path", "dev output", "--verbose"])
+    assert options.full_refresh and options.defer and options.favor_state and options.verbose
+    assert options.state == "prod state" and options.target_path == "dev output"
+    options = parser().parse_args(["run", "--no-defer", "--no-favor-state"])
+    assert options.defer is False and options.favor_state is False
+
+
+def test_unknown_arguments_keep_original_dashes(capsys):
+    import pytest
+
+    with pytest.raises(SystemExit):
+        parser().parse_args(["run", "--full-refresh", "--unknown-option"])
+    error = capsys.readouterr().err
+    assert "unrecognized arguments: --unknown-option" in error
+    assert "unrecognized arguments: full-refresh" not in error
+
+
+def test_app_custom_artifacts_override_environment(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import pytest
+
+    from dbt_dqm_app import cli
+
+    monkeypatch.setenv("DBT_TARGET_PATH", "old")
+    process = MagicMock(return_value=MagicMock(returncode=0))
+    monkeypatch.setattr(cli.subprocess, "run", process)
+    monkeypatch.setattr(cli.sys, "argv", ["dbt-dqm", "app", "--target-path", "custom artifacts"])
+    with pytest.raises(SystemExit):
+        cli.main()
+    assert process.call_args.kwargs["env"]["DBT_TARGET_PATH"] == "custom artifacts"
+
+
 def test_cache_flags_are_passed_to_the_app_environment(monkeypatch):
     from unittest.mock import MagicMock
 

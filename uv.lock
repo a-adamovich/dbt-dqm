@@ -452,7 +452,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/44/22/43a63fb0cd40dba71
 
 [[package]]
 name = "dbt-dqm"
-version = "0.2.0a4"
+version = "0.2.0a5"
 source = { editable = "." }
 dependencies = [
     { name = "dbt-core" },

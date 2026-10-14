@@ -9,8 +9,8 @@ runs.
 
 | | |
 | --- | --- |
-| Latest release | `0.2.0a4`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a4/), Git tag [`v0.2.0a4`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a4). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a4`. |
-| Upgrade | **Breaking schema change:** stop reviewer apps and run `dbt-dqm run --full-refresh`. Tracking history is reset, with no migration. Consumer models and stored test failures are preserved. |
+| Latest release | `0.2.0a5`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a5/), Git tag [`v0.2.0a5`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a5). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a4`. |
+| Upgrade | From `0.2.0a4`: update both packages and run normally; history is preserved. Earlier versions require `dbt-dqm run --full-refresh`, which resets tracking history while preserving consumer models and stored test failures. |
 | dbt | dbt-core 1.11 and 1.12, with dbt-bigquery 1.11 or 1.12 and dbt-postgres 1.11 (there is no dbt-postgres 1.12; 1.11 supports dbt-core 1.12) |
 | Warehouses | BigQuery; Postgres 14 and 16 (needs the `pgcrypto` extension) |
 | Review app | Python 3.11–3.14, the same two warehouses |
@@ -18,7 +18,7 @@ runs.
 The Python app pins dbt-core 1.12.5; its optional extras use dbt-bigquery 1.12.1 and dbt-postgres 1.11.x;
 the dbt package accepts the wider dbt range above. Python support is `>=3.11,<3.15`.
 The [release checklist](docs/release-checklist.md) lists what must pass before a release is tagged;
-the [0.2.0a4 evidence](docs/release-0.2.0a4.md) records this alpha's results.
+the [0.2.0a5 evidence](docs/release-0.2.0a5.md) records this alpha's results.
 Package contracts (relations, migrations, grants, recovery, retention, maintenance) are in
 [warehouse interfaces](docs/warehouse-interfaces.md).
 
@@ -29,10 +29,10 @@ Install the alpha through Git by adding it to your consumer project's `packages.
 ```yaml
 packages:
   - git: "https://github.com/a-adamovich/dbt-dqm.git"
-    revision: v0.2.0a4
+    revision: v0.2.0a5
 ```
 
-The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a4`, so
+The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a5`, so
 install this alpha through the Git revision above. Hub registration is planned for 0.2.0.
 
 The 0.2 app expects the matching 0.2 package; don't mix it with 0.1.
@@ -50,7 +50,7 @@ In a Python 3.14 environment (recommended; 3.11–3.14 supported), install the a
 ```bash
 python3.14 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a4'
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a5'
 ```
 
 Warehouse adapters are optional. In a checkout, install
@@ -58,9 +58,9 @@ only the adapter you need with `uv sync --extra bigquery` or `uv sync --extra po
 use `uv sync --all-extras` for both. Select the extra in your installed environment:
 
 ```bash
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a4'          # BigQuery
-python -m pip install 'dbt-dqm[postgres]==0.2.0a4'          # Postgres
-python -m pip install 'dbt-dqm[bigquery,postgres]==0.2.0a4' # Both
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a5'          # BigQuery
+python -m pip install 'dbt-dqm[postgres]==0.2.0a5'          # Postgres
+python -m pip install 'dbt-dqm[bigquery,postgres]==0.2.0a5' # Both
 ```
 
 A plain install includes the app and dbt-core but no warehouse adapters.
@@ -72,7 +72,7 @@ On Windows PowerShell, create and activate the environment with:
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a4'
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a5'
 ```
 
 Activation is optional: `uv run --extra bigquery dbt-dqm app` uses the checkout environment.
@@ -109,10 +109,13 @@ and `dbt-dqm workspace purge` use the same defaults. Explicit flags take precede
 - Profiles: `--profiles-dir`, then `DBT_PROFILES_DIR`, then `profiles.yml` in the launch directory,
   then your home directory's `.dbt` folder.
 - Target: `--target`, then `DBT_TARGET`, then the rendered profile's `target`, or `default`.
+- Artifact directory: `--target-path` on `run` or `app`, then `DBT_TARGET_PATH`, then the project's
+  `target-path`, or `target`. Relative artifact and state paths resolve against the project directory.
 
 `DBT_PROFILE`, `DBT_TARGET_PATH`, profile `env_var()` values, and
-`GOOGLE_APPLICATION_CREDENTIALS` are inherited. Only explicit CLI overrides are passed as
-flags to dbt. Paths use the native operating system's conventions; quote paths containing spaces.
+`GOOGLE_APPLICATION_CREDENTIALS` are inherited. Project, profiles and target defaults stay with
+dbt; the worker passes its resolved artifact directory consistently to every phase.
+Paths use the native operating system's conventions; quote paths containing spaces.
 The app uses dbt beside its own Python interpreter before searching PATH, and logs that
 executable and its version. Technical details include failed commands, exit codes and both output
 streams. If tracking relations are missing, run `dbt-dqm run` first.
@@ -162,7 +165,9 @@ local service-account credentials; no new keys are created or downloaded. Option
 ## Migrating existing tests
 
 DQM is disabled by default and runs as a separate workflow. Install the matching warehouse extra,
-update the Git package revision above, and run `dbt deps`. Existing installations require these steps:
+update the Git package revision above, and run `dbt deps`. Projects already on `0.2.0a4` can then
+run `dbt-dqm run` without a full refresh; history and annotations are preserved. The reset procedure
+below applies to older versions or an intentional history reset:
 
 1. Stop reviewer apps and preserve any annotations you need outside the package. No history migration is provided.
 2. Mark each DQM test with a `meta.dbt_dqm` object. Tags are optional business categories; the legacy
@@ -176,6 +181,10 @@ update the Git package revision above, and run `dbt deps`. Existing installation
 5. Set ownership using a nonblank output column `dqm_owner`, `meta.dbt_dqm.owner`, or `meta.owner`,
    in that order. Blank values fall through. Conflicting row owners use the metadata fallback and
    produce a Health diagnostic. Ownership initializes new issues; later reviewer edits persist.
+   Both metadata keys accept a string, a list of strings, or null, including inherited folder-level
+   `+meta`. List entries are trimmed, blanks discarded, and remaining entries joined with `, ` in
+   list order. An empty list falls through. The joined owner remains one text field in the app;
+   original metadata is retained in execution history. Other types fail validation before a reset.
 6. All output keys and attributes are captured. Remove `capture_mode`, `dbt_dqm_capture_mode`, and
    `context_columns`; they warn and are ignored. Remove `poc_responsible`, `owner_column`,
    `dqm_granularity`, and `dbt_dqm_test_tag`; these obsolete aliases are unsupported.
@@ -222,6 +231,9 @@ dbt-dqm run                         # enable DQM, validate, test, capture, recon
 dbt-dqm run --select tag:customer --exclude tag:experimental --threads 4
 dbt-dqm run --vars '{dbt_dqm_default_test_limit: 250}'
 dbt-dqm run --full-refresh          # explicit reset; tracking history is discarded
+dbt-dqm run --defer --favor-state --state prod-artifacts --target-path dev-artifacts
+dbt-dqm app --target-path dev-artifacts
+dbt-dqm run --verbose               # full dbt output, including listings, SQL and phase timings
 ```
 
 PowerShell uses the same commands. To avoid shell differences for YAML variables:
@@ -229,6 +241,8 @@ PowerShell uses the same commands. To avoid shell differences for YAML variables
 ```powershell
 dbt-dqm run --vars "dbt_dqm_default_test_limit: 250"
 dbt-dqm run --full-refresh
+dbt-dqm run --defer --favor-state --state "prod artifacts" --target-path "dev artifacts"
+dbt-dqm app --target-path "dev artifacts"
 dbt-dqm workspace purge
 ```
 
@@ -238,6 +252,21 @@ working directory and inherited credentials. Large selections and result payload
 Windows subprocess command line. Only metadata-marked tests matching the selection run; invalid
 selected configurations stop before initialization or reset. App startup only parses metadata and reads
 warehouse state; it does not run tests, capture results or execute package models.
+
+Normal output contains phase progress, validation messages, warnings, test failures, and a final
+test/capture/time summary. `--verbose` displays full dbt console output. dbt's file logging remains
+available in both modes. Phase timings, SQL counts and BigQuery job IDs are saved in
+`dqm_workflow_metrics.json` in the resolved artifact directory, including available metrics after
+an execution failure. Full-refresh timing is separate from initialization; maintenance step actions
+and BigQuery durations are included.
+
+`--defer`, `--favor-state`, and `--state` override `DBT_DEFER`, `DBT_FAVOR_STATE`, and `DBT_STATE`.
+Without explicit flags the installed dbt runner inherits these environment settings (and
+`DBT_DEFER_STATE` for separate deferral artifacts). `--no-defer` and `--no-favor-state` explicitly
+override enabled environment settings. State selection uses the supplied manifest; deferral applies
+to consumer test compilation and execution. DQM setup, capture, reconciliation, and maintenance
+always use the selected target. Input state and output artifacts must be separate directories;
+the command rejects identical resolved paths before parsing can overwrite a state manifest.
 
 Test failures still produce captured evidence and reconciliation. Exit codes are `0` for success,
 `1` for failed tests, and `2` for configuration or execution errors. A dbt `warn` result retains dbt's
@@ -270,6 +299,14 @@ These run as the last phase of `dbt-dqm run`, or on demand with
 fails the dbt run; outcomes are logged and shown in `dqm_maintenance_health` and the app's Health
 tab. The exact guarantee and its limits are in
 [warehouse interfaces](docs/warehouse-interfaces.md#optional-maintenance).
+
+An experimental BigQuery optimization can be enabled with
+`dbt-dqm run --vars "{dbt_dqm_maintenance_shortcuts: true}"`. It probes default automatic cleanup
+steps and skips separate jobs only when no eligible work exists, recording an attributed success
+with a fixed "no eligible work" description. Unknown eligibility and custom cleanup implementations
+execute normally. Raw retention still advances its cutoff and generation fence, while proven-empty
+deletes are omitted. Manual cleanup executes its steps. This optimization is **off by default** until
+credentialed benchmarks establish a benefit; SQL-rendering tests do not establish a live speedup.
 
 > **Event values outlive raw logs by default.** With `dbt_dqm_event_payloads: full` (the default)
 > and no `dbt_dqm_event_retention_days`, captured before/after values are kept forever. Under

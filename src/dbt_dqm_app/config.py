@@ -151,12 +151,16 @@ def _plain(value: object, cli_vars=None) -> str:
 
 
 def load_config(project_dir: str | Path | None = None, profiles_dir: str | Path | None = None,
-                target: str | None = None, *, cli_vars=None) -> AppConfig:
+                target: str | None = None, *, cli_vars=None,
+                target_path: str | Path | None = None) -> AppConfig:
     working_dir = Path.cwd()
     explicit = (project_dir, profiles_dir, target)
     project_dir = resolve_project_dir(project_dir)
     profiles_dir = resolve_profiles_dir(profiles_dir)
     project = _read_yaml(project_dir / "dbt_project.yml")
+    artifact_dir = (project_dir / Path(target_path if target_path is not None else
+                    os.environ.get("DBT_TARGET_PATH") or
+                    _plain(project.get("target-path", "target"), cli_vars)).expanduser()).resolve()
     profile_name = _profile_name(project, cli_vars)
     target, output = _selected_profile(profiles_dir, profile_name, target, cli_vars)
     cli_args = []
@@ -164,6 +168,8 @@ def load_config(project_dir: str | Path | None = None, profiles_dir: str | Path 
                                      (project_dir, profiles_dir, target), strict=True):
         if value is not None:
             cli_args.extend((flag, str(resolved)))
+    if target_path is not None:
+        cli_args.extend(("--target-path", str(artifact_dir)))
     adapter_type = str(output.get("type"))
     if adapter_type not in {"bigquery", "postgres"}:
         raise ValueError("The local app supports BigQuery and Postgres profiles")
@@ -206,8 +212,7 @@ def load_config(project_dir: str | Path | None = None, profiles_dir: str | Path 
         dbname=str(output.get("dbname")) if output.get("dbname") is not None else None,
         sslmode=str(output.get("sslmode")) if output.get("sslmode") is not None else None,
         archive_cache_days=archive_cache_days,
-        target_path=project_dir / Path(os.environ.get("DBT_TARGET_PATH")
-                                       or _plain(project.get("target-path", "target"), cli_vars)).expanduser(),
+        target_path=artifact_dir,
         dbt_cli_args=tuple(cli_args),
         working_dir=working_dir,
         lock_timeout_seconds=lock_timeout_seconds,

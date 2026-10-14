@@ -36,6 +36,10 @@ consumer_profile:
     assert config.adapter_type == "postgres"
     assert config.password == "secret-from-environment"
     assert config.dataset == "quality"
+    monkeypatch.setenv("DBT_TARGET_PATH", "environment artifacts")
+    config = load_config(project, profiles, "dev", target_path="cli artifacts")
+    assert config.target_path == project / "cli artifacts"
+    assert config.dbt_cli_args[-2:] == ("--target-path", str(project / "cli artifacts"))
 
 
 def test_manifest_relation_wins_over_manually_derived_schema(tmp_path):

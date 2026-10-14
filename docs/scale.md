@@ -419,3 +419,11 @@ This is one release-gate measurement with acceptance suites running concurrently
 It does not establish a systematic performance improvement or change the serialized cache ceilings.
 
 Raw result: [`candidate-608ce23-cache-boundary.json`](scale-results/candidate-608ce23-cache-boundary.json).
+
+## 0.2.0a5 release cache boundary
+
+Candidate `6b5f0bd8ec84e42fd4f177159d14fae895da65bf`, installed wheel on Python 3.14.6,
+Postgres 16.11: 50,000 issues with 408-byte mean captured payload, 415.6 MiB peak RSS,
+3.23 seconds warehouse reads and 7.08 seconds total. The uniquely named synthetic test
+schema was removed. [Raw result](scale-results/candidate-6b5f0bd-cache-boundary.json).
+This is cache-boundary evidence, not a BigQuery workflow speedup claim.

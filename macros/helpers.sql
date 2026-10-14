@@ -26,10 +26,25 @@
   {%- endif -%}
 {%- endmacro %}
 
-{# Decide whether a result node is an explicitly tagged, stored-failure dbt data test. #}
+{# Decide whether a result node is an explicitly metadata-marked dbt data test. #}
 {% macro tracked_test(node) -%}
   {{ return(node.resource_type == 'test' and 'dbt_dqm' in (node.config.meta or {})) }}
 {%- endmacro %}
+
+{# Owners are one text field; retain all nonblank metadata entries in list order. #}
+{% macro owner_text(value, key='owner') %}
+  {% if value is none %}{{ return(none) }}{% endif %}
+  {% if value is string %}{{ return(value|trim or none) }}{% endif %}
+  {% if value is sequence and value is not string and value is not mapping %}
+    {% set owners=[] %}
+    {% for item in value %}
+      {% if item is not string %}{{ exceptions.raise_compiler_error(key ~ ' must be a string, list of strings or null; effective value ' ~ tojson(value)) }}{% endif %}
+      {% if item|trim %}{% do owners.append(item|trim) %}{% endif %}
+    {% endfor %}
+    {{ return(owners|join(', ') or none) }}
+  {% endif %}
+  {{ exceptions.raise_compiler_error(key ~ ' must be a string, list of strings or null; effective value ' ~ tojson(value)) }}
+{% endmacro %}
 
 {# Resolve a dbt-dqm warehouse relation using the target and optional schema override.
    api.Relation.create() renders correctly per adapter (BigQuery backticks, Postgres double

@@ -51,20 +51,27 @@
     {% do results.append({'node':node,'status':row.status,'failures':row.failures,'execution_time':row.execution_time,'message':row.message}) %}
   {% endfor %}
   {% set summary_sql %}
-    select test_name,collection_status,collection_message
+    select test_name,collection_status,collection_message,captured_issue_count
     from {{ dbt_dqm.dqm_relation('dqm_test_executions') }}
     where invocation_id={{ dbt_dqm.sql_string(payload.invocation_id) }}
-      and collection_status not in ('success','not_applicable','limit_reached')
   {% endset %}
   {% set failures=run_query(dbt_dqm.capture_test_results(results,payload.invocation_id,initialized=true) ~ summary_sql) %}
   {% set errors=[] %}
-  {% for row in failures.rows %}{% do errors.append({'test_name':row[0],'status':row[1],'message':row[2]}) %}{% endfor %}
+  {% set counts=namespace(captured=0) %}
+  {% for row in failures.rows %}
+    {% set counts.captured=counts.captured+(row[3] or 0) %}
+    {% if row[1] not in ['success','not_applicable','limit_reached'] %}
+      {% do errors.append({'test_name':row[0],'status':row[1],'message':row[2]}) %}
+    {% endif %}
+  {% endfor %}
   {% do log('DQM_COLLECTION_ERRORS=' ~ tojson(errors),info=false) %}
+  {% do log('DQM_COLLECTION_SUMMARY=' ~ tojson({'captured_issue_count':counts.captured}),info=false) %}
 {% endmacro %}
 
 {% macro maintain_dqm() %}
   {% if execute and var('dqm_enabled',false) %}
-    {% do dbt_dqm.maintenance_run(dbt_dqm.maintenance_retention_days(), dbt_dqm.positive_integer_var('dbt_dqm_event_retention_days',none), 'automatic') %}
+    {% set observed=dbt_dqm.maintenance_run(dbt_dqm.maintenance_retention_days(), dbt_dqm.positive_integer_var('dbt_dqm_event_retention_days',none), 'automatic') %}
+    {% do log('DQM_MAINTENANCE=' ~ tojson(observed),info=false) %}
   {% endif %}
 {% endmacro %}
 

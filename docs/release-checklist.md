@@ -72,6 +72,15 @@ existing `dbt-dqm.dbt_dqm_qa` dataset. Preserve unrelated QA relations, existing
 identities and keys; do not create keys or change IAM. Preserve protected approval, trusted publishing
 and provenance verification. The [0.2.0a4 evidence](release-0.2.0a4.md) records exact candidate results.
 
+### 0.2.0a5 compatibility and publication criteria
+
+The maintainer requested publication of `v0.2.0a5` on 2026-10-14. All current gates remain required
+on the release candidate, with live warehouse, permissions, browser and memory checks on Python
+3.14. Use existing credentials and disposable fixtures; no shared QA reset, new keys or IAM changes
+are authorized or required. Keep the BigQuery maintenance shortcut opt-in until measured performance
+supports enabling it. Preserve the existing protected approval, trusted publisher and provenance
+workflow. Results are recorded in [the 0.2.0a5 evidence](release-0.2.0a5.md).
+
 ## 0.2.0a3 results
 
 Production candidate: `4c362266edd5457dc0bedae6348f455e064fcc90`. The test-only Windows fixture

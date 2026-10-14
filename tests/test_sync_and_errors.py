@@ -9,6 +9,12 @@ from dbt_dqm_app.config import AppConfig
 from dbt_dqm_app.errors import AppError, SnapshotUnavailable, WarehouseBusy, classify
 
 
+def test_log_reason_always_includes_reviewer_message():
+    message = "Incompatible DQM schema. Run dbt-dqm run --full-refresh."
+    assert AppError(message).log_reason() == message
+    assert AppError(message, "technical detail").log_reason() == message + "\ntechnical detail"
+
+
 @pytest.fixture(autouse=True)
 def streamed_fake(monkeypatch):
     # The legacy fake answers both small metadata reads and the new issue stream. Production
