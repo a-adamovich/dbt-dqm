@@ -134,3 +134,13 @@ def test_completed_file_limit_is_independent_of_source_limit(tmp_path, monkeypat
     with pytest.raises(AppError, match='completed export'):
         write_export(iter([issue()]), tmp_path, 'xlsx')
     assert not list(tmp_path.iterdir())
+
+
+def test_excel_line_feed_limit_preserves_complete_csv_fallback(tmp_path):
+    notes = "line\n" * 254
+    with pytest.raises(AppError, match='CSV'):
+        write_export(iter([issue(notes=notes)]), tmp_path, 'xlsx')
+    assert not list(tmp_path.iterdir())
+    result = write_export(iter([issue(notes=notes)]), tmp_path, 'csv')
+    with open(result.path, encoding='utf-8-sig', newline='') as output:
+        assert next(csv.DictReader(output))['notes'] == notes

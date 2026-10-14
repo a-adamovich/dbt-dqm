@@ -213,7 +213,7 @@ def _write_excel(connection, destination, headers, tests):
 
 
 def _excel_text(sheet, row, column, text, style=None):
-    if len(text) > 32_767 or re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", text):
+    if len(text) > 32_767 or text.count("\n") > 253 or re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", text):
         raise AppError("A value cannot be represented fully in Excel. Use CSV instead.")
     if sheet.write_string(row, column, text, style) != 0:
         raise AppError("Excel could not represent the complete value. Use CSV instead.")
