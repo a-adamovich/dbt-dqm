@@ -422,8 +422,8 @@ Raw result: [`candidate-608ce23-cache-boundary.json`](scale-results/candidate-60
 
 ## 0.2.0a5 release cache boundary
 
-Candidate `c9fa528e668d535b67e9c447d8f550c3d2c1ac91`, installed wheel on Python 3.14.6,
-Postgres 16.11: 50,000 issues with 408-byte mean captured payload, 314.4 MiB peak RSS,
-2.66 seconds warehouse reads and 9.54 seconds total. The uniquely named synthetic test
-schema was removed. [Raw result](scale-results/candidate-c9fa528-cache-boundary.json).
+Candidate `6b5f0bd8ec84e42fd4f177159d14fae895da65bf`, installed wheel on Python 3.14.6,
+Postgres 16.11: 50,000 issues with 408-byte mean captured payload, 415.6 MiB peak RSS,
+3.23 seconds warehouse reads and 7.08 seconds total. The uniquely named synthetic test
+schema was removed. [Raw result](scale-results/candidate-6b5f0bd-cache-boundary.json).
 This is cache-boundary evidence, not a BigQuery workflow speedup claim.

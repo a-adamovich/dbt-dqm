@@ -28,8 +28,12 @@ new UTF-8 database; failed/interrupted attempts are excluded.
 ## Release candidate verification and performance gate
 
 The maintainer requested release on 2026-10-14. Production candidate:
-`c9fa528e668d535b67e9c447d8f550c3d2c1ac91`, based on published main `4a8eb90`.
+`6b5f0bd8ec84e42fd4f177159d14fae895da65bf`, based on published main `4a8eb90`.
 Preparation: [PR #67](https://github.com/a-adamovich/dbt-dqm/pull/67).
+The earlier candidate `c9fa528` completed all 28 BigQuery tests without skips, but is
+superseded by a state-path collision guard correction. All runtime gates are rerun on `6b5f0bd`.
+A later release-notes wording correction changes only generated release text; execution,
+trusted publishing and environment protection remain unchanged.
 Release checks use the candidate's built wheel and dbt package on Python 3.14.6.
 Existing development, runner and reviewer credential files are available and are being used;
 no new keys, IAM changes or shared QA reset are needed. The permissions gate follows complete
@@ -37,12 +41,12 @@ BigQuery acceptance serially.
 
 | Candidate gate | Status |
 | --- | --- |
-| CI / Postgres 14 and 16 across Python 3.11–3.14 | In progress in [run 38515826514](https://github.com/a-adamovich/dbt-dqm/actions/runs/38515826514); 20 completed non-Postgres jobs passed, including native Windows/macOS |
-| Python 3.14 candidate tests with built-wheel metadata | 302 passed, 3 optional environment/native skips; one third-party `pytimeparse` deprecation warning |
+| CI / Postgres 14 and 16 across Python 3.11–3.14 | In progress in [run 38518626876](https://github.com/a-adamovich/dbt-dqm/actions/runs/38518626876); 20 completed non-Postgres jobs passed, including native Windows/macOS |
+| Python 3.14 candidate tests with built-wheel metadata | 303 passed, 3 optional environment/native skips; one third-party `pytimeparse` deprecation warning |
 | Full credentialed BigQuery acceptance | In progress; 28 collected tests |
 | Serial restricted runner/reviewer gate | Waits for complete BigQuery acceptance |
-| Real browser QA, installed wheel | Passed: both browsing modes, actual status/owner/note edits and Apply, stable order, paging, Health, configured maintenance outcomes, held-lock pending preservation/retry, filters, offline recovery; actual BigQuery dry-run search refusal verified read-only against QA views |
-| 50,000-issue cache boundary | Passed: 314.4 MiB peak RSS, 2.66 s warehouse reads, 9.54 s total, 408-byte mean payload; [raw result](scale-results/candidate-c9fa528-cache-boundary.json) |
+| Real browser QA, installed wheel | Previous candidate passed; final candidate recheck in progress: both browsing modes, actual status/owner/note edits and Apply, stable order, paging, Health, configured maintenance outcomes, held-lock pending preservation/retry, filters, offline recovery; actual BigQuery dry-run search refusal verified read-only against QA views |
+| 50,000-issue cache boundary | Passed: 415.6 MiB peak RSS, 3.23 s warehouse reads, 7.08 s total, 408-byte mean payload; [raw result](scale-results/candidate-6b5f0bd-cache-boundary.json) |
 | Security | No open Dependabot alerts; 117 locked runtime dependencies and 117 fresh-wheel dependencies audited, zero known vulnerabilities |
 | Distributions / lock | Candidate wheel and source archive built; Twine and offline lock agreement passed |
 | Publisher and protected approval | Existing `release.yml`/`pypi` trusted publishing retained; required reviewer `a-adamovich`, no admin bypass, `v*` tag policy confirmed |
