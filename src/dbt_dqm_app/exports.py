@@ -82,14 +82,51 @@ class ExportResult:
 
 
 def _record(row):
+    """Expand top-level fields without rounding JSON numbers or rewriting nested JSON."""
     try:
-        value = json.loads(row["record_values_json"])
-        if not isinstance(value, dict):
-            raise TypeError("record values must be an object")
-        return value
+        raw = row["record_values_json"]
+        if not isinstance(raw, str):
+            raise TypeError("record values must be JSON text")
+        def reject_constant(value):
+            raise ValueError("nonstandard JSON constant")
+
+        decoder = json.JSONDecoder(parse_int=str, parse_float=str, parse_constant=reject_constant)
+        whitespace = re.compile(r"[ \t\r\n]*")
+
+        def skip(position):
+            return whitespace.match(raw, position).end()
+
+        position = skip(0)
+        if raw[position:position + 1] != "{":
+            raise ValueError("record values must be an object")
+        position = skip(position + 1)
+        result = {}
+        while raw[position:position + 1] != "}":
+            if raw[position:position + 1] != '"':
+                raise ValueError("record keys must be strings")
+            key, position = decoder.raw_decode(raw, position)
+            if not isinstance(key, str) or key in result:
+                raise ValueError("record keys must be unique strings")
+            position = skip(position)
+            if raw[position:position + 1] != ":":
+                raise ValueError("missing record separator")
+            start = skip(position + 1)
+            value, position = decoder.raw_decode(raw, start)
+            result[key] = raw[start:position] if isinstance(value, (dict, list)) else value
+            position = skip(position)
+            if raw[position:position + 1] == "}":
+                break
+            if raw[position:position + 1] != ",":
+                raise ValueError("missing record separator")
+            position = skip(position + 1)
+            if raw[position:position + 1] == "}":
+                raise ValueError("trailing record comma")
+        if skip(position + 1) != len(raw):
+            raise ValueError("unexpected record content")
+        return result
     except (ValueError, TypeError, KeyError) as error:
-        raise AppError(f"Issue {row.get('occurrence_id')}: invalid record JSON. "
-                       "Rebuild and sync before exporting.") from error
+        raise AppError(f"Issue {row.get('occurrence_id')}: record JSON cannot be expanded "
+                       "completely in Excel. Use CSV instead.") from error
 
 
 def _text(value):

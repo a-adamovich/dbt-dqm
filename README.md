@@ -384,7 +384,8 @@ archive window include them. Disable **Pending edits only** before exporting.
   `record_values_json` fields into `record.<field>` columns alongside review metadata. Nested objects,
   arrays and other JSON remain text; captured IDs and numeric-looking strings retain their exact
   text. Long or duplicate test names get safe, unique sheet names; full test names and IDs remain in
-  the rows. Headers are frozen and filterable. Values exceeding Excel's limits require CSV instead.
+  the rows. Captured numeric tokens retain their full precision as text; nested JSON retains its
+  complete original content. Headers are frozen and filterable. Values exceeding Excel's limits require CSV instead.
 
 Exports are limited to 50,000 issues, 128 MiB of serialized source data and 128 MiB per file,
 independently of browsing cache settings. Limit failures offer no partial file. Warehouse exports

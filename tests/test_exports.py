@@ -61,7 +61,8 @@ def test_excel_groups_tests_unions_keys_and_only_flattens_top_level(tmp_path):
     head, row, second=sheets[0]; values=dict(zip(head,row))
     assert 'record_values_json' not in head and 'record.nested.label' not in head
     assert values['record.id']=='001' and values['record.large_id']=='12345678901234567890'
-    assert values['record.nested']=='{"label":"nested"}' and values['record.array']=='[1,2]'
+    assert json.loads(values['record.nested']) == {'label': 'nested'}
+    assert json.loads(values['record.array']) == [1, 2]
     assert values['notes']=='=HYPERLINK("evil")' and values['record.notes']=='record notes'
     assert dict(zip(head,second))['record.extra']=='second'
 
@@ -144,3 +145,20 @@ def test_excel_line_feed_limit_preserves_complete_csv_fallback(tmp_path):
     result = write_export(iter([issue(notes=notes)]), tmp_path, 'csv')
     with open(result.path, encoding='utf-8-sig', newline='') as output:
         assert next(csv.DictReader(output))['notes'] == notes
+
+
+def test_excel_preserves_numeric_tokens_and_complete_nested_json(tmp_path):
+    raw = '{"amount":0.12345678901234567890123456789,"huge":123456789012345678901234567890,"nested":{"amount":0.12345678901234567890123456789,"duplicate":1,"duplicate":2}}'
+    result = write_export(iter([issue(record_values_json=raw)]), tmp_path, 'xlsx')
+    _, sheets = workbook_rows(result.path)
+    values = dict(zip(*sheets[0]))
+    assert values['record.amount'] == '0.12345678901234567890123456789'
+    assert values['record.huge'] == '123456789012345678901234567890'
+    assert values['record.nested'] == '{"amount":0.12345678901234567890123456789,"duplicate":1,"duplicate":2}'
+
+
+@pytest.mark.parametrize('raw', ['{"a":1,}', '{"a":1,"a":2}', '{} trailing', '{"a" 1}', '{', '{1:2}', '{"a":NaN}'])
+def test_excel_refuses_unexpandable_record_json_without_partial_files(tmp_path, raw):
+    with pytest.raises(AppError, match='CSV'):
+        write_export(iter([issue(record_values_json=raw)]), tmp_path, 'xlsx')
+    assert not list(tmp_path.iterdir())
