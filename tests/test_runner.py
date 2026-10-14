@@ -132,6 +132,20 @@ def test_metrics_survive_failure_and_resolved_artifact_path_is_shared(tmp_path, 
     assert calls[0][calls[0].index("--state") + 1] == str(tmp_path / "prod artifacts")
 
 
+def test_blank_explicit_state_resolves_to_project_and_cannot_be_overwritten(tmp_path, monkeypatch):
+    config = SimpleNamespace(project_dir=tmp_path, target_path=tmp_path)
+    monkeypatch.setattr(runner, "load_config", lambda *args, **kwargs: config)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("saved production state")
+    calls = []
+    workflow = runner.Workflow({"state": ""}, factory=workflow_factory(calls))
+    with pytest.raises(ValueError, match="equals target-path"):
+        workflow.execute()
+    assert not calls
+    assert manifest.read_text() == "saved production state"
+    assert not (tmp_path / "dqm_workflow_metrics.json").exists()
+
+
 def node(**overrides):
     config = {"meta": {"dbt_dqm": {"granularity": ["customer_id"]}}, "store_failures": True,
               "limit": None, "fail_calc": "count(*)", "store_failures_as": None}

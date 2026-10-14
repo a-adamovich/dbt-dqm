@@ -196,7 +196,7 @@ class Workflow:
             for key, value in (("state", self.request.get("state", None)
                                if self.request.get("state") is not None else os.environ.get("DBT_STATE")),
                                ("defer_state", os.environ.get("DBT_DEFER_STATE"))):
-                if value:
+                if value or (key == "state" and self.request.get("state") is not None):
                     path = (config.project_dir / Path(value).expanduser()).resolve()
                     if path == config.target_path:
                         config = None  # Never write metrics into the input state directory.
