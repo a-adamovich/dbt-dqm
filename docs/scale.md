@@ -430,10 +430,10 @@ This is cache-boundary evidence, not a BigQuery workflow speedup claim.
 
 ## 0.2.0a6 export-enabled cache boundary
 
-Production candidate `ef2a26c8c4a791de4dfe5883d87217258c94b12d`, installed wheel on Python 3.14.6,
-Postgres 16.11: 50,000 issues, 408-byte mean captured payload, 431.2 MiB peak RSS. Warehouse
-reads took 3.40 s; total sync/render/export measurement 28.01 s. CSV exported all 50,000 issues
-in 3.54 s (42,451,937 bytes); Excel exported all 50,000 in 17.58 s (21,231,127 bytes). These
+Production candidate `e1f914a6dedb86f696a931626d967494eeb9362e`, installed wheel on Python 3.14.6,
+Postgres 16.11: 50,000 issues, 408-byte mean captured payload, 464.7 MiB peak RSS. Warehouse
+reads took 1.92 s; total sync/render/export measurement 23.37 s. CSV exported all 50,000 issues
+in 4.67 s (42,451,937 bytes); Excel exported all 50,000 in 13.65 s (21,231,969 bytes). These
 are synthetic processed-history export measurements, not workflow speedup claims.
-[Raw result](scale-results/candidate-ef2a26c-cache-boundary.json). The disposable test schema
-was removed. This supersedes the preliminary measurements against `7e0583e` and `c1edc92`.
+[Raw result](scale-results/candidate-e1f914a-cache-boundary.json). The disposable test schema
+was removed. This supersedes the preliminary measurements against earlier a6 candidates.
