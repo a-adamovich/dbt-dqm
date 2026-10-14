@@ -216,3 +216,28 @@ def test_workspace_keeps_epoch_on_edits_and_refuses_a_new_installation(tmp_path)
     with pytest.raises(AppError, match="earlier DQM installation"):
         workspace.replace_snapshot([{"occurrence_id": "same-id", "notes": None, "_installation_id": "new"}])
     assert workspace.pending()[0].installation_id == "old"
+
+
+def test_declined_empty_selection_refresh_never_initializes_or_executes_tests(tmp_path,monkeypatch,capsys):
+    import json
+
+    from dbt_dqm_app import refresh
+    config=SimpleNamespace(project_dir=tmp_path,target_path=tmp_path/'target',adapter_type='postgres')
+    monkeypatch.setattr(runner,'load_config',lambda *args,**kwargs:config)
+    workflow=runner.Workflow({'full_refresh':True},factory=workflow_factory([]))
+    workflow.settings={'default_limit':100,'raw_retention':30,'event_retention':90,
+                       'event_payloads':'full','refresh':{}}
+    commands=[]
+    def checked(arguments,**kwargs):
+        commands.append(arguments)
+        if arguments[0]=='parse': return SimpleNamespace(nodes={})
+        return []
+    monkeypatch.setattr(workflow,'checked',checked)
+    monkeypatch.setattr(refresh,'confirm_refresh',lambda *args:False)
+    monkeypatch.setattr(refresh,'full_refresh',lambda *args:pytest.fail('reset must not run'))
+    assert workflow.execute()==0
+    assert not any('initialize_dqm' in ' '.join(command) for command in commands)
+    metrics=json.loads((config.target_path/'dqm_workflow_metrics.json').read_text())
+    assert metrics['completion_status']=='cancelled' and metrics['exit_code']==0
+    output=capsys.readouterr().out
+    assert 'DQM cancelled' in output and 'DQM complete' not in output

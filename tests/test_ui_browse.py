@@ -65,9 +65,9 @@ class FakeWarehouse:
 def harness(tmp_path, monkeypatch):
     import dbt_dqm_app.streamlit_app as ui
 
-    def start(browse_mode="warehouse", futures=None, adapter="postgres", issues=60):
+    def start(browse_mode="warehouse", futures=None, adapter="postgres", issues=60, max_cache_issues=50_000):
         config = AppConfig(tmp_path, tmp_path, "dev", "demo", adapter, "db", "schema", "US",
-                           "oauth", None, browse_mode=browse_mode)
+                           "oauth", None, browse_mode=browse_mode, max_cache_issues=max_cache_issues)
         path = tmp_path / "workspace.sqlite"
         monkeypatch.setattr(AppConfig, "workspace_path", property(lambda self: path))
         monkeypatch.setattr(ui, "load_config", lambda *args: config)
@@ -267,3 +267,125 @@ def test_bigquery_reads_a_chunk_and_pages_through_it_locally(harness):
     for _ in range(78):
         click(app, "Next")
     assert card_titles(app)[-1] == "test 1999" and len(warehouse.reads) == reads + 1
+
+
+def test_bulk_selection_crosses_pages_and_stages_without_applying(harness):
+    app, warehouse, executor, workspace = harness()
+    # Real warehouse rows always carry the installation identity.
+    with workspace.connect() as connection:
+        connection.execute("insert or replace into metadata values ('installation_id','installed')")
+        connection.execute("update snapshot set payload_json=json_set(payload_json,'$._installation_id','installed')")
+    for row in warehouse.issues: row['_installation_id']='installed'
+    next(box for box in app.checkbox if box.key=='select-issue-id000').check().run()
+    click(app,'Next')
+    next(box for box in app.checkbox if box.key=='select-issue-id025').check().run()
+    assert set(app.session_state['bulk_selection'].rows)=={'id000','id025'}
+    next(box for box in app.selectbox if box.label=='Bulk workflow status').set_value('TRIAGED').run()
+    click(app,'Stage changes')
+    assert {p.occurrence_id for p in workspace.pending()}=={'id000','id025'}
+    assert all(p.new_value=='TRIAGED' for p in workspace.pending())
+    assert not app.session_state['bulk_selection'].rows
+    assert {c.args[1].__name__ for c in executor.submit.call_args_list}=={'browse_refresh_worker'}
+
+
+def test_filter_change_clears_selection_without_losing_pending_edits(harness):
+    app,_,_,workspace=harness()
+    next(box for box in app.checkbox if box.key=='select-issue-id000').check().run()
+    next(box for box in app.text_area if box.label=='Notes').set_value('keep').run()
+    next(box for box in app.multiselect if box.label=='Workflow status').select('BLOCKED').run()
+    assert not app.session_state['bulk_selection'].rows
+    assert workspace.pending()[0].new_value=='keep'
+
+
+def test_export_freezes_all_page_filters_and_saved_value_scope(harness,tmp_path):
+    from dbt_dqm_app.exports import ExportResult
+    export=Future();export.set_result(ExportResult(str(tmp_path/'issues.csv'),60,'csv'))
+    (tmp_path/'issues.csv').write_text('occurrence_id\n')
+    # The first future is startup Health; the export future follows it.
+    startup=Future();startup.set_result({'health':HEALTH})
+    app,_,executor,_=harness(futures=[startup,export])
+    click(app,'Prepare CSV')
+    call=executor.submit.call_args_list[-1]
+    assert call.args[1].__name__=='prepare_export'
+    assert call.args[4].lifecycle==('Active',)
+    assert call.args[-2]=='true' and call.args[-1]==1
+    assert any('60 issue(s)' in caption.value for caption in app.caption)
+
+
+def test_snapshot_bulk_stage_survives_card_rerenders(harness):
+    startup=Future(); startup.set_result({'issues':[{**issue(n),'_installation_id':'installed'} for n in range(60)],
+                                          'health':HEALTH})
+    app,_,_,workspace=harness(browse_mode='snapshot',futures=[startup])
+    click(app,'Select current page')
+    assert len(app.session_state['bulk_selection'].rows)==25
+    next(box for box in app.selectbox if box.label=='Bulk workflow status').set_value('TRIAGED').run()
+    keys_before = {box.key for box in app.selectbox if box.label == 'Status'}
+    click(app,'Stage changes')
+    keys_after = {box.key for box in app.selectbox if box.label == 'Status'}
+    assert not keys_before & keys_after
+    assert all(box.value == '— No change —' for box in app.selectbox if box.label.startswith('Bulk '))
+    assert len(workspace.pending())==25
+    assert all(p.new_value=='TRIAGED' for p in workspace.pending())
+    next(box for box in app.number_input if box.label=='Page').set_value(2).run()
+    next(box for box in app.number_input if box.label=='Page').set_value(1).run()
+    assert len(workspace.pending())==25
+
+
+def test_connection_failure_keeps_selection_and_disables_bulk_stage(harness,monkeypatch):
+    import dbt_dqm_app.streamlit_app as ui
+    app,_,_,_=harness()
+    next(box for box in app.checkbox if box.key=='select-issue-id000').check().run()
+    monkeypatch.setattr(ui,'browse_page',lambda *args,**kwargs:(_ for _ in ()).throw(RuntimeError('offline')))
+    click(app,'Next')
+    assert set(app.session_state['bulk_selection'].rows)=={'id000'}
+    assert next(button for button in app.button if button.label=='Stage changes').disabled
+
+
+def test_warehouse_bulk_apply_is_available_above_configured_snapshot_limit(harness):
+    app,warehouse,_,workspace=harness(max_cache_issues=1)
+    for row in warehouse.issues: row['_installation_id']='installed'
+    with workspace.connect() as connection:
+        connection.execute("insert or replace into metadata values ('installation_id','installed')")
+        connection.execute("update snapshot set payload_json=json_set(payload_json,'$._installation_id','installed')")
+    click(app,'Select current page')
+    next(box for box in app.selectbox if box.label=='Bulk review verdict').set_value('TRUE_POSITIVE').run()
+    keys_before = {box.key for box in app.selectbox if box.label == 'Status'}
+    click(app,'Stage changes')
+    keys_after = {box.key for box in app.selectbox if box.label == 'Status'}
+    assert not keys_before & keys_after
+    assert all(box.value == '— No change —' for box in app.selectbox if box.label.startswith('Bulk '))
+    assert len(workspace.pending())==25
+    assert not next(button for button in app.button if button.label=='Apply and sync').disabled
+
+
+def test_selection_callback_tolerates_a_widget_removed_during_filter_or_sync(tmp_path, monkeypatch):
+    import dbt_dqm_app.streamlit_app as ui
+    from dbt_dqm_app.selection import Selection
+
+    class State(dict):
+        __getattr__ = dict.__getitem__
+
+    selection = Selection()
+    monkeypatch.setattr(ui.st, "session_state", State(bulk_selection=selection))
+    ui._toggle_selection(tmp_path / "workspace.sqlite", "removed", "select-issue-removed")
+    assert not selection.rows
+
+
+def test_disposed_export_keeps_private_storage_until_worker_completion(tmp_path):
+    import gc
+    import tempfile
+    from pathlib import Path
+
+    from dbt_dqm_app.streamlit_app import _hold_export_directory
+
+    job = Future()
+    directory = tempfile.TemporaryDirectory(dir=tmp_path)
+    path = Path(directory.name)
+    _hold_export_directory(job, directory)
+    del directory
+    gc.collect()
+    assert path.exists()
+    job.set_result(None)
+    del job
+    gc.collect()
+    assert not path.exists()

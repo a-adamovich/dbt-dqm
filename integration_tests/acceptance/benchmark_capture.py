@@ -84,7 +84,12 @@ def run_trial(client, project_id, python, package, shortcuts, scenario, log_path
             if shortcuts:
                 command += ["--vars", "{dbt_dqm_maintenance_shortcuts: true}"]
 
+            supports_yes = "--yes" in subprocess.check_output(
+                [str(python), "-m", "dbt_dqm_app.cli", "run", "--help"], text=True)
+
             def invoke(options=()):
+                if "--full-refresh" in options and supports_yes:
+                    options = [*options, "--yes"]
                 result = subprocess.run([*command, *options], capture_output=True, text=True,
                                         timeout=1200, check=False, cwd=project, env=environment)
                 with log_path.open("a", encoding="utf-8") as log:

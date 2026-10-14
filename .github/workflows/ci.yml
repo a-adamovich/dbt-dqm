@@ -260,7 +260,7 @@ jobs:
       - name: Install adapters and development dependencies
         run: uv sync --locked --all-groups --all-extras
       - name: Native configuration, process pool and authentication checks
-        run: uv run pytest -q tests/test_runner.py tests/test_portability.py tests/test_config.py tests/test_cli.py tests/test_credentials.py tests/test_dependency_floors.py tests/test_python_compatibility.py tests/test_wif.py
+        run: uv run pytest -q tests/test_runner.py tests/test_portability.py tests/test_config.py tests/test_cli.py tests/test_credentials.py tests/test_dependency_floors.py tests/test_python_compatibility.py tests/test_wif.py tests/test_review_actions.py tests/test_exports.py tests/test_store.py tests/test_ui.py tests/test_ui_browse.py
       - name: Build and check each installed wheel variant
         run: |
           uv build --no-create-gitignore

@@ -30,6 +30,8 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--target-path", help="Output artifacts directory (DBT_TARGET_PATH)")
     run.add_argument("--full-refresh", action="store_true",
                      help="Reset DQM history and annotations; preserve unrelated relations")
+    run.add_argument("--yes", action="store_true",
+                     help="Confirm the destructive full refresh without an interactive prompt")
     app = commands.add_parser("app", help="Launch the local review application")
     app.add_argument("--project-dir", default=None)
     app.add_argument("--profiles-dir", default=None)
@@ -41,7 +43,7 @@ def parser() -> argparse.ArgumentParser:
     app.add_argument("--max-cache-mib", type=int, default=MAX_CACHE_MIB,
                      help="Serialized issue cache ceiling, configurable downward from 128 MiB")
     app.add_argument("--max-search-gib", type=float, default=1.0,
-                     help="BigQuery bytes one search may process in warehouse browsing (GiB)")
+                     help="BigQuery bytes one search or warehouse export may process (GiB)")
     app.add_argument("--browse", choices=("snapshot", "warehouse", "auto"), default="auto",
                      help="auto (default): sync all issues locally while they fit the cache "
                      "limits, read pages from the warehouse above them; snapshot or warehouse: "

@@ -1,6 +1,9 @@
 import json
+import os
 import stat
 import threading
+
+import pytest
 
 from dbt_dqm_app.display import (
     calendar_date,
@@ -148,6 +151,7 @@ def test_set_change_survives_concurrent_writers_without_losing_an_update(tmp_pat
     assert final[0].version == 2
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits do not describe Windows ACLs")
 def test_workspace_uses_owner_only_permissions(tmp_path):
     workspace = Workspace(tmp_path / "private" / "workspace.sqlite")
     assert stat.S_IMODE(workspace.path.parent.stat().st_mode) == 0o700
@@ -308,3 +312,25 @@ def test_page_cache_trims_old_pages_but_keeps_pending_edits_and_the_new_page(tmp
         cached = {row[0] for row in connection.execute("select occurrence_id from snapshot")}
     assert cached == {"p012", "p001"}
     assert workspace.pending_issue_ids() == ["p001"]
+
+
+def test_transient_sqlite_journal_disappearance_does_not_break_reads(tmp_path,monkeypatch):
+    from pathlib import Path
+    workspace=Workspace(tmp_path/'workspace.sqlite');workspace.replace_snapshot([issue()])
+    original=Path.chmod
+    def raced(path,mode,*args,**kwargs):
+        if str(path).endswith(('-wal','-shm')): raise FileNotFoundError('journal removed by SQLite')
+        return original(path,mode,*args,**kwargs)
+    monkeypatch.setattr(Path,'chmod',raced)
+    assert workspace.rows()[0]['occurrence_id']=='occ-1'
+
+
+def test_windows_workspace_does_not_toggle_attributes_on_open_sqlite_handles(tmp_path,monkeypatch):
+    from pathlib import Path
+
+    from dbt_dqm_app import store
+    monkeypatch.setattr(store.sys,'platform','win32')
+    monkeypatch.setattr(Path,'chmod',lambda *args,**kwargs:pytest.fail('Windows ACLs are not POSIX modes'))
+    workspace=Workspace(tmp_path/'workspace.sqlite');workspace.replace_snapshot([issue()])
+    workspace.set_change('occ-1','notes','kept')
+    assert workspace.rows()[0]['notes']=='kept'

@@ -60,3 +60,7 @@ def check_alias_app(project, profiles):
         "missed_issue_id": identity, "description": "alias acceptance report",
         "area_label": "synthetic alias QA", "root_cause": "no_test",
     }) == identity
+
+    from review_checks import check_review_actions
+
+    check_review_actions(config)

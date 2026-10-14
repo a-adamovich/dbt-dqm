@@ -23,8 +23,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from dbt_dqm_app.browse import Filters
 from dbt_dqm_app.config import load_config
 from dbt_dqm_app.display import paired_display
+from dbt_dqm_app.exports import snapshot_rows, write_export
 from dbt_dqm_app.frames import configure_pandas
 from dbt_dqm_app.store import Workspace
 from dbt_dqm_app.warehouse import fetch_health, fetch_issues
@@ -58,6 +60,14 @@ def main() -> None:
         frame = pd.DataFrame(rows)
         frame["record_details"] = frame["record_values_json"].map(paired_display)
         payload_bytes = int(frame["record_values_json"].fillna("").str.len().mean() or 0)
+        export_results = {}
+        for format in ("csv", "xlsx"):
+            export_started = time.perf_counter()
+            result = write_export(snapshot_rows(workspace.path, Filters(lifecycle=()), workspace.last_sync()),
+                                  Path(directory) / format, format)
+            assert result.rows == len(frame)
+            export_results[format] = {"rows": result.rows, "bytes": Path(result.path).stat().st_size,
+                                      "seconds": round(time.perf_counter() - export_started, 2)}
     finished = time.perf_counter()
     print(
         json.dumps(
@@ -68,6 +78,7 @@ def main() -> None:
                 "total_seconds": round(finished - started, 2),
                 "baseline_rss_mb": baseline,
                 "peak_rss_mb": peak_rss_mb(),
+                "exports": export_results,
             }
         )
     )
