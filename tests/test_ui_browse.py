@@ -369,3 +369,23 @@ def test_selection_callback_tolerates_a_widget_removed_during_filter_or_sync(tmp
     monkeypatch.setattr(ui.st, "session_state", State(bulk_selection=selection))
     ui._toggle_selection(tmp_path / "workspace.sqlite", "removed", "select-issue-removed")
     assert not selection.rows
+
+
+def test_disposed_export_keeps_private_storage_until_worker_completion(tmp_path):
+    import gc
+    import tempfile
+    from pathlib import Path
+
+    from dbt_dqm_app.streamlit_app import _hold_export_directory
+
+    job = Future()
+    directory = tempfile.TemporaryDirectory(dir=tmp_path)
+    path = Path(directory.name)
+    _hold_export_directory(job, directory)
+    del directory
+    gc.collect()
+    assert path.exists()
+    job.set_result(None)
+    del job
+    gc.collect()
+    assert not path.exists()

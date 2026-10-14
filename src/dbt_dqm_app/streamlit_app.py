@@ -398,6 +398,12 @@ def _clear_selection():
             del st.session_state[key]
 
 
+def _hold_export_directory(job, directory):
+    # A disposed session can release its state while the worker still has open files. Keep
+    # its private directory alive until the Future is released after worker completion.
+    job.add_done_callback(lambda completed, keep_directory=directory: None)
+
+
 def _invalidate_export():
     directory = st.session_state.pop("export_directory", None)
     st.session_state.pop("prepared_export", None)
@@ -510,6 +516,7 @@ def _render_review_tools(workspace, config, page_rows, filters, pending_only,
                 st.session_state.job = _get_executor().submit(
                     run_worker, prepare_export, config, workspace.path, filters,
                     directory.name, format, population, expected)
+                _hold_export_directory(st.session_state.job, directory)
                 st.rerun()
         if pending_only:
             st.caption("Disable Pending edits only to export saved results.")
