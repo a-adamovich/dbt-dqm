@@ -19,6 +19,9 @@ class AppError(Exception):
         self.message = message
         self.details = details
 
+    def log_reason(self) -> str:
+        return self.message + (f"\n{self.details}" if self.details else "")
+
 
 class SnapshotUnavailable(AppError):
     """The warehouse answered, but its data can't be trusted to replace the local cache."""

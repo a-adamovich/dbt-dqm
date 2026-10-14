@@ -11,21 +11,30 @@ from dbt_dqm_app.limits import MAX_CACHE_ISSUES, MAX_CACHE_MIB, validate_limits
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(prog="dbt-dqm")
+    root = argparse.ArgumentParser(prog="dbt-dqm", allow_abbrev=False)
     commands = root.add_subparsers(dest="command", required=True)
-    run = commands.add_parser("run", help="Run the separate DQM test, capture and review workflow")
+    run = commands.add_parser("run", allow_abbrev=False,
+                              help="Run the separate DQM test, capture and review workflow")
     for flag in ("project-dir", "profiles-dir", "target"):
         run.add_argument(f"--{flag}")
     run.add_argument("--select", nargs="+")
     run.add_argument("--exclude", nargs="+")
     run.add_argument("--vars", default="{}")
     run.add_argument("--threads", type=int)
+    run.add_argument("--verbose", action="store_true", help="Show full dbt console output and timings")
+    run.add_argument("--defer", action=argparse.BooleanOptionalAction, default=None,
+                     help="Resolve upstream refs using state (default: DBT_DEFER)")
+    run.add_argument("--favor-state", action=argparse.BooleanOptionalAction, default=None,
+                     help="Prefer state even when upstream dev models exist (DBT_FAVOR_STATE)")
+    run.add_argument("--state", help="Comparison/deferral artifacts directory (DBT_STATE)")
+    run.add_argument("--target-path", help="Output artifacts directory (DBT_TARGET_PATH)")
     run.add_argument("--full-refresh", action="store_true",
                      help="Reset DQM history and annotations; preserve unrelated relations")
     app = commands.add_parser("app", help="Launch the local review application")
     app.add_argument("--project-dir", default=None)
     app.add_argument("--profiles-dir", default=None)
     app.add_argument("--target", default=None)
+    app.add_argument("--target-path", help="Artifacts directory used by run (DBT_TARGET_PATH)")
     app.add_argument("--port", type=int, default=8501)
     app.add_argument("--max-cache-issues", type=int, default=MAX_CACHE_ISSUES,
                      help="Issue cache ceiling, configurable downward from 50000")
@@ -102,6 +111,8 @@ def main() -> None:
         if args.lock_timeout <= 0:
             raise SystemExit("--lock-timeout must be a positive integer")
         environment = os.environ.copy()
+        if args.target_path is not None:
+            environment["DBT_TARGET_PATH"] = args.target_path
         environment.update(
             {
                 "STREAMLIT_BROWSER_GATHER_USAGE_STATS": "false",

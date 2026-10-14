@@ -50,7 +50,7 @@ def protocol_project(tmp_path_factory):
     return project, profiles
 
 
-def render(protocol_project, monkeypatch, macro, arguments=""):
+def render(protocol_project, monkeypatch, macro, arguments="", variables=None):
     project, profiles = protocol_project
 
     def closed(cls, connection):
@@ -73,11 +73,129 @@ def render(protocol_project, monkeypatch, macro, arguments=""):
             str(project),
             "--profiles-dir",
             str(profiles),
-            "--vars", "{dqm_enabled: true}",
+            "--vars", json.dumps({"dqm_enabled": True, **(variables or {})}),
         ]
     )
     assert result.success, result.exception
     return result.result[0].node.compiled_code
+
+
+@pytest.mark.parametrize("value, expected", [
+    ([" alpha ", "", "beta"], "alpha, beta"), (" team ", "team"),
+    ([], "None"), (["", " "], "None"), (None, "None"),
+])
+def test_owner_normalization_uses_all_nonblank_strings(protocol_project, monkeypatch, value, expected):
+    # JSON null is not a Jinja literal; pass the value through vars instead.
+    sql = render(protocol_project, monkeypatch, "owner_text", "var('test_owner')",
+                 variables={"test_owner": value})
+    assert sql.strip() == expected
+
+
+def test_maintenance_probe_is_protected_and_preserves_live_work(protocol_project, monkeypatch):
+    sql = render(protocol_project, monkeypatch, "bigquery__maintenance_probe_script",
+                 "dbt_dqm.maintenance_steps(30,90),30,90")
+    assert "set dqm_trigger_marker" in sql
+    assert "exception when error then" in sql
+    assert "= null;" in sql and "setup_status='ready'" in sql
+    assert "status!='started'" in sql
+    assert "status='abandoned'" in sql
+    assert "interval 24 hour" in sql
+    assert "delete from" not in sql
+
+
+def test_empty_raw_pruning_keeps_the_cutoff_and_generation(protocol_project, monkeypatch):
+    sql = render(protocol_project, monkeypatch, "default__maintenance_raw_pruning", "30",
+                 variables={"dbt_dqm_maintenance_shortcuts": True})
+    assert sql.index("generation=generation+1") < sql.index("if exists(")
+    assert "raw_pruned_before" in sql and "run.status='started'" in sql
+    assert sql.index("if exists(") < sql.index("create or replace temp table dqm_prune")
+    assert "end if;" in sql
+
+
+def test_empty_outcome_has_normal_health_attribution(protocol_project, monkeypatch):
+    sql = render(protocol_project, monkeypatch, "bigquery__maintenance_log_script",
+                 "[{'step':'staging_expiry','ok':true,'job_id':none,'empty':true}],"
+                 "\"timestamp '2026-10-10T00:00:00.000000Z'\",'automatic'")
+    assert "no eligible work" in sql and "'succeeded'" in sql
+    assert "trigger_marker_at,trigger_kind" in sql and "'automatic'" in sql
+
+
+def test_custom_dispatch_disables_shortcuts(protocol_project, monkeypatch):
+    sql = render(protocol_project, monkeypatch, "maintenance_probe_steps",
+                 "dbt_dqm.maintenance_steps(30,90)")
+    # The fixture overrides outcome logging; absence of eligible rows cannot hide those hooks.
+    assert sql.strip() == "[]"
+
+
+@pytest.mark.parametrize("eligibility, kind, expected_jobs", [
+    (False, "automatic", 2), (None, "automatic", 5),
+    (True, "automatic", 5), (False, "manual", 4),
+])
+def test_maintenance_executor_skips_only_proven_empty_defaults(
+    protocol_project, monkeypatch, tmp_path, eligibility, kind, expected_jobs
+):
+    import agate
+    from dbt.adapters.bigquery.connections import BigQueryAdapterResponse
+
+    original, profiles = protocol_project
+    project = tmp_path / "maintenance"
+    shutil.copytree(original, project, ignore=shutil.ignore_patterns("dbt_packages", "target", "logs"))
+    (project / "macros/acceptance_protocol.sql").unlink()
+    (project / "dbt_packages").mkdir()
+    (project / "dbt_packages/dbt_dqm").symlink_to(ROOT, target_is_directory=True)
+    scripts = []
+    messages = []
+    marker = "2026-10-10T00:00:00.000000Z"
+
+    def execute(self, sql, **kwargs):
+        scripts.append(sql)
+        if "declare dqm_eligible_" in sql:
+            table = agate.Table([(name, eligibility, marker) for name in
+                                 ("staging_expiry", "stage_drops", "log_pruning")],
+                                ["step", "eligible", "trigger_marker_at"],
+                                column_types=[agate.Text(), agate.Boolean(), agate.Text()])
+        elif "select dqm_step_ok as ok" in sql:
+            table = agate.Table([(True, "job_1", marker)], ["ok", "job_id", "trigger_marker_at"],
+                                column_types=[agate.Boolean(), agate.Text(), agate.Text()])
+        else:
+            table = agate.Table([], [])
+        return BigQueryAdapterResponse(_message="OK"), table
+
+    def closed(cls, connection):
+        connection.state = ConnectionState.CLOSED
+        return connection
+
+    monkeypatch.setattr(BigQueryConnectionManager, "clear_transaction", lambda self: None)
+    monkeypatch.setattr(BigQueryConnectionManager, "execute", execute)
+    monkeypatch.setattr(BigQueryConnectionManager, "close", classmethod(closed))
+    monkeypatch.setattr(BigQueryConnectionManager, "open", classmethod(
+        lambda *args: (_ for _ in ()).throw(AssertionError("Live connection attempted"))))
+    args = ["--no-populate-cache", "run-operation", "dbt_dqm.maintain_dqm",
+            "--project-dir", str(project), "--profiles-dir", str(profiles),
+            "--vars", "{dqm_enabled: true, dbt_dqm_maintenance_shortcuts: true}"]
+    if kind == "manual":
+        args[2] = "dbt_dqm.cleanup_dqm_logs"
+        # Explicit cleanup verifies the logged outcomes after execution.
+        def manual_execute(self, sql, **kwargs):
+            if "select step, outcome, diagnostic_id" in sql:
+                return BigQueryAdapterResponse(_message="OK"), agate.Table(
+                    [(name, "succeeded", None) for name in ("staging_expiry", "stage_drops", "log_pruning")],
+                    ["step", "outcome", "diagnostic_id"])
+            return execute(self, sql, **kwargs)
+        monkeypatch.setattr(BigQueryConnectionManager, "execute", manual_execute)
+    result = dbtRunner(callbacks=[lambda event: messages.append(event.info.msg)]).invoke(args)
+    assert result.success, result.exception
+    assert len(scripts) == expected_jobs
+    log = scripts[-1]
+    assert log.count("insert into") == 3
+    if eligibility is False and kind == "automatic":
+        assert log.count("no eligible work") == 3
+        assert marker in log
+        observed = json.loads(next(msg.removeprefix("DQM_MAINTENANCE=") for msg in messages
+                                   if msg.startswith("DQM_MAINTENANCE=")))
+        assert {item["action"] for item in observed} == {"no_eligible_work"}
+    else:
+        assert "no eligible work" not in log
 
 
 def test_bigquery_apply_fences_and_protects_annotations(protocol_project, monkeypatch):
@@ -315,7 +433,8 @@ def test_capture_summary_is_valid_bigquery_script_without_empty_statements(proto
     def reject(*args, **kwargs):
         raise AssertionError("Script rendering attempted warehouse access")
 
-    monkeypatch.setattr(BigQueryAdapter, "get_relation", lambda *args, **kwargs: None)
+    # Already-initialized collection must not even render setup's metadata lookups.
+    monkeypatch.setattr(BigQueryAdapter, "get_relation", reject)
     monkeypatch.setattr(BigQueryConnectionManager, "clear_transaction", lambda self: None)
     monkeypatch.setattr(BigQueryConnectionManager, "execute", execute)
     monkeypatch.setattr(BigQueryConnectionManager, "close", classmethod(closed))
@@ -331,4 +450,4 @@ def test_capture_summary_is_valid_bigquery_script_without_empty_statements(proto
     assert len(scripts) == 1
     parsed = sqlglot.parse(scripts[0], read="bigquery")
     assert parsed and all(statement is not None for statement in parsed)
-    assert "inconclusive" in scripts[0] and "collection_status not in" in scripts[0]
+    assert "inconclusive" in scripts[0] and "captured_issue_count" in scripts[0]

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0a5 - 2026-10-14
+
+- Capture routine dbt output; add `--verbose`, phase progress, test/capture summaries and failure metrics.
+- Add defer/state flags and a shared artifact-directory override for the runner and review app.
+  Reject input-state/output-directory collisions before parsing, and keep DQM writes in the selected target.
+- Accept inherited metadata owner lists, preserving all nonblank owners as comma-separated text.
+  Invalid values identify their effective metadata key and type; background failure logs always include a reason.
+- Avoid redundant collection setup lookups and restrict eager adapter caching to selected resources.
+  Add opt-in BigQuery maintenance eligibility shortcuts; preserve retention fences and attributed health.
+- Expand the capture benchmark to matched fresh, refresh, unchanged and retention-backlog trials,
+  with an optional installed a4 baseline. No warehouse schema migration or history reset is required.
+
 ## 0.2.0a4 - 2026-10-13
 
 - Add explicitly enabled `dbt-dqm run`; remove automatic capture/retention end hooks. Package models

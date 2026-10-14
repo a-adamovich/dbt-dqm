@@ -7,6 +7,27 @@ from dbt_dqm_app.config import AppConfig
 from dbt_dqm_app.store import Workspace
 
 
+def test_background_sync_logs_the_visible_error_when_details_are_empty(tmp_path, monkeypatch, caplog):
+    import dbt_dqm_app.streamlit_app as ui
+    from dbt_dqm_app.errors import AppError
+
+    config = AppConfig(tmp_path, tmp_path, "dev", "demo", "postgres", "db", "schema", "US",
+                       "oauth", None, browse_mode="snapshot")
+    monkeypatch.setattr(AppConfig, "workspace_path", property(lambda self: tmp_path / "workspace.sqlite"))
+    monkeypatch.setattr(ui, "load_config", lambda *args: config)
+    monkeypatch.setattr(ui, "manifest_nodes", lambda _: {})
+    reason = "Incompatible DQM schema. Run dbt-dqm run --full-refresh."
+    failed = Future()
+    failed.set_exception(AppError(reason))
+    executor = MagicMock()
+    executor.submit.return_value = failed
+    monkeypatch.setattr(ui, "_get_executor", lambda: executor)
+    app = AppTest.from_string("from dbt_dqm_app.streamlit_app import run_app\nrun_app()").run()
+    assert not app.exception
+    assert any(reason in error.value for error in app.error)
+    assert "Background sync job failed: " + reason in caplog.text
+
+
 def test_review_health_and_missed_retry_ui(tmp_path, monkeypatch):
     import dbt_dqm_app.streamlit_app as ui
 

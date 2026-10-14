@@ -1530,6 +1530,10 @@ def test_dedicated_native_limits_complete_pass_and_stale_edits(demo):
     assert {row["invocation_id"] for row in executions} == {invocation}
     assert {row["test_unique_id"] for row in executions} == {
         row["unique_id"] for row in original["results"] if row["unique_id"].startswith("test.")}
+    empty = dedicated(demo, "--select", "no_such_test")
+    assert "0 tests" in empty.stdout
+    assert len(demo.occurrences()) == 7
+    assert all(row["record_status"] == "Active" for row in demo.occurrences())
     config = load_config(demo.project, demo.profiles, "dev")
     workspace = Workspace(demo.project.parent / "review.sqlite")
     workspace.replace_snapshot(fetch_issues(config))
@@ -1537,7 +1541,9 @@ def test_dedicated_native_limits_complete_pass_and_stale_edits(demo):
     patches = workspace.pending()
     epoch = patches[0].installation_id
     limited = dedicated(demo, variables={"dbt_dqm_default_test_limit": 2})
-    assert "DQM phase seconds" in limited.stdout
+    assert "DQM phase seconds" not in limited.stdout
+    assert "DQM complete:" in limited.stdout
+    assert "Compiled node" not in limited.stdout and "Running with dbt" not in limited.stdout
     rows = demo.sql("select * from @schema.dqm_test_executions where failure_limit=2")
     assert len(rows) == 3 and {row["collection_status"] for row in rows} == {"limit_reached"}
     assert sorted(row["captured_issue_count"] for row in rows) == [1, 2, 2]
@@ -1591,6 +1597,64 @@ def test_dedicated_preflight_failure_codes_and_default_limit(demo):
     tampered = dedicated(demo, variables={"tamper": True}, code=2)
     assert "collection_error" in tampered.stderr and "Stored failures changed before capture" in tampered.stderr
     assert _latest_execution(demo, "demo_order_amount_invalid")["collection_status"] == "success"
+
+
+def test_dedicated_defer_inherited_owner_lists_and_custom_artifacts(demo, monkeypatch):
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.warehouse import fetch_issues
+
+    demo.dbt("run", "--select", "demo_records")
+    shutil.copytree(demo.project / "target", demo.project / "prod state")
+    original_schema = demo.schema
+    dev_schema = original_schema + "_dev"
+    profile = yaml.safe_load((demo.profiles / "profiles.yml").read_text())
+    profile["dbt_dqm_demo_postgres"]["outputs"]["dev"]["schema"] = dev_schema
+    (demo.profiles / "profiles.yml").write_text(yaml.safe_dump(profile))
+    project = yaml.safe_load((demo.project / "dbt_project.yml").read_text())
+    project["data_tests"] = {"dbt_dqm_demo_postgres": {"+meta": {"owner": [" alpha ", "", "beta"]}}}
+    (demo.project / "dbt_project.yml").write_text(yaml.safe_dump(project))
+    test = demo.project / "tests/demo_customer_email_invalid.sql"
+    test.write_text(test.read_text().replace("'owner': 'customer_data_owner',", ""))
+    flags = ["--select", "demo_customer_email_invalid", "--state", "prod state",
+             "--target-path", "dev artifacts"]
+    demo.schema = dev_schema
+    try:
+        result = dedicated(demo, *flags, "--defer", "--favor-state")
+        assert "2 captured issues" in result.stdout
+        assert "Compiled node" not in result.stdout and "Running with dbt" not in result.stdout
+        assert not demo.sql("select 1 from information_schema.tables where table_schema=%s and table_name='demo_records'", [dev_schema])
+        owners = {row["dqm_owner"] for row in demo.occurrences()}
+        assert owners == {"customer_success", "alpha, beta"}
+        installation = demo.sql("select installation_id from @schema.dqm_install")
+        project["data_tests"]["dbt_dqm_demo_postgres"]["+meta"]["owner"] = ["alpha", 7]
+        (demo.project / "dbt_project.yml").write_text(yaml.safe_dump(project))
+        invalid = dedicated(demo, *flags, "--defer", "--full-refresh", code=2)
+        assert "meta.owner" in invalid.stderr and "['alpha', 7]" in invalid.stderr
+        assert "tests/demo_customer_email_invalid.sql" in invalid.stderr
+        assert demo.sql("select installation_id from @schema.dqm_install") == installation
+        project["data_tests"]["dbt_dqm_demo_postgres"]["+meta"]["owner"] = [" alpha ", "", "beta"]
+        (demo.project / "dbt_project.yml").write_text(yaml.safe_dump(project))
+        invocation = json.loads((demo.project / "dev artifacts/dqm_run_results.json").read_text())["metadata"]["invocation_id"]
+        assert demo.sql("select test_meta from @schema.dqm_test_executions where invocation_id=%s", [invocation])[0]["test_meta"].find('" alpha "') >= 0
+        config = load_config(demo.project, demo.profiles, "dev", target_path="dev artifacts")
+        assert len(fetch_issues(config)) == 2
+        demo.sql("update @schema.dqm_issue_occurrences set dqm_owner='reviewer',annotation_version=1 where dqm_owner='alpha, beta'")
+        dedicated(demo, *flags, "--defer", "--favor-state")
+        assert {row["dqm_owner"] for row in demo.occurrences()} == {"customer_success", "reviewer"}
+        monkeypatch.setenv("DBT_DEFER", "true")
+        refused = dedicated(demo, *flags, "--no-defer", "--full-refresh", code=2)
+        assert "does not exist" in refused.stdout + refused.stderr
+        assert len(demo.occurrences()) == 2
+        demo.sql(f'create table @schema.demo_records as select * from "{original_schema}".demo_records where false')
+        favored = dedicated(demo, *flags, "--favor-state", "--verbose")
+        assert "DQM phase seconds" in favored.stdout and "Running with dbt" in favored.stdout
+        assert "2 captured issues" in favored.stdout
+        dedicated(demo, *flags, "--no-favor-state")
+        assert all(row["record_status"] == "Archived" for row in demo.occurrences())
+    finally:
+        demo.sql("drop schema if exists @schema cascade")
+        demo.sql(f'drop schema if exists "{dev_schema}_dbt_test__audit" cascade')
+        demo.schema = original_schema
 
 
 def test_dedicated_full_refresh_aliases_grants_and_external_dependency_failure(demo):

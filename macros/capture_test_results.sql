@@ -1,7 +1,7 @@
 {#
-  Persist dbt test execution metadata and row-level failure observations at on-run-end.
+  Persist dbt test execution metadata and row-level failure observations in the explicit workflow.
 
-  Only selected tests tagged for dbt-dqm and configured with store_failures participate. Each
+  Only selected tests marked with meta.dbt_dqm and configured with store_failures participate. Each
   failing test must declare meta.dbt_dqm.granularity, and every named key must be present in the
   stored-failure relation. Invalid configurations are recorded without making lifecycle changes.
 #}
@@ -22,9 +22,11 @@
   {% endif %}
 
   {% set capture_sql = [] %}
-  {% set setup %}{% if target.type=='postgres' %}begin; {{ dbt_dqm.reconcile_lock() }}{% endif %}
-    {{ dbt_dqm.setup_sql() }}{% if target.type=='postgres' %}commit;{% endif %}{% endset %}
-  {% if not initialized %}{% do capture_sql.append(setup) %}{% endif %}
+  {% if not initialized %}
+    {% set setup %}{% if target.type=='postgres' %}begin; {{ dbt_dqm.reconcile_lock() }}{% endif %}
+      {{ dbt_dqm.setup_sql() }}{% if target.type=='postgres' %}commit;{% endif %}{% endset %}
+    {% do capture_sql.append(setup) %}
+  {% endif %}
 
   {% set execution_columns = [
     'invocation_id', 'captured_at', 'command', 'test_unique_id', 'test_name', 'test_status',
@@ -227,7 +229,7 @@
           {% do log('dbt-dqm skipped ' ~ node.unique_id ~ ': a granularity column is missing', info=true) %}
         {% elif result.failures is not none and result.failures|int > 0 %}
           {% set tags_json = dbt_dqm.compact_json(node.config.tags) %}
-          {% set owner = (dqm_meta.get('owner') or '')|trim or (meta.get('owner') or '')|trim or none %}
+          {% set owner = dbt_dqm.owner_text(dqm_meta.get('owner'), 'meta.dbt_dqm.owner') or dbt_dqm.owner_text(meta.get('owner'), 'meta.owner') %}
           {% set action = dqm_meta.get('call_to_action') %}
 
           {% set key_pairs = [] %}

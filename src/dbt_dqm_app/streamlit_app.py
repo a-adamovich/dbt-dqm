@@ -178,7 +178,7 @@ def run_app() -> None:
                 )
             else:
                 logger.warning(
-                    "Background %s job failed: %s", st.session_state.job_kind, failure.details
+                    "Background %s job failed: %s", st.session_state.job_kind, failure.log_reason()
                 )
                 st.session_state.job_notice = ("error", failure.message, failure.details)
         finally:
@@ -338,7 +338,7 @@ def _warehouse_read(read, *args):
         raise
     except Exception as error:  # noqa: BLE001 - the UI reports every warehouse failure.
         failure = classify(error)
-        logger.warning("Warehouse browse read failed: %s", failure.details)
+        logger.warning("Warehouse browse read failed: %s", failure.log_reason())
         st.session_state.browse_failure = (failure.message, failure.details)
         return None
 

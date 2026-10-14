@@ -24,6 +24,29 @@ PROJECT = os.environ.get("DBT_DQM_BIGQUERY_TEST_PROJECT")
 pytestmark = pytest.mark.skipif(not PROJECT, reason="Credentialed BigQuery release gate")
 
 
+def test_default_maintenance_shortcuts_keep_retention_fence_and_health(demo):
+    # Remove this disposable fixture's fault overrides so the package defaults are exercised.
+    (demo.path / "macros/acceptance_protocol.sql").unlink()
+    owner_test = demo.path / "tests/demo_customer_email_invalid.sql"
+    owner_test.write_text(owner_test.read_text().replace(
+        "'owner': 'customer_data_owner'", "'owner': [' alpha ', '', 'beta']"))
+    demo.dbt("run", "--select", "demo_records")
+    result = dedicated(demo, variables={"dbt_dqm_retention_days": 30,
+                       "dbt_dqm_event_retention_days": 30, "dbt_dqm_maintenance_shortcuts": True})
+    assert "Compiled node" not in result.stdout and "Running with dbt" not in result.stdout
+    metrics = json.loads((demo.path / "target/dqm_workflow_metrics.json").read_text())
+    actions = {row["step"]: row["action"] for row in metrics["maintenance_steps"]}
+    assert actions == {"raw_pruning": "executed", "event_retention": "no_eligible_work",
+                       "staging_expiry": "no_eligible_work", "stage_drops": "no_eligible_work",
+                       "run_pruning": "no_eligible_work", "log_pruning": "no_eligible_work"}
+    assert len(set(metrics["query_jobs"]["maintain_dqm"])) == 3
+    control = demo.sql("select generation,raw_pruned_before from @dataset.dqm_reconciliation_control`")[0]
+    assert control["generation"] > 0 and control["raw_pruned_before"] is not None
+    assert demo.sql("select count(*) as n from @dataset.dqm_maintenance_health` where state!='ok'")[0]["n"] == 0
+    assert demo.sql("select count(*) as n from @dataset.dqm_issue_observations`")[0]["n"] > 0
+    assert {row["dqm_owner"] for row in demo.snapshot()} >= {"customer_success", "alpha, beta"}
+
+
 class Demo:
     def __init__(self, path, profiles, dataset, client):
         self.path, self.profiles, self.dataset, self.client = path, profiles, dataset, client

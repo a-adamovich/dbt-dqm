@@ -46,7 +46,12 @@ patches bind to the installation UUID and are checked transactionally before aud
 
 ## Evidence and lifecycle
 
-Capture records each tagged, stored-failure test execution. Tracked tests require `fail_calc=count(*)` after whitespace/case normalization, no configured `limit`, and effective table failure storage. Sampling inside test SQL violates this complete-evidence contract. Configuration, collection and inconclusive outcomes never archive issues. A passing test's grain and explicitly configured owner column are checked from column metadata without scanning rows.
+Capture records selected tests marked with `meta.dbt_dqm` and configured with `store_failures`.
+Tracked tests require `fail_calc=count(*)` after whitespace/case normalization, a positive native
+`limit`, and table failure storage. Native limits apply before deduplication. Reaching the limit
+records `collection_status=limit_reached` and cannot close omitted issues through absence.
+Configuration, collection and inconclusive outcomes never archive issues. Output granularity is
+validated for passing and failing tests before initialization or destructive refresh.
 
 Reconciliation freezes all unreceipted conclusive execution IDs. It replays them in `(captured_at, invocation_id)` order. Passing evidence closes an Active issue as `Passed`; identity scheme changes close it as `IDENTITY_CHANGED`; a removed tracked test closes it as `TEST_REMOVED`. New occurrences start with clean annotations. Public history context matches the previous occurrence within the same identity scheme. Recurrence requires its previous closure to be `Passed`; potential regression additionally requires the previous closure workflow snapshot to be `RESOLVED`.
 
@@ -63,6 +68,9 @@ Verdicts are `UNREVIEWED`, `TRUE_POSITIVE`, or `FALSE_POSITIVE`, independently o
 Row ownership uses the fixed, case-insensitive output column `dqm_owner`, then nonblank
 `meta.dbt_dqm.owner`, then `meta.owner`, then unassigned. Conflicting nonblank row owners for one
 identity use the metadata fallback, record a warning, and increment `owner_conflict_identity_count`.
+Both metadata owner keys accept strings, lists of strings, or null. Strings are trimmed; lists
+discard blank entries and join the rest with `, ` in order. Empty values fall through. The normalized
+owner is a single text field; execution metadata retains the original list, including inherited values.
 Ownership initializes new occurrences; reviewer assignments persist. Every output column, including
 the row owner, belongs to full payload capture. `owner_column` and `poc_responsible` are unsupported.
 
@@ -108,6 +116,15 @@ available for operators. The steps are:
 - pruning of maintenance-log rows older than 30 days, whenever any other step is scheduled.
 
 On Postgres without retention settings, nothing is scheduled.
+
+`dbt_dqm_maintenance_shortcuts: true` opts into an experimental BigQuery optimization, disabled
+by default pending credentialed performance evidence. A protected eligibility probe can avoid
+separate automatic jobs for empty default steps. An unknown result executes the step normally;
+custom step/drop/log implementations and manual cleanup keep their execution behavior. Empty
+steps receive a `succeeded` outcome with a fixed "no eligible work" description and the invocation's
+trigger marker. Eligibility is assessed at the probe; newly eligible work waits until the next run.
+Raw pruning always advances its cutoff and generation fence and protects active reconciliation
+inputs, even when empty deletes are omitted. No outcome column or Health state is added.
 
 **What is guaranteed.** A SQL error inside a maintenance step never fails an otherwise successful dbt invocation:
 - The failing step rolls back its own work, its outcome is logged, and it is retried the next time maintenance runs. The other steps still run.

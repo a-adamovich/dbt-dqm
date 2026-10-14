@@ -64,6 +64,7 @@
   {% if target.type == 'postgres' %}
     create temporary table dqm_prune on commit drop as {{ eligible }};
   {% else %}
+    {% if var('dbt_dqm_maintenance_shortcuts',false) %}if exists({{ eligible }}) then{% endif %}
     create or replace temp table dqm_prune as {{ eligible }};
   {% endif %}
   {% for name in ['dqm_issue_observations', 'dqm_reconciliation_receipts', 'dqm_test_executions'] %}
@@ -71,6 +72,7 @@
       where prune.test_unique_id=target.test_unique_id and prune.invocation_id=target.invocation_id);
   {% endfor %}
   {% if target.type == 'postgres' %}drop table dqm_prune;{% endif %}
+  {% if target.type == 'bigquery' and var('dbt_dqm_maintenance_shortcuts',false) %}end if;{% endif %}
 {% endmacro %}
 
 {% macro maintenance_event_retention(events_days) %}{{ return(adapter.dispatch('maintenance_event_retention', 'dbt_dqm')(events_days)) }}{% endmacro %}
@@ -173,12 +175,12 @@
 {% macro maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression, marker, kind) %}
   {{ return(adapter.dispatch('maintenance_log_insert_sql', 'dbt_dqm')(step_name, ok_expression, diagnostic_expression, marker, kind)) }}
 {% endmacro %}
-{% macro default__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression, marker, kind) %}
+{% macro default__maintenance_log_insert_sql(step_name, ok_expression, diagnostic_expression, marker, kind, empty=false) %}
   insert into {{ dbt_dqm.dqm_relation('dqm_maintenance_log') }}
     (logged_at,invocation_id,step,outcome,description,diagnostic_id,trigger_marker_at,trigger_kind)
   values ({{ dbt.current_timestamp() }}, {{ dbt_dqm.sql_string(dbt_dqm.maintenance_invocation_id()) }}, {{ dbt_dqm.sql_string(step_name) }},
     case when {{ ok_expression }} then 'succeeded' else 'failed' end,
-    case when {{ ok_expression }} then {{ dbt_dqm.sql_string(step_name | replace('_', ' ') ~ ' succeeded') }}
+    case when {{ ok_expression }} then {{ dbt_dqm.sql_string(step_name | replace('_', ' ') ~ (' no eligible work' if empty else ' succeeded')) }}
       else {{ dbt_dqm.sql_string(step_name | replace('_', ' ') ~ ' failed') }} end,
     case when {{ ok_expression }} then cast(null as {{ dbt.type_string() }}) else {{ diagnostic_expression }} end,
     {{ marker }}, {{ dbt_dqm.sql_string(kind) }});
@@ -220,7 +222,11 @@
 {% macro bigquery__maintenance_log_script(outcomes, marker, kind) %}
   {% for outcome in outcomes %}
     begin
-      {{ dbt_dqm.maintenance_log_insert_sql(outcome.step, 'true' if outcome.ok else 'false', dbt_dqm.sql_string(outcome.job_id) if outcome.job_id else 'cast(null as string)', marker, kind) }}
+      {% if outcome.empty|default(false) %}
+        {{ dbt_dqm.default__maintenance_log_insert_sql(outcome.step, 'true', 'cast(null as string)', marker, kind, empty=true) }}
+      {% else %}
+        {{ dbt_dqm.maintenance_log_insert_sql(outcome.step, 'true' if outcome.ok else 'false', dbt_dqm.sql_string(outcome.job_id) if outcome.job_id else 'cast(null as string)', marker, kind) }}
+      {% endif %}
     exception when error then
       select 'maintenance outcome not logged' as maintenance_note;
     end;
@@ -268,6 +274,63 @@
 
 {# --- Executor --- #}
 
+{# Shortcuts apply only to package defaults, including the logging implementation.
+   Custom dispatched steps may do work beyond the package eligibility predicates. #}
+{% macro maintenance_probe_steps(steps) %}
+  {% set probe=[] %}
+  {% set dispatch=adapter.dispatch %}
+  {% set logging=dispatch('maintenance_log_insert_sql','dbt_dqm').macro %}
+  {% if logging.package_name != 'dbt_dqm' or logging.name != 'default__maintenance_log_insert_sql' %}{{ return(probe) }}{% endif %}
+  {% for step in steps if step.name != 'raw_pruning' %}
+    {% set implementation=dispatch('maintenance_' ~ step.name,'dbt_dqm').macro %}
+    {% if implementation.package_name == 'dbt_dqm' and implementation.name == 'default__maintenance_' ~ step.name %}
+      {# Stage drop dispatch is independently overridable. #}
+      {% set drop=dispatch('maintenance_stage_drop_sql','dbt_dqm').macro if step.name=='stage_drops' else none %}
+      {% if drop is none or (drop.package_name=='dbt_dqm' and drop.name=='default__maintenance_stage_drop_sql') %}
+        {% do probe.append(step) %}
+      {% endif %}
+    {% endif %}
+  {% endfor %}
+  {{ return(probe) }}
+{% endmacro %}
+
+{% macro maintenance_eligible_sql(step, days, events_days) %}
+  {% if step.name == 'event_retention' %}
+    select 1 from {{ dbt_dqm.dqm_relation('dqm_issue_events') }} where event_at < timestamp_sub(current_timestamp(),interval {{ events_days }} day)
+  {% elif step.name == 'staging_expiry' %}
+    select 1 from {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} where staged_at <= timestamp_sub(current_timestamp(),interval 24 hour)
+  {% elif step.name == 'stage_drops' %}
+    select 1 from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }}
+    where (status='abandoned' or (status='completed' and completed_at <= timestamp_sub(current_timestamp(),interval 24 hour)))
+      and strpos(stage_relation,'dqm_reconcile_stage_') > 0
+  {% elif step.name == 'run_pruning' %}
+    select 1 from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }}
+    where status!='started' and completed_at < timestamp_sub(current_timestamp(),interval {{ days }} day)
+  {% else %}
+    select 1 from {{ dbt_dqm.dqm_relation('dqm_maintenance_log') }} where logged_at < timestamp_sub(current_timestamp(),interval 30 day)
+  {% endif %}
+{% endmacro %}
+
+{# A failed readiness/eligibility read produces unknown, never a successful empty result. #}
+{% macro bigquery__maintenance_probe_script(steps, days, events_days) %}
+  declare dqm_trigger_marker timestamp default null;
+  {% for step in steps %}declare dqm_eligible_{{ step.name }} bool default null;{% endfor %}
+  {{ dbt_dqm.bigquery__maintenance_marker_sql() }}
+  {% for step in steps %}
+    begin
+      {{ dbt_dqm.ready_sql() }}
+      set dqm_eligible_{{ step.name }} = exists({{ dbt_dqm.maintenance_eligible_sql(step,days,events_days) }});
+    exception when error then
+      set dqm_eligible_{{ step.name }} = null;
+    end;
+  {% endfor %}
+  {% for step in steps %}
+    select {{ dbt_dqm.sql_string(step.name) }} as step,dqm_eligible_{{ step.name }} as eligible,
+      format_timestamp('%Y-%m-%dT%H:%M:%E6SZ',dqm_trigger_marker,'UTC') as trigger_marker_at
+    {% if not loop.last %}union all{% endif %}
+  {% endfor %};
+{% endmacro %}
+
 {#- Runs optional maintenance and returns what it observed: a list of {step, ok}. `ok` is the
     step job's own result on BigQuery, and none on Postgres, where outcomes are only known from
     the log. `kind` is 'automatic' or 'manual'. #}
@@ -279,8 +342,24 @@
     {#- A namespace: a plain `set` inside the loop wouldn't outlive it. #}
     {% set run = namespace(marker='cast(null as timestamp)') %}
     {% set outcomes = [] %}
+    {% set eligibility = {} %}
+    {% set probe_steps = dbt_dqm.maintenance_probe_steps(steps) if kind=='automatic' and var('dbt_dqm_maintenance_shortcuts',false) else [] %}
+    {% if probe_steps %}
+      {% set probed=run_query(dbt_dqm.bigquery__maintenance_probe_script(probe_steps,days,events_days)) %}
+      {% for row in probed.rows %}
+        {% do eligibility.update({row[0]:row[1]}) %}
+        {% if row[2] is not none and modules.re.match('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{6}Z$',row[2]|string) %}
+          {% set run.marker="timestamp '" ~ row[2] ~ "'" %}
+        {% endif %}
+      {% endfor %}
+    {% endif %}
     {% for step in steps %}
-      {% set read_marker = loop.first and kind == 'automatic' %}
+      {% set started=modules.datetime.datetime.now() %}
+      {% if eligibility.get(step.name) is sameas false %}
+        {% do outcomes.append({'step':step.name,'ok':true,'job_id':none,'empty':true}) %}
+        {% do observed.append({'step':step.name,'ok':true,'action':'no_eligible_work','seconds':0}) %}
+      {% else %}
+      {% set read_marker = loop.first and kind == 'automatic' and not probe_steps %}
       {% set result = run_query(dbt_dqm.bigquery__maintenance_step_script(step, days, events_days, read_marker)) %}
       {% set row = result.rows[0] if result.rows | length == 1 else none %}
       {% set ok = row is not none and row[0] == true %}
@@ -291,12 +370,18 @@
         {% set run.marker = "timestamp '" ~ row[2] ~ "'" %}
       {% endif %}
       {% do outcomes.append({'step': step.name, 'ok': ok, 'job_id': job_id}) %}
-      {% do observed.append({'step': step.name, 'ok': ok}) %}
+      {% do observed.append({'step': step.name, 'ok': ok,'action':'executed',
+                             'seconds':(modules.datetime.datetime.now()-started).total_seconds()}) %}
+      {% endif %}
+      {% do log('DQM_MAINTENANCE_STEP=' ~ tojson(observed[-1]),info=false) %}
     {% endfor %}
     {% do run_query(dbt_dqm.bigquery__maintenance_log_script(outcomes, run.marker, kind)) %}
   {% else %}
     {% do run_query(dbt_dqm.postgres__maintenance_script(steps, days, events_days, kind)) %}
-    {% for step in steps %}{% do observed.append({'step': step.name, 'ok': none}) %}{% endfor %}
+    {% for step in steps %}
+      {% do observed.append({'step': step.name, 'ok': none,'action':'executed','seconds':none}) %}
+      {% do log('DQM_MAINTENANCE_STEP=' ~ tojson(observed[-1]),info=false) %}
+    {% endfor %}
   {% endif %}
   {{ return(observed) }}
 {% endmacro %}

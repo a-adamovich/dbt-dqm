@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -42,9 +44,13 @@ def validate_test(node, default_limit: int) -> list[str]:
     for key in ("poc_responsible", "owner_column", "dqm_granularity"):
         if key in dqm or key in meta:
             problems.append(f"remove obsolete {key}; use granularity and owner metadata/dqm_owner")
-    for owner in (meta.get("owner"), dqm.get("owner")):
-        if owner is not None and not isinstance(owner, str):
-            problems.append("owner must be a string")
+    for key, owner in (("meta.owner", meta.get("owner")),
+                       ("meta.dbt_dqm.owner", dqm.get("owner"))):
+        if not (owner is None or isinstance(owner, str) or
+                isinstance(owner, list) and all(isinstance(value, str) for value in owner)):
+            problems.append(f"{key} must be a string, list of strings or null; "
+                            f"effective value {owner!r} ({type(owner).__name__}); "
+                            "metadata may be inherited from dbt_project.yml")
     priority = dqm.get("priority")
     if priority is not None and (not isinstance(priority, str) or priority.strip().lower() not in
                                  ("critical", "high", "medium", "low", "unset")):
@@ -65,7 +71,7 @@ class Workflow:
     def __init__(self, request, factory=None):
         from dbt.cli.main import dbtRunner
 
-        self.request = request
+        self.request = dict(request)
         variables = yaml.safe_load(request.get("vars") or "{}")
         if not isinstance(variables, dict):
             raise TypeError("--vars must be a YAML object")
@@ -85,6 +91,13 @@ class Workflow:
         self.settings = {}
         self.columns = []
         self.collection_errors = []
+        self.collection_summary = {}
+        self.maintenance = []
+        self.console = sys.stderr
+        self.phase_errors = []
+        self.phase_messages = []
+        self.outcomes = {}
+        self.selected_count = 0
         self.factory = factory or dbtRunner
         self.runner = self.factory(callbacks=[self.event])
         self.timings = {}
@@ -105,30 +118,125 @@ class Workflow:
             self.collection_errors = json.loads(message.removeprefix("DQM_COLLECTION_ERRORS="))
         if message.startswith("DQM_COLUMNS="):
             self.columns = json.loads(message.removeprefix("DQM_COLUMNS="))
+        if message.startswith("DQM_COLLECTION_SUMMARY="):
+            self.collection_summary = json.loads(message.removeprefix("DQM_COLLECTION_SUMMARY="))
+        if message.startswith("DQM_MAINTENANCE="):
+            self.maintenance = json.loads(message.removeprefix("DQM_MAINTENANCE="))
+        if message.startswith("DQM_MAINTENANCE_STEP="):
+            self.maintenance.append(json.loads(message.removeprefix("DQM_MAINTENANCE_STEP=")))
+        level = str(getattr(event.info, "level", "")).lower()
+        if level in ("warn", "warning", "error") and not message.startswith("DQM_"):
+            reason = getattr(event.info, "msg", "") or message
+            if reason and reason not in self.phase_messages:
+                self.phase_messages.append(reason)
+                if level == "error":
+                    self.phase_errors.append(reason)
+                if not self.request.get("verbose"):
+                    print(reason, file=self.console, flush=True)
+
+    def phase_flags(self, command):
+        flags = []
+        if command in ("ls", "compile", "test") and self.request.get("state") is not None:
+            flags += ["--state", self.request["state"]]
+        if command in ("compile", "test"):
+            for key in ("defer", "favor_state"):
+                if self.request.get(key) is not None:
+                    flags.append("--" + ("" if self.request[key] else "no-") +
+                                 key.replace("_", "-"))
+        else:
+            flags += ["--no-defer", "--no-favor-state"]
+        if command in ("test", "run"):
+            flags.append("--cache-selected-only")
+        if not self.request.get("verbose"):
+            flags += ["--log-level", "none"]
+        else:
+            flags += ["--no-quiet", "--log-level", "info"]
+        return flags
 
     def invoke(self, arguments, **kwargs):
         self.phase = arguments[1].removeprefix("dbt_dqm.") if arguments[0] == "run-operation" else arguments[0]
         started = time.monotonic()
-        result = self.runner.invoke([*arguments, *self.base], **kwargs)
-        phase = arguments[1].removeprefix("dbt_dqm.") if arguments[0] == "run-operation" else arguments[0]
-        self.timings[phase] = self.timings.get(phase, 0) + time.monotonic() - started
-        return result
+        self.phase_errors = []
+        self.phase_messages = []
+        print(f"DQM: {self.phase.replace('_', ' ')}…", flush=True)
+        try:
+            with contextlib.ExitStack() as stack:
+                if not self.request.get("verbose"):
+                    output = stack.enter_context(tempfile.TemporaryFile(mode="w+", encoding="utf-8"))
+                    stack.enter_context(contextlib.redirect_stdout(output))
+                    stack.enter_context(contextlib.redirect_stderr(output))
+                return self.runner.invoke([*arguments, *self.base,
+                                           *self.phase_flags(arguments[0])], **kwargs)
+        finally:
+            self.timings[self.phase] = self.timings.get(self.phase, 0) + time.monotonic() - started
+
+    def failure_reason(self, result):
+        if result.exception:
+            return str(result.exception)
+        failures = [r.message for r in getattr(result.result, "results", [])
+                    if str(r.status) in ("error", "fail", "skipped") and r.message]
+        return "\n".join(failures or self.phase_errors) or (
+            "dbt returned an unsuccessful result; run again with --verbose for details")
 
     def checked(self, arguments, **kwargs):
         result = self.invoke(arguments, **kwargs)
         if not result.success:
-            raise RuntimeError(f"DQM phase failed: {' '.join(arguments[:2])}. {result.exception or ''}")
+            raise RuntimeError(f"DQM phase failed: {' '.join(arguments[:2])}. {self.failure_reason(result)}")
         return result.result
 
     def execute(self) -> int:
-        config = load_config(self.request.get("project_dir"), self.request.get("profiles_dir"),
-                             self.request.get("target"), cli_vars=self.variables)
+        started = time.monotonic()
+        config = None
+        code = 2
+        try:
+            config = load_config(self.request.get("project_dir"), self.request.get("profiles_dir"),
+                                 self.request.get("target"), cli_vars=self.variables,
+                                 target_path=self.request.get("target_path"))
+            self.base += ["--target-path", str(config.target_path)]
+            for key, value in (("state", self.request.get("state", None)
+                               if self.request.get("state") is not None else os.environ.get("DBT_STATE")),
+                               ("defer_state", os.environ.get("DBT_DEFER_STATE"))):
+                if value:
+                    path = (config.project_dir / Path(value).expanduser()).resolve()
+                    if path == config.target_path:
+                        config = None  # Never write metrics into the input state directory.
+                        raise ValueError(f"{key.replace('_', '-')} directory equals target-path: "
+                                         f"{path}. Keep input state separate from output artifacts.")
+                    if key == "state" and self.request.get("state") is not None:
+                        self.request["state"] = str(path)
+            code = self._execute(config)
+            return code
+        finally:
+            elapsed = time.monotonic() - started
+            if config is not None:
+                metrics = {"phase_seconds": self.timings, "sql_calls": self.sql_calls,
+                           "query_jobs": self.query_jobs, "total_seconds": elapsed,
+                           "completion_status": {0: "success", 1: "test_failures", 2: "error"}[code],
+                           "exit_code": code, "maintenance_steps": self.maintenance,
+                           "test_outcomes": self.outcomes, "collection": self.collection_summary}
+                try:
+                    config.target_path.mkdir(parents=True, exist_ok=True)
+                    (config.target_path / "dqm_workflow_metrics.json").write_text(
+                        json.dumps(metrics), encoding="utf-8")
+                except OSError as error:
+                    print(f"WARNING: Could not write DQM metrics: {error}", file=sys.stderr)
+            captured = self.collection_summary.get("captured_issue_count")
+            capture_notice = (f"{captured} captured issues" if captured is not None else
+                              "capture count unavailable" if self.selected_count else "0 captured issues")
+            outcomes = ", ".join(f"{count} {status}" for status, count in sorted(self.outcomes.items()))
+            print(f"DQM {'complete' if code != 2 else 'stopped'}: {self.selected_count} tests"
+                  f"{f' ({outcomes})' if outcomes else ''}, {capture_notice}, {elapsed:.1f}s.",
+                  flush=True)
+            if self.request.get("verbose"):
+                print("DQM phase seconds: " + json.dumps(self.timings), flush=True)
+
+    def _execute(self, config) -> int:
         require_adapter(config.adapter_type)
         manifest = self.checked(["parse"])
         self.runner = self.factory(manifest=manifest, callbacks=[self.event])
         self.checked(["run-operation", "dbt_dqm.workflow_settings"])
         default = self.settings["default_limit"]
-        listing = ["ls", "--quiet", "--resource-type", "test", "--output", "json",
+        listing = ["ls", "--resource-type", "test", "--output", "json",
                    "--output-keys", "unique_id", "fqn"]
         for key in ("select", "exclude"):
             if self.request.get(key):
@@ -137,6 +245,7 @@ class Workflow:
         ids = {json.loads(row)["unique_id"] for row in selected}
         nodes = [node for key, node in manifest.nodes.items()
                  if key in ids and "dbt_dqm" in (node.config.meta or {})]
+        self.selected_count = len(nodes)
         errors = []
         for other in manifest.nodes.values():
             if other.resource_type != "test" or other.unique_id in ids or "dbt_dqm" not in (other.config.meta or {}):
@@ -174,7 +283,13 @@ class Workflow:
         if self.request.get("full_refresh"):
             from .refresh import full_refresh
 
-            full_refresh(config, manifest, self)
+            self.phase = "full_refresh"
+            print("DQM: full refresh…", flush=True)
+            started = time.monotonic()
+            try:
+                full_refresh(config, manifest, self)
+            finally:
+                self.timings["full_refresh"] = time.monotonic() - started
         self.checked(["run-operation", "dbt_dqm.initialize_dqm"])
         tests = None
         capture_failed = False
@@ -185,9 +300,14 @@ class Workflow:
             tests = self.invoke(arguments, vars={**self.variables, "_dbt_dqm_output_columns": {
                 row["unique_id"]: row["columns"] for row in self.columns}})
             if tests.result is None:
-                raise RuntimeError(f"DQM test execution failed: {tests.exception}")
+                raise RuntimeError(f"DQM test execution failed: {self.failure_reason(tests)}")
             results = [r for r in tests.result.results if r.node.unique_id in ids
                        and "dbt_dqm" in (r.node.config.meta or {})]
+            for result in results:
+                status = str(result.status)
+                self.outcomes[status] = self.outcomes.get(status, 0) + 1
+                if status in ("fail", "warn", "error", "skipped"):
+                    print(f"DQM test {status}: {result.node.name}: {result.message or status}", flush=True)
             # Write directly from this result object while its invocation context is current.
             # This also avoids stale native artifacts when DBT_WRITE_JSON is disabled.
             target = config.target_path / "dqm_run_results.json"
@@ -222,10 +342,9 @@ class Workflow:
         reconciliation = json.loads(model_artifact.read_text(encoding="utf-8"))["metadata"]["invocation_id"]
         self.checked(["run-operation", "dbt_dqm.maintain_dqm"],
                      vars={**self.variables, "_dbt_dqm_maintenance_invocation_id": reconciliation})
-        (config.target_path / "dqm_workflow_metrics.json").write_text(json.dumps({
-            "phase_seconds": self.timings, "sql_calls": self.sql_calls, "query_jobs": self.query_jobs}),
-            encoding="utf-8")
-        print("DQM phase seconds: " + json.dumps(self.timings), flush=True)
+        for step in self.maintenance:
+            if step.get("ok") is False:
+                print(f"WARNING: DQM maintenance {step['step']} failed; see maintenance Health.", flush=True)
         if capture_failed or tests and (tests.exception or any(str(r.status) in ("error", "skipped")
                                             for r in tests.result.results)):
             return 2
