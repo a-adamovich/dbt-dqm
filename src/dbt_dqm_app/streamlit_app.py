@@ -407,7 +407,7 @@ def _invalidate_export():
 
 def _toggle_selection(path, identity, key):
     selection = st.session_state.bulk_selection
-    if st.session_state[key]:
+    if st.session_state.get(key, False):
         try:
             rows = Workspace(path).saved_rows_for([identity])
             if not rows:

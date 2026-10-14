@@ -354,3 +354,16 @@ def test_warehouse_bulk_apply_is_available_above_configured_snapshot_limit(harne
     assert not keys_before & keys_after
     assert len(workspace.pending())==25
     assert not next(button for button in app.button if button.label=='Apply and sync').disabled
+
+
+def test_selection_callback_tolerates_a_widget_removed_during_filter_or_sync(tmp_path, monkeypatch):
+    import dbt_dqm_app.streamlit_app as ui
+    from dbt_dqm_app.selection import Selection
+
+    class State(dict):
+        __getattr__ = dict.__getitem__
+
+    selection = Selection()
+    monkeypatch.setattr(ui.st, "session_state", State(bulk_selection=selection))
+    ui._toggle_selection(tmp_path / "workspace.sqlite", "removed", "select-issue-removed")
+    assert not selection.rows
