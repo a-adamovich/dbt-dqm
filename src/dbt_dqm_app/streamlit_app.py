@@ -392,7 +392,7 @@ def _status_choices(values) -> list[str]:
 
 def _clear_selection():
     st.session_state.bulk_selection = Selection()
-    st.session_state.bulk_reset_controls = True
+    st.session_state.bulk_editor_generation = st.session_state.get("bulk_editor_generation", 0) + 1
     for key in list(st.session_state):
         if key.startswith("select-issue-"):
             del st.session_state[key]
@@ -441,9 +441,7 @@ def _render_review_tools(workspace, config, page_rows, filters, pending_only,
         _clear_selection()
         _invalidate_export()
         st.session_state.review_context = context
-    if st.session_state.pop("bulk_reset_controls", False):
-        for key in ("bulk-owner", "bulk-status", "bulk-verdict"):
-            st.session_state.pop(key, None)
+    editor_generation = st.session_state.get("bulk_editor_generation", 0)
     selection = st.session_state.bulk_selection
     disabled = (st.session_state.job is not None or st.session_state.get("browse_offline", False) or stale)
     if notice := st.session_state.pop("review_notice", None):
@@ -470,11 +468,11 @@ def _render_review_tools(workspace, config, page_rows, filters, pending_only,
         owner_col, status_col, verdict_col = st.columns(3)
         noop = "— No change —"
         owner = owner_col.selectbox("Bulk owner", [noop, *owner_options], accept_new_options=True,
-                                   key="bulk-owner", disabled=disabled)
+                                   key=f"bulk-owner-{editor_generation}", disabled=disabled)
         status = status_col.selectbox("Bulk workflow status", [noop, *WORKFLOW_STATUSES],
-                                      key="bulk-status", disabled=disabled)
+                                      key=f"bulk-status-{editor_generation}", disabled=disabled)
         verdict = verdict_col.selectbox("Bulk review verdict", [noop, *REVIEW_VERDICTS],
-                                        key="bulk-verdict", disabled=disabled)
+                                        key=f"bulk-verdict-{editor_generation}", disabled=disabled)
         changes = {}
         if owner != noop:
             changes["dqm_owner"] = owner_value_from_selection(owner)

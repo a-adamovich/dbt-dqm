@@ -323,6 +323,7 @@ def test_snapshot_bulk_stage_survives_card_rerenders(harness):
     click(app,'Stage changes')
     keys_after = {box.key for box in app.selectbox if box.label == 'Status'}
     assert not keys_before & keys_after
+    assert all(box.value == '— No change —' for box in app.selectbox if box.label.startswith('Bulk '))
     assert len(workspace.pending())==25
     assert all(p.new_value=='TRIAGED' for p in workspace.pending())
     next(box for box in app.number_input if box.label=='Page').set_value(2).run()
@@ -352,6 +353,7 @@ def test_warehouse_bulk_apply_is_available_above_configured_snapshot_limit(harne
     click(app,'Stage changes')
     keys_after = {box.key for box in app.selectbox if box.label == 'Status'}
     assert not keys_before & keys_after
+    assert all(box.value == '— No change —' for box in app.selectbox if box.label.startswith('Bulk '))
     assert len(workspace.pending())==25
     assert not next(button for button in app.button if button.label=='Apply and sync').disabled
 
