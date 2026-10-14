@@ -99,3 +99,38 @@ def test_snapshot_export_rejects_stale_sync_and_filters_archived(tmp_path):
     with pytest.raises(AppError,match='changed'): list(snapshot_rows(w.path,Filters(),'old sync'))
     assert len(list(snapshot_rows(w.path,Filters(),w.last_sync())))==1
     assert len(list(snapshot_rows(w.path,Filters(lifecycle=('Archived',)),w.last_sync())))==1
+
+
+@pytest.mark.parametrize('payload', ['{"bad":"\\u0001"}', json.dumps({str(n): n for n in range(16_384)})], ids=['control-character', 'too-many-columns'])
+def test_excel_incompatible_values_or_columns_fail_with_csv_fallback(tmp_path, payload):
+    with pytest.raises(AppError, match='CSV'):
+        write_export(iter([issue(record_values_json=payload)]), tmp_path, 'xlsx')
+    assert not list(tmp_path.iterdir())
+
+
+def test_failed_stream_closes_source_and_removes_partial_export(tmp_path):
+    closed = []
+
+    def rows():
+        try:
+            yield issue()
+            raise AppError('Warehouse generation changed')
+        finally:
+            closed.append(True)
+
+    with pytest.raises(AppError, match='generation changed'):
+        write_export(rows(), tmp_path, 'csv')
+    assert closed == [True] and not list(tmp_path.iterdir())
+
+
+def test_completed_file_limit_is_independent_of_source_limit(tmp_path, monkeypatch):
+    import dbt_dqm_app.exports as module
+
+    def refuse(path):
+        assert path.exists()
+        raise AppError('The completed export exceeds 128 MiB')
+
+    monkeypatch.setattr(module, '_check_file', refuse)
+    with pytest.raises(AppError, match='completed export'):
+        write_export(iter([issue()]), tmp_path, 'xlsx')
+    assert not list(tmp_path.iterdir())

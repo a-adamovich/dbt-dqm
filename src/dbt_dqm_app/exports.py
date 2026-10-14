@@ -7,6 +7,7 @@ import json
 import re
 import sqlite3
 import sys
+import tempfile
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -177,8 +178,9 @@ def _write_excel(connection, destination, headers, tests):
 
     headers = [key for key in headers if key != "record_values_json"]
     used = set()
-    with xlsxwriter.Workbook(destination, {"constant_memory": True,
-            "tmpdir": str(destination.parent),
+    with tempfile.TemporaryDirectory(prefix="xlsx-", dir=destination.parent) as temporary, \
+            xlsxwriter.Workbook(destination, {"constant_memory": True,
+            "tmpdir": temporary,
             "strings_to_formulas": False, "strings_to_urls": False}) as workbook:
         header_style = workbook.add_format({"bold": True})
         groups = sorted(tests.items()) or [("", {"name": "No issues", "keys": set()})]
