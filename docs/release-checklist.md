@@ -81,6 +81,17 @@ are authorized or required. Keep the BigQuery maintenance shortcut opt-in until 
 supports enabling it. Preserve the existing protected approval, trusted publisher and provenance
 workflow. Results are recorded in [the 0.2.0a5 evidence](release-0.2.0a5.md).
 
+### 0.2.0a6 review usability and publication criteria
+
+The maintainer authorized refresh confirmation, cross-page bulk editing, saved CSV/Excel exports,
+merging and publication of `v0.2.0a6`. All current gates remain required on one exact production
+candidate. Use existing credentials and disposable fixtures without a shared QA reset, new keys or
+IAM changes. Preserve protected approval, trusted publishing and provenance verification. Verify
+both export formats, real bulk Apply/retry and the 50,000-issue memory boundary with exports enabled.
+Scheduled fixture refreshes use `--yes`; earlier baseline benchmark versions retain their supported
+flags. Final source, gate, approval and public artifact evidence is recorded in the release page
+linked from [the a6 preparation record](release-0.2.0a6.md).
+
 ## 0.2.0a3 results
 
 Production candidate: `4c362266edd5457dc0bedae6348f455e064fcc90`. The test-only Windows fixture

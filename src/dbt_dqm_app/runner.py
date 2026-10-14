@@ -98,6 +98,7 @@ class Workflow:
         self.phase_messages = []
         self.outcomes = {}
         self.selected_count = 0
+        self.cancelled = False
         self.factory = factory or dbtRunner
         self.runner = self.factory(callbacks=[self.event])
         self.timings = {}
@@ -211,7 +212,8 @@ class Workflow:
             if config is not None:
                 metrics = {"phase_seconds": self.timings, "sql_calls": self.sql_calls,
                            "query_jobs": self.query_jobs, "total_seconds": elapsed,
-                           "completion_status": {0: "success", 1: "test_failures", 2: "error"}[code],
+                           "completion_status": "cancelled" if self.cancelled else
+                           {0: "success", 1: "test_failures", 2: "error"}[code],
                            "exit_code": code, "maintenance_steps": self.maintenance,
                            "test_outcomes": self.outcomes, "collection": self.collection_summary}
                 try:
@@ -224,9 +226,12 @@ class Workflow:
             capture_notice = (f"{captured} captured issues" if captured is not None else
                               "capture count unavailable" if self.selected_count else "0 captured issues")
             outcomes = ", ".join(f"{count} {status}" for status, count in sorted(self.outcomes.items()))
-            print(f"DQM {'complete' if code != 2 else 'stopped'}: {self.selected_count} tests"
-                  f"{f' ({outcomes})' if outcomes else ''}, {capture_notice}, {elapsed:.1f}s.",
-                  flush=True)
+            if self.cancelled:
+                print("DQM cancelled: no tracking relations reset; no tests run.", flush=True)
+            else:
+                print(f"DQM {'complete' if code != 2 else 'stopped'}: {self.selected_count} tests"
+                      f"{f' ({outcomes})' if outcomes else ''}, {capture_notice}, {elapsed:.1f}s.",
+                      flush=True)
             if self.request.get("verbose"):
                 print("DQM phase seconds: " + json.dumps(self.timings), flush=True)
 
@@ -281,7 +286,11 @@ class Workflow:
             for node in nodes:
                 node.config.materialized = "dqm_test"
         if self.request.get("full_refresh"):
-            from .refresh import full_refresh
+            from .refresh import confirm_refresh, full_refresh
+
+            if not confirm_refresh(config, manifest, self):
+                self.cancelled = True
+                return 0
 
             self.phase = "full_refresh"
             print("DQM: full refresh…", flush=True)

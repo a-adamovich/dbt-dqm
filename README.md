@@ -9,8 +9,8 @@ runs.
 
 | | |
 | --- | --- |
-| Latest release | `0.2.0a5`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a5/), Git tag [`v0.2.0a5`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a5). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a4`. |
-| Upgrade | From `0.2.0a4`: update both packages and run normally; history is preserved. Earlier versions require `dbt-dqm run --full-refresh`, which resets tracking history while preserving consumer models and stored test failures. |
+| Latest release | `0.2.0a6`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a6/), Git tag [`v0.2.0a6`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a6). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a6`. |
+| Upgrade | From `0.2.0a4` or `0.2.0a5`: update both packages and run normally; history is preserved. Earlier versions require `dbt-dqm run --full-refresh`, which resets tracking history while preserving consumer models and stored test failures. |
 | dbt | dbt-core 1.11 and 1.12, with dbt-bigquery 1.11 or 1.12 and dbt-postgres 1.11 (there is no dbt-postgres 1.12; 1.11 supports dbt-core 1.12) |
 | Warehouses | BigQuery; Postgres 14 and 16 (needs the `pgcrypto` extension) |
 | Review app | Python 3.11–3.14, the same two warehouses |
@@ -18,7 +18,7 @@ runs.
 The Python app pins dbt-core 1.12.5; its optional extras use dbt-bigquery 1.12.1 and dbt-postgres 1.11.x;
 the dbt package accepts the wider dbt range above. Python support is `>=3.11,<3.15`.
 The [release checklist](docs/release-checklist.md) lists what must pass before a release is tagged;
-the [0.2.0a5 evidence](docs/release-0.2.0a5.md) records this alpha's results.
+the [0.2.0a6 evidence](docs/release-0.2.0a6.md) records this alpha's results.
 Package contracts (relations, migrations, grants, recovery, retention, maintenance) are in
 [warehouse interfaces](docs/warehouse-interfaces.md).
 
@@ -29,10 +29,10 @@ Install the alpha through Git by adding it to your consumer project's `packages.
 ```yaml
 packages:
   - git: "https://github.com/a-adamovich/dbt-dqm.git"
-    revision: v0.2.0a5
+    revision: v0.2.0a6
 ```
 
-The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a5`, so
+The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a6`, so
 install this alpha through the Git revision above. Hub registration is planned for 0.2.0.
 
 The 0.2 app expects the matching 0.2 package; don't mix it with 0.1.
@@ -50,7 +50,7 @@ In a Python 3.14 environment (recommended; 3.11–3.14 supported), install the a
 ```bash
 python3.14 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a5'
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a6'
 ```
 
 Warehouse adapters are optional. In a checkout, install
@@ -58,9 +58,9 @@ only the adapter you need with `uv sync --extra bigquery` or `uv sync --extra po
 use `uv sync --all-extras` for both. Select the extra in your installed environment:
 
 ```bash
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a5'          # BigQuery
-python -m pip install 'dbt-dqm[postgres]==0.2.0a5'          # Postgres
-python -m pip install 'dbt-dqm[bigquery,postgres]==0.2.0a5' # Both
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a6'          # BigQuery
+python -m pip install 'dbt-dqm[postgres]==0.2.0a6'          # Postgres
+python -m pip install 'dbt-dqm[bigquery,postgres]==0.2.0a6' # Both
 ```
 
 A plain install includes the app and dbt-core but no warehouse adapters.
@@ -72,7 +72,7 @@ On Windows PowerShell, create and activate the environment with:
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a5'
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a6'
 ```
 
 Activation is optional: `uv run --extra bigquery dbt-dqm app` uses the checkout environment.
@@ -165,7 +165,7 @@ local service-account credentials; no new keys are created or downloaded. Option
 ## Migrating existing tests
 
 DQM is disabled by default and runs as a separate workflow. Install the matching warehouse extra,
-update the Git package revision above, and run `dbt deps`. Projects already on `0.2.0a4` can then
+update the Git package revision above, and run `dbt deps`. Projects already on `0.2.0a4` or `0.2.0a5` can then
 run `dbt-dqm run` without a full refresh; history and annotations are preserved. The reset procedure
 below applies to older versions or an intentional history reset:
 
@@ -268,6 +268,17 @@ to consumer test compilation and execution. DQM setup, capture, reconciliation, 
 always use the selected target. Input state and output artifacts must be separate directories;
 the command rejects identical resolved paths before parsing can overwrite a state manifest.
 
+Full refresh prints the selected target and resolved tracking relations, then asks for confirmation
+(default **No**) after test validation. History and annotations are discarded only after confirmation.
+For scheduled/noninteractive commands, explicitly add `--yes`:
+
+```bash
+dbt-dqm run --full-refresh --yes --target dev
+```
+
+The same command works in PowerShell. A declined interactive reset exits `0` with cancelled metrics;
+a noninteractive reset without `--yes` exits `2`. Upgrading from a4 or a5 requires no full refresh.
+
 Test failures still produce captured evidence and reconciliation. Exit codes are `0` for success,
 `1` for failed tests, and `2` for configuration or execution errors. A dbt `warn` result retains dbt's
 successful exit behavior. Automatic capture and retention `on-run-end` hooks have been removed.
@@ -351,6 +362,35 @@ dbt-dqm app \
   header summary costs about 0.16 GB, and a search is refused before it runs if a dry run
   estimates more than `--max-search-gib` (default 1). Postgres needs migration 0007's index for
   fast pages. Measured figures: [scale](docs/scale.md#warehouse-browsing-2026-10-11).
+
+### Bulk editing and exports
+
+Select individual issues or **Select current page**, move between pages, and choose bulk owner,
+workflow status or review verdict. Each field defaults to **No change**; owner supports unassignment.
+**Stage changes** creates local pending edits for the selected issues. **Apply and sync** submits them
+through the same conflict detection, audit and retry mechanism as individual edits. Chosen fields
+replace existing drafts for those fields; notes, tickets and other drafts are kept. Selection is
+limited to 2,000 issues or 32 MiB and clears after staging, filter changes, Sync or successful Apply.
+There is no automatic selection of every issue belonging to a test.
+
+**Prepare CSV** and **Prepare Excel** export all filtered results across pages, using saved values;
+pending edits are excluded. Archived issues are included only when the current lifecycle filter and
+archive window include them. Disable **Pending edits only** before exporting.
+
+- CSV is UTF-8 with BOM and standard quoting. It preserves `record_values_json` and other JSON
+  columns. Formula-like text is prefixed with an apostrophe so opening it in a spreadsheet does not
+  execute formulas; captured JSON remains intact.
+- Excel has one sheet per test represented in the filtered results. It expands top-level
+  `record_values_json` fields into `record.<field>` columns alongside review metadata. Nested objects,
+  arrays and other JSON remain text; captured IDs and numeric-looking strings retain their exact
+  text. Long or duplicate test names get safe, unique sheet names; full test names and IDs remain in
+  the rows. Headers are frozen and filterable. Values exceeding Excel's limits require CSV instead.
+
+Exports are limited to 50,000 issues, 128 MiB of serialized source data and 128 MiB per file,
+independently of browsing cache settings. Limit failures offer no partial file. Warehouse exports
+use a single filtered data query with installation/generation checks; on BigQuery the whole query,
+even without search, respects `--max-search-gib`. Narrow filters to reduce size or cost. Prepared
+files are temporary and are discarded after filter changes, Sync or Apply.
 
 ## Demo projects
 

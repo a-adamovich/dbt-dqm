@@ -434,6 +434,60 @@ class Page:
 PAGE_ORDER = "q._priority_rank, q.first_seen_at, q.occurrence_id"
 
 
+def iter_export_rows(config, population, filters, expected_generation):
+    """Stream a single read snapshot; exports always enforce the BigQuery byte ceiling."""
+    query = browse.export_query(config.adapter_type, _table(config, "dqm_all_issues"),
+                                population, filters)
+    control = _table(config, "dqm_reconciliation_control")
+    state = (f"select max(generation) as _generation,max(setup_status) as _setup_status,"
+             f"(select max(installation_id) from {_table(config, 'dqm_install')}) as _installation_id,"
+             f"(select max(marker) from {_table(config, 'dqm_install')}) as _installation_marker "
+             f"from {control}")
+    sql = f"select s.*,q.* from ({state}) s left join ({query.sql}) q on true"
+    sql += f" order by {browse._priority_rank_sql()},q.first_seen_at,q.occurrence_id"
+
+    def checked(rows):
+        for row in rows:
+            row = dict(row.items())
+            if row["_setup_status"] != "ready" or row["_installation_marker"] != "dqm-full-v1":
+                raise SnapshotUnavailable(SETUP_NOT_READY)
+            generation = (row["_installation_id"], row["_generation"])
+            if generation != expected_generation:
+                raise SnapshotUnavailable("The warehouse changed. Sync or restart browsing, then export again.")
+            if row.get("occurrence_id") is not None:
+                _validate_issue_rows([row])
+                yield row
+
+    if config.adapter_type == "bigquery":
+        client = client_for(config)
+        parameters = _bigquery_parameters(query.params)
+        estimate = client.query(sql, job_config=bigquery.QueryJobConfig(
+            query_parameters=parameters, dry_run=True, use_query_cache=False)).total_bytes_processed or 0
+        if estimate > config.max_search_bytes:
+            raise SearchTooCostly("This export exceeds the BigQuery query byte limit. "
+                                 "Narrow the filters or increase --max-search-gib.")
+        try:
+            rows = client.query(sql, job_config=bigquery.QueryJobConfig(
+                query_parameters=parameters, maximum_bytes_billed=config.max_search_bytes)).result(page_size=500)
+            yield from checked(rows)
+        except google_errors.GoogleAPICallError as error:
+            if "bytesBilledLimitExceeded" in str(getattr(error, "errors", "")) + str(error):
+                raise SearchTooCostly("This export exceeds the BigQuery query byte limit. "
+                                     "Narrow the filters or increase --max-search-gib.") from error
+            raise
+    else:
+        with _postgres_connection(config) as connection:
+            connection.set_session(readonly=True, isolation_level="REPEATABLE READ")
+            with connection.cursor(name="dqm_export", cursor_factory=pg_extras.RealDictCursor) as cursor:
+                cursor.itersize = 500
+                cursor.execute(sql, query.params)
+                yield from checked(cursor)
+    # The completed query was coherent; reject if the installation/generation changed during delivery.
+    _, latest = _read_with_state(config, browse.Query("select 1 as export_check"))
+    if latest != expected_generation:
+        raise SnapshotUnavailable("The warehouse changed during export. Sync and export again.")
+
+
 def browse_page(config: AppConfig, population: str, filters: browse.Filters,
                 cursor: browse.Cursor | None, page_size: int) -> Page:
     """One verified page in snapshot sort order, plus the cursor for the next one.

@@ -10,6 +10,33 @@ from . import warehouse
 CONTRACT = "dqm-full-v1"
 
 
+def confirm_refresh(config, manifest, workflow) -> bool:
+    """Describe the actual destinations before any reset preparation or warehouse writes."""
+    print(f"DQM full refresh · target {config.target} · {config.project_id}.{config.dataset}",
+          flush=True)
+    print("Tracking history and reviewer annotations in these relations will be discarded:",
+          flush=True)
+    for item in workflow.settings["refresh"].values():
+        print("  " + ".".join(str(item[key]) for key in ("database", "schema", "identifier")),
+              flush=True)
+    views = _views(manifest)
+    if views:
+        print("Review views will be rebuilt:", flush=True)
+        for node in views:
+            print(f"  {node.database}.{node.schema}.{node.alias}", flush=True)
+    if workflow.request.get("yes"):
+        return True
+    import sys
+
+    if not sys.stdin.isatty():
+        raise ValueError("Noninteractive full refresh requires --yes. Review the reset scope "
+                         "above, then add --yes to confirm discarding history and annotations.")
+    try:
+        return input("Reset these DQM relations? [y/N] ").strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
 def _views(manifest):
     nodes = {key: node for key, node in manifest.nodes.items()
              if node.package_name == "dbt_dqm" and node.resource_type == "model"

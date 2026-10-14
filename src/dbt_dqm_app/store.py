@@ -316,6 +316,89 @@ class Workspace:
                 "select occurrence_id from pending_changes group by occurrence_id "
                 "order by max(changed_at) desc limit ?", (limit,))]
 
+    def saved_rows_for(self, occurrence_ids) -> list[dict]:
+        """Saved baselines, without overlaying pending annotation edits."""
+        ids = list(dict.fromkeys(map(str, occurrence_ids)))
+        if not ids:
+            return []
+        with self.connect() as connection:
+            return [json.loads(row[0]) for row in connection.execute(
+                "select payload_json from snapshot where occurrence_id in (" +
+                ",".join("?" for _ in ids) + ")", ids)]
+
+    def stage_bulk(self, baselines, changes) -> int:
+        """Stage chosen fields atomically against saved, possibly evicted, selection bases."""
+        from .display import REVIEW_VERDICTS, WORKFLOW_STATUSES
+        from .selection import Selection
+
+        selection = Selection()
+        selection.add(baselines)
+        if not changes or not set(changes) <= {"dqm_owner", "workflow_status", "review_verdict"}:
+            raise ValueError("Choose owner, workflow status or review verdict for the bulk edit")
+        if ("workflow_status" in changes and changes["workflow_status"] not in WORKFLOW_STATUSES or
+                "review_verdict" in changes and changes["review_verdict"] not in REVIEW_VERDICTS):
+            raise ValueError("Invalid bulk status or verdict")
+        now = datetime.now(UTC).isoformat()
+        connection = self._connect_immediate()
+        affected = 0
+        try:
+            connection.execute("begin immediate")
+            for row in selection.baselines():
+                identity = str(row["occurrence_id"])
+                installation = row.get("_installation_id")
+                current_installation = connection.execute(
+                    "select value from metadata where key='installation_id'").fetchone()
+                version = row.get("annotation_version", 0)
+                if (not installation or current_installation is None or
+                        installation != current_installation[0] or isinstance(version, bool) or
+                        not isinstance(version, int) or version < 0):
+                    raise AppError("The selection belongs to an earlier installation. Sync and select again.")
+                cached = connection.execute("select payload_json from snapshot where occurrence_id=?",
+                                            (identity,)).fetchone()
+                if cached and json.loads(cached[0]).get("annotation_version", 0) != version:
+                    raise AppError("Selected issues have changed. Sync and select again; pending edits are kept.")
+                pending = connection.execute(
+                    "select base_annotation_version,installation_id from pending_changes "
+                    "where occurrence_id=?", (identity,)).fetchall()
+                if any(p[0] != version or p[1] != installation for p in pending):
+                    raise AppError("Selected issues have conflicting pending edits. Resolve conflicts first.")
+                if not cached:
+                    connection.execute("insert into snapshot values (?,?,?)",
+                                       (identity, issue_json(row), now))
+                changed = False
+                for field_name, value in changes.items():
+                    normalized = None if value is None else str(value)
+                    base = row.get(field_name)
+                    base = None if base is None else str(base)
+                    previous = connection.execute(
+                        "select version,new_value from pending_changes where occurrence_id=? and field_name=?",
+                        (identity, field_name)).fetchone()
+                    if normalized == base:
+                        changed |= previous is not None
+                        connection.execute("delete from pending_changes where occurrence_id=? and field_name=?",
+                                           (identity, field_name))
+                        continue
+                    if previous is not None and previous[1] == normalized:
+                        continue
+                    changed |= previous is None or previous[1] != normalized
+                    connection.execute("""insert into pending_changes
+                        (occurrence_id,field_name,old_value,new_value,version,changed_at,
+                         base_annotation_version,installation_id) values (?,?,?,?,?,?,?,?)
+                        on conflict(occurrence_id,field_name) do update set
+                        new_value=excluded.new_value,version=excluded.version,changed_at=excluded.changed_at""",
+                        (identity, field_name, base, normalized, (previous[0] if previous else 0) + 1,
+                         now, version, installation))
+                affected += changed
+            count, size = self._cache_size(connection)
+            check_cache_size(count, size, MAX_CACHE_ISSUES, MAX_CACHE_MIB * 2**20)
+            connection.commit()
+            return affected
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def set_change(self, occurrence_id: str, field_name: str, new_value: Any) -> None:
         if field_name not in EDITABLE_FIELDS:
             raise ValueError(f"Field is not editable: {field_name}")

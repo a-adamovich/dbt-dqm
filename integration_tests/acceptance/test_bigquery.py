@@ -1242,9 +1242,11 @@ def test_package_initialization_and_app_with_custom_aliases(demo):
     check_alias_app(project, demo.profiles)
 
 
-def dedicated(demo, *options, variables=None, code=0):
+def dedicated(demo, *options, variables=None, code=0, confirm=True):
     command = [str(Path(sys.executable).with_name("dbt-dqm")), "run",
                "--project-dir", str(demo.path), "--profiles-dir", str(demo.profiles), *options]
+    if "--full-refresh" in options and confirm:
+        command.append("--yes")
     if variables:
         command += ["--vars", json.dumps(variables)]
     result = subprocess.run(command, text=True, capture_output=True, timeout=900, check=False)
@@ -1293,6 +1295,10 @@ select 'record-1' as id, [1,2] as attributes, struct('nested' as label) as detai
     identities = {table.table_id for table in demo.client.list_tables(f"{PROJECT}.{demo.dataset}")}
     before = {name: demo.client.get_iam_policy(f"{PROJECT}.{demo.dataset}.{name}").bindings
               for name in ("dqm_issue_occurrences", "dqm_annotation_changes", "dqm_app_change_staging")}
+    before_reset = demo.occurrences() if hasattr(demo, "occurrences") else demo.snapshot()
+    refused_reset = dedicated(demo, "--full-refresh", confirm=False, code=2)
+    assert "requires --yes" in refused_reset.stderr
+    assert (demo.occurrences() if hasattr(demo, "occurrences") else demo.snapshot()) == before_reset
     dedicated(demo, "--full-refresh", "--threads", "4")
     assert len(demo.snapshot()) == 8
     assert demo.sql("select installation_id from @dataset.dqm_install`")[0]["installation_id"] != old_epoch

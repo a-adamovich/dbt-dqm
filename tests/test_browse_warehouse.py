@@ -178,3 +178,33 @@ def test_summary_is_one_statement_with_global_metrics_and_the_filtered_count(tmp
                        "recurring_count": 1, "matching": 3, "generation": ("test-installation", 5)}
     assert len(run.seen) == 1 and run.seen[0][1] is True
     assert "countif" in run.seen[0][0].sql and "as matching" in run.seen[0][0].sql
+
+
+@pytest.mark.parametrize('search',[None,'find me'])
+def test_export_always_checks_billing_and_streams_whole_filtered_population(tmp_path,monkeypatch,search):
+    client=FakeClient(estimate=2**20,rows=[_issue('a'),_issue('b')])
+    monkeypatch.setattr(FakeJob,'result',lambda self,**kwargs:[FakeRow(row) for row in self.rows])
+    monkeypatch.setattr(warehouse,'client_for',lambda _:client)
+    monkeypatch.setattr(warehouse,'_read_with_state',lambda *args,**kwargs:([],('test-installation',1)))
+    rows=list(warehouse.iter_export_rows(config(tmp_path),'true',browse.Filters(search=search),('test-installation',1)))
+    assert [r['occurrence_id'] for r in rows]==['a','b']
+    assert len(client.calls)==2 and client.calls[0].dry_run
+    assert client.calls[1].maximum_bytes_billed==2**30
+
+
+def test_export_budget_refusal_does_not_run_a_data_query(tmp_path,monkeypatch):
+    client=FakeClient(estimate=2**31)
+    monkeypatch.setattr(warehouse,'client_for',lambda _:client)
+    with pytest.raises(SearchTooCostly,match='export'):
+        list(warehouse.iter_export_rows(config(tmp_path),'true',browse.Filters(),('test-installation',1)))
+    assert len(client.calls)==1 and client.calls[0].dry_run
+
+
+@pytest.mark.parametrize('change',['before','during'])
+def test_export_rejects_installation_or_generation_drift(tmp_path,monkeypatch,change):
+    client=FakeClient(estimate=0,rows=[_issue('a',generation=2 if change=='before' else 1)])
+    monkeypatch.setattr(FakeJob,'result',lambda self,**kwargs:[FakeRow(row) for row in self.rows])
+    monkeypatch.setattr(warehouse,'client_for',lambda _:client)
+    monkeypatch.setattr(warehouse,'_read_with_state',lambda *args,**kwargs:([],('test-installation',2)))
+    with pytest.raises(SnapshotUnavailable,match='changed'):
+        list(warehouse.iter_export_rows(config(tmp_path),'true',browse.Filters(),('test-installation',1)))

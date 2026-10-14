@@ -234,6 +234,15 @@ def count_query(adapter: str, relation: str, population: str, filters: Filters) 
                  builder.params)
 
 
+def export_query(adapter: str, relation: str, population: str, filters: Filters) -> Query:
+    """One bounded export of the whole filtered population, without a page cursor."""
+    builder = _Builder(adapter)
+    _apply_filters(builder, population, filters)
+    order, _ = _order_and_keyset(builder, None)
+    return Query(f"select * from {relation} where {' and '.join(builder.where)} "
+                 f"order by {order} limit 50001", builder.params)
+
+
 def metrics_query(adapter: str, relation: str, population: str) -> Query:
     """The header metrics over the whole population, as in snapshot mode (not the filtered list)."""
     active = "record_status = 'Active'"

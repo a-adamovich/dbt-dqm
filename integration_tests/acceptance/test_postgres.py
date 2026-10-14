@@ -1498,10 +1498,12 @@ def test_package_initialization_and_app_with_custom_aliases(demo):
                     "where missed_issue_id='kept-before-alias'")[0]["description"] == "existing canonical data"
 
 
-def dedicated(demo, *options, variables=None, code=0):
+def dedicated(demo, *options, variables=None, code=0, confirm=True):
     """Exercise the actual isolated product command, without the protocol-harness phases."""
     command = [str(Path(sys.executable).with_name("dbt-dqm")), "run",
                "--project-dir", str(demo.project), "--profiles-dir", str(demo.profiles), *options]
+    if "--full-refresh" in options and confirm:
+        command.append("--yes")
     if variables:
         command += ["--vars", json.dumps(variables)]
     result = subprocess.run(command, text=True, capture_output=True, timeout=120, check=False)
@@ -1560,6 +1562,10 @@ def test_dedicated_native_limits_complete_pass_and_stale_edits(demo):
     dedicated(demo)
     assert all(row["record_status"] == "Archived" for row in demo.occurrences())
     demo.sql("create table @schema.consumer_keep as select 42 as value")
+    before_reset = demo.occurrences() if hasattr(demo, "occurrences") else demo.snapshot()
+    refused_reset = dedicated(demo, "--full-refresh", confirm=False, code=2)
+    assert "requires --yes" in refused_reset.stderr
+    assert (demo.occurrences() if hasattr(demo, "occurrences") else demo.snapshot()) == before_reset
     dedicated(demo, "--full-refresh")
     assert demo.sql("select * from @schema.consumer_keep") == [{"value": 42}]
     assert demo.sql("select installation_id from @schema.dqm_install")[0]["installation_id"] != epoch

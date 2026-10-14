@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0a6 - 2026-10-14
+
+- Preview fully resolved tracking relations and confirm destructive full refreshes; add `--yes`
+  for unattended runs. Keep validation before reset and record declined runs as cancelled.
+- Add bounded cross-page issue selection and atomic staging of bulk owner/status/verdict edits.
+  Preserve other drafts, compare-and-set conflicts, audit history and idempotent Apply retries.
+- Add background CSV and Excel exports of all filtered saved issues across pages. Preserve JSON
+  in CSV; expand top-level captured fields on one Excel worksheet per test. Guard size, query
+  budgets and installation/generation consistency; do not return partial or truncated reports.
+- Upgrading from a4 or a5 requires no warehouse migration or history reset. Scheduled full-refresh
+  invocations must now include `--yes`.
+
 ## 0.2.0a5 - 2026-10-14
 
 - Capture routine dbt output; add `--verbose`, phase progress, test/capture summaries and failure metrics.

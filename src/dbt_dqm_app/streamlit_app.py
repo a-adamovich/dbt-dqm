@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import tempfile
 import time
 import uuid
 from concurrent.futures import Future, ProcessPoolExecutor
@@ -38,8 +39,10 @@ from dbt_dqm_app.display import (
     workflow_status_options,
 )
 from dbt_dqm_app.errors import SearchTooCostly, classify
+from dbt_dqm_app.exports import matches_filters, prepare_export
 from dbt_dqm_app.frames import configure_pandas
-from dbt_dqm_app.limits import CacheLimitExceeded, check_cache_size
+from dbt_dqm_app.limits import MAX_CACHE_ISSUES, MAX_CACHE_MIB, CacheLimitExceeded, check_cache_size
+from dbt_dqm_app.selection import Selection
 from dbt_dqm_app.store import EDITABLE_FIELDS, Workspace
 from dbt_dqm_app.warehouse import (
     MISSED_ROOT_CAUSES,
@@ -132,8 +135,12 @@ def run_app() -> None:
     job: Future | None = st.session_state.job
     if job is not None and job.done():
         try:
-            if st.session_state.job_kind == "apply":
+            if st.session_state.job_kind == "export":
+                st.session_state.prepared_export = job.result()
+                st.session_state.job_notice = ("success", "Export prepared from saved values.", "")
+            elif st.session_state.job_kind == "apply":
                 batch_id, snapshot, refresh_error = job.result()
+                _clear_selection()
                 workspace.clear_applied(st.session_state.job_patches)
                 _reset_browse_cache()
                 if refresh_error is None:
@@ -163,6 +170,8 @@ def run_app() -> None:
                     if st.session_state.browsing else "Local data synchronized."), "")
         except Exception as error:  # noqa: BLE001 - patches must survive worker failures.
             failure = classify(error)
+            if st.session_state.job_kind == "export":
+                _invalidate_export()
             if (config.browse_mode == "auto" and st.session_state.job_kind == "sync"
                     and not st.session_state.browsing and isinstance(failure, CacheLimitExceeded)):
                 # Too many issues for a local snapshot: browse them in the warehouse instead.
@@ -189,7 +198,9 @@ def run_app() -> None:
 
     busy = st.session_state.job is not None
     try:
-        check_cache_size(*workspace.cache_size(), config.max_cache_issues, config.max_cache_bytes)
+        check_cache_size(*workspace.cache_size(),
+                         MAX_CACHE_ISSUES if st.session_state.browsing else config.max_cache_issues,
+                         MAX_CACHE_MIB * 2**20 if st.session_state.browsing else config.max_cache_bytes)
         oversized = False
     except CacheLimitExceeded:
         oversized = True
@@ -297,12 +308,15 @@ def _install_snapshot(workspace, config, snapshot) -> None:
 
 
 def _submit_sync(executor, config) -> None:
+    _clear_selection()
+    _invalidate_export()
     st.session_state.job_kind = "sync"
     worker = browse_refresh_worker if st.session_state.browsing else sync_worker
     st.session_state.job = executor.submit(run_worker, worker, config)
 
 
 def _submit_apply(executor, config, patches) -> None:
+    _invalidate_export()
     st.session_state.job_kind = "apply"
     st.session_state.job_patches = patches
     st.session_state.job = executor.submit(
@@ -325,6 +339,8 @@ def _reset_browse_cache(restart: bool = False) -> None:
     for key in BROWSE_STATE:
         st.session_state.pop(key, None)
     if restart:
+        _clear_selection()
+        _invalidate_export()
         for key in ("browse_cursors", "browse_page_index", "browse_generation", "browse_key",
                     "browse_offline"):
             st.session_state.pop(key, None)
@@ -372,6 +388,143 @@ def _render_offline(workspace, pending, config) -> None:
 def _status_choices(values) -> list[str]:
     known = [status for status in WORKFLOW_STATUSES if status in set(values)]
     return known + sorted(set(values) - set(known))
+
+
+def _clear_selection():
+    st.session_state.bulk_selection = Selection()
+    st.session_state.bulk_reset_controls = True
+    for key in list(st.session_state):
+        if key.startswith("select-issue-"):
+            del st.session_state[key]
+
+
+def _invalidate_export():
+    directory = st.session_state.pop("export_directory", None)
+    st.session_state.pop("prepared_export", None)
+    if directory is not None:
+        directory.cleanup()
+
+
+def _toggle_selection(path, identity, key):
+    selection = st.session_state.bulk_selection
+    if st.session_state[key]:
+        try:
+            rows = Workspace(path).saved_rows_for([identity])
+            if not rows:
+                raise ValueError("This issue is no longer cached. Sync and select again.")
+            selection.add(rows)
+        except Exception as error:  # noqa: BLE001 - retain the earlier selection.
+            st.session_state[key] = False
+            st.session_state.review_notice = classify(error).message
+    else:
+        selection.remove(identity)
+
+
+def _selection_checkbox(workspace, row):
+    identity = str(row["occurrence_id"])
+    key = "select-issue-" + identity
+    if key not in st.session_state:
+        st.session_state[key] = identity in st.session_state.bulk_selection.rows
+    st.checkbox("Select issue", key=key, on_change=_toggle_selection,
+                args=(workspace.path, identity, key), disabled=st.session_state.get("browse_offline", False))
+
+
+def _render_review_tools(workspace, config, page_rows, filters, pending_only,
+                         owner_options, population=None, expected=None, stale=False):
+    context = (str(workspace.path), filters, pending_only, population, expected)
+    previous = st.session_state.get("review_context")
+    if st.session_state.get("browse_offline") and previous and previous[0] == str(workspace.path):
+        # The fallback renderer changes its filter defaults and data source, not the user's
+        # selection. Keep saved bases through connection failures; staging remains disabled.
+        context = previous
+    if st.session_state.get("review_context") != context:
+        _clear_selection()
+        _invalidate_export()
+        st.session_state.review_context = context
+    if st.session_state.pop("bulk_reset_controls", False):
+        for key in ("bulk-owner", "bulk-status", "bulk-verdict"):
+            st.session_state.pop(key, None)
+    selection = st.session_state.bulk_selection
+    disabled = (st.session_state.job is not None or st.session_state.get("browse_offline", False) or stale)
+    if notice := st.session_state.pop("review_notice", None):
+        st.info(notice)
+    with st.expander(f"Bulk edit · {len(selection.rows)} selected", expanded=bool(selection.rows)):
+        first, clear, _ = st.columns([1, 1, 2])
+        if first.button("Select current page", disabled=disabled or not page_rows):
+            try:
+                ids = [str(row["occurrence_id"]) for row in page_rows]
+                saved = workspace.saved_rows_for(ids)
+                if len(saved) != len(ids):
+                    raise ValueError("Some issues are no longer cached. Sync and select again.")
+                selection.add(saved)
+                for identity in ids:
+                    st.session_state["select-issue-" + identity] = True
+                st.rerun()
+            except Exception as error:  # noqa: BLE001 - selection is atomic.
+                st.warning(classify(error).message)
+        if clear.button("Clear selection", disabled=disabled or not selection.rows):
+            _clear_selection()
+            st.rerun()
+        st.caption("Selections stay selected across pages. Filter changes and Sync clear selection. "
+                   "Up to 2,000 issues or 32 MiB per selection.")
+        owner_col, status_col, verdict_col = st.columns(3)
+        noop = "— No change —"
+        owner = owner_col.selectbox("Bulk owner", [noop, *owner_options], accept_new_options=True,
+                                   key="bulk-owner", disabled=disabled)
+        status = status_col.selectbox("Bulk workflow status", [noop, *WORKFLOW_STATUSES],
+                                      key="bulk-status", disabled=disabled)
+        verdict = verdict_col.selectbox("Bulk review verdict", [noop, *REVIEW_VERDICTS],
+                                        key="bulk-verdict", disabled=disabled)
+        changes = {}
+        if owner != noop:
+            changes["dqm_owner"] = owner_value_from_selection(owner)
+        if status != noop:
+            changes["workflow_status"] = status
+        if verdict != noop:
+            changes["review_verdict"] = verdict
+        if changes:
+            labels = {"dqm_owner": "Owner", "workflow_status": "Status", "review_verdict": "Verdict"}
+            st.caption(f"Stage for {len(selection.rows)} selected issue(s): " +
+                       "; ".join(f"{labels[field]}: {value or 'Unassigned'}" for field, value in changes.items()) +
+                       ". Existing pending edits to these fields will be replaced.")
+        if st.button("Stage changes", disabled=disabled or not selection.rows or not changes):
+            try:
+                affected = workspace.stage_bulk(selection.baselines(), changes)
+                # Cards must initialize from the new pending overlay, not their old widget
+                # values. Otherwise the next rerun stages those old values back over the batch.
+                for key in list(st.session_state):
+                    if (any(key.startswith(identity + "-") for identity in selection.rows) and
+                            any(key.endswith("-" + field) for field in changes)):
+                        del st.session_state[key]
+                _clear_selection()
+                st.session_state.review_notice = f"Staged changes for {affected} issue(s). Use Apply and sync to save."
+                st.rerun()
+            except Exception as error:  # noqa: BLE001 - no partial staging.
+                st.error(classify(error).message)
+    with st.expander("Export saved issues"):
+        st.caption("All filtered results across pages, using saved values. Pending edits are excluded. "
+                   "Up to 50,000 issues and 128 MiB; narrow filters for larger exports.")
+        csv_col, excel_col, _ = st.columns([1, 1, 2])
+        for column, label, format in [(csv_col, "Prepare CSV", "csv"), (excel_col, "Prepare Excel", "xlsx")]:
+            if column.button(label, disabled=disabled or pending_only):
+                _invalidate_export()
+                directory = tempfile.TemporaryDirectory(prefix="dbt-dqm-export-")
+                st.session_state.export_directory = directory
+                st.session_state.job_kind = "export"
+                st.session_state.job = _get_executor().submit(
+                    run_worker, prepare_export, config, workspace.path, filters,
+                    directory.name, format, population, expected)
+                st.rerun()
+        if pending_only:
+            st.caption("Disable Pending edits only to export saved results.")
+        prepared = st.session_state.get("prepared_export")
+        if prepared is not None and not disabled and not pending_only:
+            st.caption(f"{prepared.rows:,} issue(s) in the prepared export.")
+            with open(prepared.path, "rb") as file:
+                st.download_button("Download " + ("CSV" if prepared.format == "csv" else "Excel"), file,
+                    file_name="dqm-issues." + prepared.format,
+                    mime="text/csv" if prepared.format == "csv" else
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 def _render_warehouse_issues(workspace, pending, config) -> None:
@@ -479,6 +632,7 @@ def _render_warehouse_issues(workspace, pending, config) -> None:
     chunk_number, offset = divmod(index * page_size, chunk_size)
 
     has_next = False
+    stale_generation = False
     if pending_only:
         page_rows = workspace.rows_for(workspace.pending_issue_ids())
         summary = summaries.get(filters)
@@ -517,6 +671,7 @@ def _render_warehouse_issues(workspace, pending, config) -> None:
         if state.get("browse_generation") is None:
             state.browse_generation = page.generation
         if page.generation != state.browse_generation or summary["generation"] != page.generation:
+            stale_generation = True
             st.warning(
                 "The warehouse changed since you started browsing (a reconciliation finished). "
                 "Restart from the first page to see consistent results."
@@ -562,6 +717,8 @@ def _render_warehouse_issues(workspace, pending, config) -> None:
     owners_for_editor = [*options["owners"], *(row.get("dqm_owner") for row in page_rows)]
     editor_owner_options = owner_editor_options(
         [owner for owner in owners_for_editor if owner != "Unassigned"])
+    _render_review_tools(workspace, config, page_rows, filters, pending_only, editor_owner_options,
+                         population, state.get("browse_generation"), stale_generation)
     staged_change = False
     for row in page_rows:
         widget_prefix = f"{row['occurrence_id']}-{row.get('annotation_version')}-w"
@@ -613,6 +770,8 @@ def _render_issues(workspace, pending, config) -> None:
     rows = workspace.rows(max_issues=config.max_cache_issues, max_bytes=config.max_cache_bytes)
     if not rows:
         st.info("No local data. Select Sync after building the dbt-dqm package models.")
+        _render_review_tools(workspace, config, [], Filters(lifecycle=()), False,
+                             owner_editor_options([]), expected=workspace.last_sync())
         return
 
     frame = pd.DataFrame(rows)
@@ -733,35 +892,13 @@ def _render_issues(workspace, pending, config) -> None:
     with recurring_col:
         recurring_only = st.checkbox("Recurrences only")
     pending_only = st.checkbox("Pending edits only", help="Includes edits hidden by other filters.")
-    visible = frame[frame["record_status"].isin(lifecycle)] if lifecycle else frame
-    if priorities:
-        visible = visible[
-            visible.get("test_priority", pd.Series(index=visible.index, dtype=object))
-            .fillna("unset")
-            .isin(priorities)
-        ]
-    if tags:
-        visible = visible[
-            visible["test_tags"].map(lambda value: bool(set(tag_list(value)) & set(tags)))
-        ]
-    if recurring_only:
-        visible = visible[
-            visible.get("is_recurrence", pd.Series(False, index=visible.index)).fillna(False)
-        ]
-    if statuses:
-        visible = visible[visible["workflow_status"].isin(statuses)]
-    if owners:
-        visible = visible[visible["owner"].isin(owners)]
-    if len(created_range) == 2:
-        created_start, created_end = created_range
-        visible = visible[
-            visible["_created_date"].between(created_start, created_end, inclusive="both")
-        ]
-    if search:
-        searchable = visible.astype(str).apply(
-            lambda column: column.str.contains(search, case=False, na=False)
-        )
-        visible = visible[searchable.any(axis=1)]
+    created_from = created_to = None
+    if len(created_range) == 2 and tuple(created_range) != (created_dates.min(), created_dates.max()):
+        created_from, created_to = created_range
+    filters = Filters(lifecycle=tuple(lifecycle), statuses=tuple(statuses), owners=tuple(owners),
+                      created_from=created_from, created_to=created_to, priorities=tuple(priorities),
+                      tags=tuple(tags), recurrences_only=recurring_only, search=search or None)
+    visible = frame.loc[frame.apply(lambda row: matches_filters(row, filters), axis=1)]
     if pending_only:
         visible = frame[frame["_dirty"]]
     visible = visible.copy()
@@ -799,6 +936,8 @@ def _render_issues(workspace, pending, config) -> None:
             f"Showing {len(page_rows)} of {total_visible} issue record(s) "
             f"(page {page_number} of {total_pages})"
         )
+    _render_review_tools(workspace, config, page_rows.to_dict("records"), filters, pending_only,
+                         editor_owner_options, expected=workspace.last_sync())
     staged_change = False
     sync_token = workspace.last_sync() or "never"
     for _, row in page_rows.iterrows():
@@ -818,6 +957,7 @@ def _render_issue_card(workspace, row, widget_prefix, editor_owner_options) -> b
     occurrence_id = str(row["occurrence_id"])
     test_name = str(row.get("test_name") or "Unnamed test")
     with st.container(border=True):
+        _selection_checkbox(workspace, row)
         title_col, owner_col, workflow_col = st.columns([4.5, 2, 1.5])
         with title_col:
             st.subheader(test_name)
