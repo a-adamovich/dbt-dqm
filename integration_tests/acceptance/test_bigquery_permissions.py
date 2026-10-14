@@ -6,6 +6,7 @@ separate local ADC files. The existing destructive BigQuery fixture is deliberat
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import shutil
@@ -24,6 +25,7 @@ from google.oauth2 import service_account
 
 from dbt_dqm_app.browse import Filters
 from dbt_dqm_app.config import load_config
+from dbt_dqm_app.exports import prepare_export
 from dbt_dqm_app.store import Patch
 from dbt_dqm_app.warehouse import (
     apply_patches,
@@ -157,7 +159,20 @@ def test_restricted_bigquery_runner_and_reviewer(tmp_path):
     found = browse_page(config, population, Filters(lifecycle=(), search="Permissions QA " + token),
                         None, 25)
     assert [r["occurrence_id"] for r in found.rows] == [row["occurrence_id"]]
-    assert browse_summary(config, population, Filters(search=token))["matching"] == 1
+    summary = browse_summary(config, population, Filters(search=token))
+    assert summary["matching"] == 1
+    # Complete exports also use the restricted reviewer identity and leave the audit unchanged.
+    for format in ("csv", "xlsx"):
+        exported = prepare_export(config, tmp_path / "unused.sqlite",
+            Filters(lifecycle=(), search="Permissions QA " + token), tmp_path / ("export-" + format),
+            format, population, summary["generation"])
+        assert exported.rows == 1
+        if format == "csv":
+            with open(exported.path, encoding="utf-8-sig", newline="") as file:
+                exported_row, = csv.DictReader(file)
+            assert exported_row["occurrence_id"] == row["occurrence_id"]
+            assert exported_row["notes"] == "Permissions QA " + token
+            assert exported_row["review_verdict"] == "TRUE_POSITIVE"
     count = reviewer.query(
         f"select count(*) as n from `{PROJECT}.{DATASET}.dqm_annotation_changes` "
         "where batch_id=@batch",
