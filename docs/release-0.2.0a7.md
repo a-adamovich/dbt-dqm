@@ -18,3 +18,9 @@ Naming discovery uses private artifacts so concurrent reviewer requests cannot o
 consumer manifest or partial-parse cache. It opens no warehouse connection. Final source, complete
 CI/live warehouse results and installed-wheel browser/memory evidence are recorded on the linked
 release page after verification of the corrected candidate.
+
+Production candidate: `fe629f1b6bd8b486f09cb3a15f3aaf8f4b3c54a8`. Subsequent documentation records
+verification without changing production files. The export-enabled 50,000-issue memory check
+passed at 448.9 MiB peak RSS; [raw result](scale-results/candidate-fe629f1-cache-boundary.json).
+Complete CI, warehouse, installed-wheel and public verification results are recorded on the
+linked release page.
