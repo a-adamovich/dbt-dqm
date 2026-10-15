@@ -345,7 +345,8 @@ no extra reporting query runs. A reporting failure warns without changing the wo
 
 Package state tables, views, incremental models and staging objects follow the project's
 `generate_alias_name`; custom schemas follow the package's resolved model schema. Set the same
-variables when opening the app or inspecting a workspace:
+variables when opening the app or inspecting a workspace. Name resolution works without a live
+warehouse connection, so cached offline browsing and retry remain available:
 
 ```bash
 dbt-dqm run --vars '{table_alias_prefix: alice}' --summary

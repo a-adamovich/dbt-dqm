@@ -13,8 +13,3 @@ PR and [v0.2.0a7 release page](https://github.com/a-adamovich/dbt-dqm/releases/t
 exact source revisions, CI and warehouse counts, restricted identities, browser/memory checks,
 protected approval, trusted publishing, artifact hashes/provenance and public installation matrix.
 This is a preparation record; final publication evidence is recorded on that release page.
-
-Production candidate: `87152709a085a6ff683a8774aa2fa6b1e18041cc`. Subsequent documentation records
-verification without changing its production files. The export-enabled 50,000-issue memory gate
-passed at 437.2 MiB peak RSS; [raw result](scale-results/candidate-8715270-cache-boundary.json).
-CI and complete live warehouse gates are recorded on the final linked release page.

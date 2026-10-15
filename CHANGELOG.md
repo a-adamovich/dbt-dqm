@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0a7 - 2026-10-14
+## 0.2.0a7 - 2026-10-15
 
 - Apply consumer alias naming to package state, upload and reconciliation staging tables, and use
   the same resolved contract for app reads/writes, reset, migration checks and maintenance.

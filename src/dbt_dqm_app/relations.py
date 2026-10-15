@@ -61,6 +61,7 @@ def resolve_config(config):
             "target": config.target,
             "target_path": str(config.target_path or config.project_dir / "target"),
             "vars": config.vars_yaml,
+            "adapter_type": config.adapter_type,
         },
         sort_keys=True,
     )
@@ -134,6 +135,22 @@ def main():
         "--log-level",
         "none",
     ]
+    if request.get("adapter_type") == "bigquery":
+        from dbt.adapters.bigquery.connections import BigQueryConnectionManager
+        from dbt.adapters.contracts.connection import ConnectionState
+
+        original_close = BigQueryConnectionManager.close.__func__
+
+        def close_unused(cls, connection):
+            # dbt-bigquery 1.12 closes INIT handles by dereferencing the lazy client, which
+            # opens it and loads ADC. Naming compilation never needs that unused client.
+            if connection.state != ConnectionState.OPEN:
+                connection.handle = None
+                connection.state = ConnectionState.CLOSED
+                return connection
+            return original_close(cls, connection)
+
+        BigQueryConnectionManager.close = classmethod(close_unused)
     contract = {}
     errors = []
 
@@ -153,7 +170,14 @@ def main():
         parsed = runner.invoke(["parse", *flags])
         result = (
             dbtRunner(manifest=parsed.result, callbacks=[event]).invoke(
-                ["run-operation", "dbt_dqm.resolved_relations", *flags]
+                [
+                    "--no-populate-cache",
+                    "compile",
+                    "--no-introspect",
+                    "--inline",
+                    "{{ dbt_dqm.resolved_relations() }}",
+                    *flags,
+                ]
             )
             if parsed.success
             else parsed

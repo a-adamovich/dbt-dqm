@@ -504,3 +504,40 @@ def test_reported_alias_precedence_and_environment_targets(protocol_project,monk
             assert sql.strip()==expected+'dqm_issue_events'
     finally:
         macro.unlink();profile_path.write_text(original)
+
+
+@pytest.mark.parametrize('adapter',['postgres','bigquery'])
+def test_naming_resolution_is_offline_and_never_opens_connections(protocol_project,monkeypatch,adapter):
+    import sys
+
+    from dbt.adapters.postgres.connections import PostgresConnectionManager
+
+    from dbt_dqm_app import relations
+    project,profiles=protocol_project
+    path=profiles/'profiles.yml';original=path.read_text()
+    settings=yaml.safe_load(original)
+    settings['dbt_dqm_demo']['outputs']['dev']=(
+        {'type':'postgres','host':'127.0.0.1','port':1,'user':'offline','password':'offline',
+         'dbname':'offline','schema':'offline','threads':1} if adapter=='postgres' else
+        {'type':'bigquery','method':'oauth','project':'offline','dataset':'offline','threads':1})
+    path.write_text(yaml.safe_dump(settings))
+    manager=PostgresConnectionManager if adapter=='postgres' else BigQueryConnectionManager
+    monkeypatch.setattr(manager,'close',manager.close)
+    attempts=[]
+    def reject(*args,**kwargs):
+        attempts.append(True)
+        raise AssertionError('Naming attempted warehouse access')
+    monkeypatch.setattr(manager,'open',classmethod(reject))
+    monkeypatch.delenv('GOOGLE_APPLICATION_CREDENTIALS',raising=False)
+    source=project/'offline-request.json';output=project/'offline-relations.json'
+    source.write_text(json.dumps({'project_dir':str(project),'profiles_dir':str(profiles),
+                      'target':'dev','target_path':str(project/'target'),'vars':'{}','adapter_type':adapter}))
+    monkeypatch.setattr(sys,'argv',['relations',str(source),str(output)])
+    try:
+        assert relations.main()==0
+        assert not attempts
+        result=json.loads(output.read_text())
+        assert result['relations']['dqm_install']['identifier']=='dqm_install'
+        assert result['granularity']
+    finally:
+        path.write_text(original)
