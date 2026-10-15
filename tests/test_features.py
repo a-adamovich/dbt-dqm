@@ -89,7 +89,7 @@ def test_verdict_overlay_and_validation(tmp_path):
         workspace.set_change("one", "review_verdict", "RESOLVED")
 
 
-def test_hook_owned_relation_uses_reconcile_schema(tmp_path):
+def test_hook_owned_relation_uses_dbt_resolved_contract(tmp_path, monkeypatch):
     import json
 
     (tmp_path / "target").mkdir()
@@ -106,10 +106,15 @@ def test_hook_owned_relation_uses_reconcile_schema(tmp_path):
             }
         )
     )
+    from dbt_dqm_app.relations import bind
+    resolved = bind(config(tmp_path), {name: {'database':'custom_db', 'schema':'custom_schema',
+                                            'identifier':'reviewer_' + name}
+                    for name in ('dqm_install','dqm_issue_occurrences','dqm_reconciliation_control')})
+    monkeypatch.setattr('dbt_dqm_app.relations.resolve_config', lambda _: resolved)
     assert _relation_parts(config(tmp_path), "dqm_issue_occurrences") == (
         "custom_db",
         "custom_schema",
-        "dqm_issue_occurrences",
+        "reviewer_dqm_issue_occurrences",
     )
 
 

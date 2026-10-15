@@ -76,5 +76,5 @@
 {% endmacro %}
 
 {% macro workflow_settings() %}
-  {% do log('DQM_SETTINGS=' ~ tojson({'default_limit': dbt_dqm.positive_integer_var('dbt_dqm_default_test_limit',100), 'raw_retention': dbt_dqm.maintenance_retention_days(), 'event_retention':dbt_dqm.positive_integer_var('dbt_dqm_event_retention_days',none), 'event_payloads':dbt_dqm.event_payload_mode(), 'legacy_tag':var('dbt_dqm_test_tag',none), 'legacy_capture':var('dbt_dqm_capture_mode',none), 'refresh':dbt_dqm.refresh_contract()}),info=false) %}
+  {% do log('DQM_SETTINGS=' ~ tojson({'relations':dbt_dqm.relation_contract(), 'default_limit': dbt_dqm.positive_integer_var('dbt_dqm_default_test_limit',100), 'raw_retention': dbt_dqm.maintenance_retention_days(), 'event_retention':dbt_dqm.positive_integer_var('dbt_dqm_event_retention_days',none), 'event_payloads':dbt_dqm.event_payload_mode(), 'legacy_tag':var('dbt_dqm_test_tag',none), 'legacy_capture':var('dbt_dqm_capture_mode',none), 'refresh':dbt_dqm.refresh_contract()}),info=false) %}
 {% endmacro %}

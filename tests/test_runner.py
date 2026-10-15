@@ -241,3 +241,24 @@ def test_declined_empty_selection_refresh_never_initializes_or_executes_tests(tm
     assert metrics['completion_status']=='cancelled' and metrics['exit_code']==0
     output=capsys.readouterr().out
     assert 'DQM cancelled' in output and 'DQM complete' not in output
+
+
+def test_quiet_test_events_are_deduplicated_but_unrelated_warnings_remain(capsys):
+    workflow=runner.Workflow({},factory=workflow_factory([]));workflow.phase='test'
+    for name,message,level in [('LogTestResult','1 of 1 WARN 3 sample','warn'),
+                               ('RunResultWarning','in test sample','warn'),
+                               ('RunResultWarningMessage','Got 3 results','warn'),
+                               ('JinjaLogWarning','important project warning','warn'),
+                               ('RunResultError','useful failure reason','error')]:
+        workflow.event(SimpleNamespace(data=SimpleNamespace(msg=message),
+                       info=SimpleNamespace(name=name,msg=message,level=level)))
+    output=capsys.readouterr()
+    assert output.err=='important project warning\n'
+    assert workflow.phase_errors==['useful failure reason']
+    assert workflow.failure_reason(SimpleNamespace(exception=None,result=None))=='useful failure reason'
+
+
+def test_summary_and_naming_vars_are_explicit_cli_options():
+    assert parser().parse_args(['run','--summary']).summary
+    for command in [['app'],['workspace','info'],['workspace','purge']]:
+        assert parser().parse_args([*command,'--vars','{table_alias_prefix: alice}']).vars=='{table_alias_prefix: alice}'

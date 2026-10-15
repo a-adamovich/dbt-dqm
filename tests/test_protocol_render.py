@@ -451,3 +451,56 @@ def test_capture_summary_is_valid_bigquery_script_without_empty_statements(proto
     parsed = sqlglot.parse(scripts[0], read="bigquery")
     assert parsed and all(statement is not None for statement in parsed)
     assert "inconclusive" in scripts[0] and "captured_issue_count" in scripts[0]
+
+
+def test_namespace_contract_covers_state_and_cleanup(protocol_project, monkeypatch):
+    project,_profiles=protocol_project
+    macro=project/'macros/a7_namespace.sql'
+    macro.write_text('''{% macro generate_alias_name(custom_alias_name=none,node=none) %}
+{{ ('alice_' if node.package_name=='dbt_dqm' else '') ~ (custom_alias_name|trim if custom_alias_name else node.name) }}
+{% endmacro %}''')
+    try:
+        names=render(protocol_project,monkeypatch,'relation_contract')
+        assert 'alice_dqm_issue_occurrences' in names and 'alice_dqm_install' in names
+        sql=render(protocol_project,monkeypatch,'cleanup_stages_sql')
+        assert 'alice_dqm_reconciliation_runs' in sql
+        assert 'alice_dqm_reconcile_stage_' in sql and 'stage.stage_relation =' in sql
+        assert 'strpos(' not in sql
+        sql=render(protocol_project,monkeypatch,'default__app_staging_safety_apply')
+        assert "table_name='alice_dqm_app_change_staging'" in sql
+        sql=render(protocol_project,monkeypatch,'maintenance_eligible_sql',"{'name':'stage_drops'},30,90")
+        assert 'dqm_runs.run_id' in sql and 'alice_dqm_reconciliation_runs' in sql
+    finally:
+        macro.unlink()
+
+
+def test_reported_alias_precedence_and_environment_targets(protocol_project,monkeypatch):
+    import importlib.util
+    source=ROOT/'integration_tests/acceptance/namespace_checks.py'
+    spec=importlib.util.spec_from_file_location('a7_namespace_cases',source)
+    cases=importlib.util.module_from_spec(spec);spec.loader.exec_module(cases)
+    project,profiles=protocol_project
+    macro=project/'macros/a7_alias_precedence.sql';macro.write_text(cases.USER_ALIAS_MACRO)
+    profile_path=profiles/'profiles.yml';original=profile_path.read_text()
+    profile=yaml.safe_load(original);settings=profile['dbt_dqm_demo']
+    output=settings['outputs']['dev']
+    for target in ['prod_dev','dw','qa','ple','prod']:
+        settings['outputs'][target]=dict(output)
+    try:
+        for target,variables,environment,expected in [
+            ('dev',{'table_alias_prefix':'chosen'},{'DBT_TABLE_ALIAS_PREFIX':'env','USERNAME':'user'},'chosen_'),
+            ('dev',{}, {'DBT_TABLE_ALIAS_PREFIX':'env','USERNAME':'user'},'env_'),
+            ('dev',{}, {'DBT_TABLE_ALIAS_PREFIX':'','USERNAME':'user'},'user_'),
+            ('dev',{}, {'DBT_TABLE_ALIAS_PREFIX':'','USERNAME':''},'dev_'),
+            ('prod_dev',{'table_alias_prefix':'chosen'}, {},'chosen_'),
+            ('dw',{'table_alias_prefix':'chosen'}, {},'chosen_'),
+            ('qa',{'table_alias_prefix':'chosen'}, {},'qa_'),
+            ('ple',{'table_alias_prefix':'chosen'}, {},''),
+            ('prod',{'table_alias_prefix':'chosen'}, {},'')]:
+            settings['target']=target;profile_path.write_text(yaml.safe_dump(profile))
+            for key in ('DBT_TABLE_ALIAS_PREFIX','USERNAME'):
+                monkeypatch.setenv(key,environment.get(key,''))
+            sql=render(protocol_project,monkeypatch,'internal_alias',"'dqm_issue_events'",variables)
+            assert sql.strip()==expected+'dqm_issue_events'
+    finally:
+        macro.unlink();profile_path.write_text(original)

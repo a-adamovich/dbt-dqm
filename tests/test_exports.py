@@ -162,3 +162,39 @@ def test_excel_refuses_unexpandable_record_json_without_partial_files(tmp_path, 
     with pytest.raises(AppError, match='CSV'):
         write_export(iter([issue(record_values_json=raw)]), tmp_path, 'xlsx')
     assert not list(tmp_path.iterdir())
+
+
+def test_review_order_granularity_and_first_seen_record_fields(tmp_path):
+    rows=[issue(record_values_json='{"z":"z","id":"001","a":"a"}'),
+          issue(1,record_values_json='{"b":"b","id":"002","z":"z"}')]
+    output=write_export(iter(rows),tmp_path/'xlsx','xlsx',{'test.one':['a','ID']})
+    _,sheets=workbook_rows(output.path)
+    header=sheets[0][0]
+    assert header[:6]==['test_name','dqm_owner','record.a','record.id','record.z','record.b']
+    assert header[6:10]==['record_status','workflow_status','review_verdict','test_status']
+    assert header[10:16]==['first_seen_at (UTC)','last_seen_at (UTC)','annotation_updated_at (UTC)','call_to_action','ticket_url','notes']
+    output=write_export(iter(rows),tmp_path/'csv','csv')
+    with open(output.path,encoding='utf-8-sig') as file:
+        header=next(csv.reader(file))
+    assert header[:3]==['test_name','dqm_owner','record_values_json']
+    assert header.index('notes') < header.index('occurrence_id')
+
+
+def test_timezone_labels_preserve_precision_and_captured_json(tmp_path):
+    timestamp='2026-10-14T12:13:23.175000123+00:00'
+    output=write_export(iter([issue(first_seen_at=timestamp,last_seen_at='2026-10-14T11:00:00',
+                                  annotation_updated_at='2026-10-14T08:00:00-04:00')]),tmp_path,'csv')
+    with open(output.path,encoding='utf-8-sig') as file:row=next(csv.DictReader(file))
+    assert row['first_seen_at (UTC)']==timestamp
+    assert row['last_seen_at (timezone unspecified)']=='2026-10-14T11:00:00'
+    assert row['annotation_updated_at (offset included)']=='2026-10-14T08:00:00-04:00'
+    assert row['record_values_json']==issue()['record_values_json']
+
+
+def test_csv_retains_json_that_excel_cannot_expand(tmp_path):
+    raw='{"duplicate":1,"duplicate":2}'
+    with pytest.raises(AppError,match='CSV'):
+        write_export(iter([issue(record_values_json=raw)]),tmp_path/'xlsx','xlsx')
+    output=write_export(iter([issue(record_values_json=raw)]),tmp_path/'csv','csv')
+    with open(output.path,encoding='utf-8-sig') as file:
+        assert next(csv.DictReader(file))['record_values_json']==raw

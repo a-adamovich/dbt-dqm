@@ -181,7 +181,8 @@ def test_validation_keeps_only_supplied_flags_and_adc(project, monkeypatch):
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "existing ADC configuration")
     warehouse.validate_dbt(config)
     assert calls[0][0][2:] == ["--target", "dev"]
-    assert calls[1][0][2:] == ["--target", "dev", "--vars", "{dqm_enabled: true}"]
+    assert calls[1][0][2:5] == ["--target", "dev", "--vars"]
+    assert __import__("yaml").safe_load(calls[1][0][5]) == {"dqm_enabled": True}
     assert all(kwargs["cwd"] == project for _, kwargs in calls)
     assert all(kwargs["env"]["GOOGLE_APPLICATION_CREDENTIALS"] == "existing ADC configuration"
                for _, kwargs in calls)

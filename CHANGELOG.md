@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0a7 - 2026-10-14
+
+- Apply consumer alias naming to package state, upload and reconciliation staging tables, and use
+  the same resolved contract for app reads/writes, reset, migration checks and maintenance.
+  Scope Postgres locks/indexes and local workspaces to the installation.
+- Refuse implicit initialization when corrected naming would abandon legacy shared history.
+  Require a confirmed fresh start of the selected namespace; preserve legacy and other-prefix data.
+  Install the matching app and dbt package and pass the same `--vars` to run, app and workspace.
+- Add optional `run --summary`: current NEW/ACTIVE counts by saved owner, Total first, sorted by
+  NEW descending. ACTIVE includes NEW; these are workload counts, not invocation deltas.
+- Reorder CSV/Excel columns for review; preserve Excel granularity/record field order and label
+  timestamp zones explicitly without altering values or captured JSON.
+- Emit one quiet-mode status/row-count line per test; retain full dbt output under `--verbose`.
+
 ## 0.2.0a6 - 2026-10-14
 
 - Preview fully resolved tracking relations and confirm destructive full refreshes; add `--yes`

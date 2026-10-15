@@ -1308,3 +1308,8 @@ select 'record-1' as id, [1,2] as attributes, struct('nested' as label) as detai
         assert demo.client.get_iam_policy(f"{PROJECT}.{demo.dataset}.{name}").bindings == policy
     with pytest.raises(AppError, match="Stale DQM installation"):
         apply_patches(config, patches)
+
+
+def test_two_developer_namespaces_are_isolated(demo):
+    from namespace_checks import check_namespace_isolation
+    check_namespace_isolation(demo, dedicated)

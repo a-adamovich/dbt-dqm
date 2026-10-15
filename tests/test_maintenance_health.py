@@ -2,6 +2,7 @@ from concurrent.futures import Future
 from unittest.mock import MagicMock
 
 import psycopg2
+import pytest
 from google.api_core.exceptions import NotFound
 from streamlit.testing.v1 import AppTest
 
@@ -91,3 +92,9 @@ def test_health_tab_shows_unknown_maintenance(tmp_path, monkeypatch):
     assert any(header.value == "Maintenance" for header in app.subheader)
     table = next(frame.value for frame in app.dataframe if "state" in frame.value.columns)
     assert list(table["state"]) == [MAINTENANCE_STATES["unknown"]]
+
+
+@pytest.fixture(autouse=True)
+def isolated_naming_for_health_ui_tests(monkeypatch):
+    import dbt_dqm_app.streamlit_app as ui
+    monkeypatch.setattr(ui, 'resolve_config', lambda config: config)

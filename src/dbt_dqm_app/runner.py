@@ -99,6 +99,8 @@ class Workflow:
         self.outcomes = {}
         self.selected_count = 0
         self.cancelled = False
+        self.owner_summary = None
+        self.summary_status = "not_requested"
         self.factory = factory or dbtRunner
         self.runner = self.factory(callbacks=[self.event])
         self.timings = {}
@@ -132,7 +134,10 @@ class Workflow:
                 self.phase_messages.append(reason)
                 if level == "error":
                     self.phase_errors.append(reason)
-                if not self.request.get("verbose"):
+                duplicate_test = self.phase == 'test' and getattr(event.info, 'name', '') in {
+                    'LogTestResult', 'RunResultWarning', 'RunResultWarningMessage',
+                    'RunResultFailure', 'RunResultError', 'RunResultErrorNoMessage'}
+                if not self.request.get("verbose") and not duplicate_test:
                     print(reason, file=self.console, flush=True)
 
     def phase_flags(self, command):
@@ -215,7 +220,8 @@ class Workflow:
                            "completion_status": "cancelled" if self.cancelled else
                            {0: "success", 1: "test_failures", 2: "error"}[code],
                            "exit_code": code, "maintenance_steps": self.maintenance,
-                           "test_outcomes": self.outcomes, "collection": self.collection_summary}
+                           "test_outcomes": self.outcomes, "collection": self.collection_summary,
+                           "owner_summary": self.owner_summary, "summary_status": self.summary_status}
                 try:
                     config.target_path.mkdir(parents=True, exist_ok=True)
                     (config.target_path / "dqm_workflow_metrics.json").write_text(
@@ -232,6 +238,9 @@ class Workflow:
                 print(f"DQM {'complete' if code != 2 else 'stopped'}: {self.selected_count} tests"
                       f"{f' ({outcomes})' if outcomes else ''}, {capture_notice}, {elapsed:.1f}s.",
                       flush=True)
+            if self.owner_summary is not None:
+                from .summary import print_summary
+                print_summary(self.owner_summary)
             if self.request.get("verbose"):
                 print("DQM phase seconds: " + json.dumps(self.timings), flush=True)
 
@@ -240,6 +249,9 @@ class Workflow:
         manifest = self.checked(["parse"])
         self.runner = self.factory(manifest=manifest, callbacks=[self.event])
         self.checked(["run-operation", "dbt_dqm.workflow_settings"])
+        if self.settings.get('relations'):
+            from .relations import bind
+            config = bind(config, self.settings['relations'])
         default = self.settings["default_limit"]
         listing = ["ls", "--resource-type", "test", "--output", "json",
                    "--output-keys", "unique_id", "fqn"]
@@ -315,8 +327,11 @@ class Workflow:
             for result in results:
                 status = str(result.status)
                 self.outcomes[status] = self.outcomes.get(status, 0) + 1
-                if status in ("fail", "warn", "error", "skipped"):
-                    print(f"DQM test {status}: {result.node.name}: {result.message or status}", flush=True)
+                if not self.request.get('verbose'):
+                    count = result.failures if result.failures is not None else 'unavailable'
+                    reason = ('; ' + ' '.join((result.message or '').split())
+                              if status in ('error', 'skipped', 'fail') else '')
+                    print(f'DQM test {status}: {result.node.name}: {count} rows{reason}', flush=True)
             # Write directly from this result object while its invocation context is current.
             # This also avoids stale native artifacts when DBT_WRITE_JSON is disabled.
             target = config.target_path / "dqm_run_results.json"
@@ -349,6 +364,17 @@ class Workflow:
         model_artifact.parent.mkdir(parents=True, exist_ok=True)
         model_results.write(str(model_artifact))
         reconciliation = json.loads(model_artifact.read_text(encoding="utf-8"))["metadata"]["invocation_id"]
+        if self.request.get('summary'):
+            from .summary import owner_summary
+            started = time.monotonic()
+            try:
+                self.owner_summary = owner_summary(config, reconciliation)
+                self.summary_status = 'available'
+            except Exception as error:  # noqa: BLE001 - reporting must not change execution outcomes.
+                self.summary_status = 'unavailable'
+                print(f'WARNING: Owner summary unavailable: {error}', file=sys.stderr, flush=True)
+            finally:
+                self.timings['summary'] = time.monotonic() - started
         self.checked(["run-operation", "dbt_dqm.maintain_dqm"],
                      vars={**self.variables, "_dbt_dqm_maintenance_invocation_id": reconciliation})
         for step in self.maintenance:

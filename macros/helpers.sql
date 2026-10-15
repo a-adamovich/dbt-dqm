@@ -53,17 +53,79 @@
   {% set nodes = graph.nodes if graph.nodes is defined else {} %}
   {% set model_node = nodes.get('model.dbt_dqm.' ~ name) %}
   {% if model_node %}
-    {{ return(api.Relation.create(database=model_node.database, schema=model_node.schema,
-        identifier=model_node.alias, type='table')) }}
+    {{ return(dbt_dqm.checked_relation(api.Relation.create(database=model_node.database, schema=model_node.schema,
+        identifier=model_node.alias, type='table'))) }}
   {% endif %}
   {% if model is defined and model.package_name == 'dbt_dqm' and model.name == name %}
-    {{ return(this) }}
+    {{ return(dbt_dqm.checked_relation(this)) }}
   {% endif %}
   {% set anchor = nodes.get('model.dbt_dqm.dqm_reconcile') %}
   {% set schema = anchor.schema if anchor else (target.schema if var('dbt_dqm_schema', none) is none else generate_schema_name(var('dbt_dqm_schema'), none)) %}
-  {{ return(api.Relation.create(database=anchor.database if anchor else target.database,
-      schema=schema, identifier=name, type='table')) }}
+  {{ return(dbt_dqm.checked_relation(api.Relation.create(database=anchor.database if anchor else target.database,
+      schema=schema, identifier=dbt_dqm.internal_alias(name, anchor), type='table'))) }}
 {% endmacro %}
+{# PostgreSQL truncates identifiers silently; reject before another namespace could be touched. #}
+{% macro checked_relation(relation) %}
+  {% if target.type=='postgres' %}
+    {% for value in [relation.schema, relation.identifier] %}
+      {% if value is not none and value.encode('utf-8')|length > 63 %}
+        {{ exceptions.raise_compiler_error('DQM relation name exceeds PostgreSQL 63-byte limit: ' ~ relation ~ '. Shorten the schema or alias prefix; no tracking reset is performed.') }}
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+  {{ return(relation) }}
+{% endmacro %}
+
+{# Internal objects use the same project naming macro as package models. Never mutate graph nodes. #}
+{% macro internal_alias(name, anchor=none) %}
+  {% set source = anchor or (model if model is defined and model.package_name=='dbt_dqm' else {}) %}
+  {% set node = source.copy() %}
+  {% if 'config' not in node %}{% do node.update({'config':{'meta':{},'alias':none}}) %}{% endif %}
+  {% do node.update({'name':name, 'alias':name, 'version':none,
+      'package_name':'dbt_dqm', 'resource_type':'model'}) %}
+  {{ return(generate_alias_name(name, node)|trim) }}
+{% endmacro %}
+
+{% macro relation_contract() %}
+  {% set names = dbt_dqm.table_schemas().keys()|list %}
+  {% for name in ['dqm_install','dqm_reconciliation_control','dqm_app_change_staging','dqm_maintenance_log','dqm_reconcile_stage'] %}
+    {% if name not in names %}{% do names.append(name) %}{% endif %}
+  {% endfor %}
+  {% for node in graph.nodes.values() if node.package_name=='dbt_dqm' and node.resource_type=='model' %}
+    {% if node.name not in names %}{% do names.append(node.name) %}{% endif %}
+  {% endfor %}
+  {% set result={} %}{% set physical=[] %}
+  {% for name in names %}
+    {% set relation=dbt_dqm.dqm_relation(name) %}
+    {% set identity=[relation.database,relation.schema,relation.identifier] %}
+    {% if not relation.identifier or identity in physical %}
+      {{ exceptions.raise_compiler_error('DQM naming produced an empty or duplicate relation: ' ~ name) }}
+    {% endif %}
+    {% do physical.append(identity) %}
+    {% do result.update({name:{'database':relation.database,'schema':relation.schema,'identifier':relation.identifier}}) %}
+  {% endfor %}
+  {{ return(result) }}
+{% endmacro %}
+
+{% macro resolved_relations() %}
+  {% do log('DQM_RELATIONS=' ~ tojson(dbt_dqm.relation_contract()),info=false) %}
+{% endmacro %}
+
+{% macro installation_lock_key() %}
+  {% set relation=dbt_dqm.dqm_relation('dqm_install') %}
+  {{ return('dbt_dqm:' ~ relation.schema ~ ('.' ~ relation.identifier if relation.identifier!='dqm_install' else '')) }}
+{% endmacro %}
+
+{% macro index_name(table, suffix) %}
+  {% set relation=dbt_dqm.dqm_relation(table) %}
+  {% set legacy={'identity_history':'dqm_occurrence_identity_history',
+      'active_identity':'dqm_occurrence_active_identity','execution_order':'dqm_execution_order',
+      'identity':'dqm_observation_identity','browse_active':'dqm_occurrence_browse_active'} %}
+  {% if relation.identifier==table %}{{ return(legacy[suffix]) }}{% endif %}
+  {% set name=relation.identifier ~ '_' ~ suffix %}
+  {{ return('dqm_idx_' ~ local_md5(name)) }}
+{% endmacro %}
+
 {% macro relation_name(name) %}{{ return(dbt_dqm.dqm_relation(name)) }}{% endmacro %}
 
 {# Serialize manifest values to stable compact JSON for warehouse storage. #}

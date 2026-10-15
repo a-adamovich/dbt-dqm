@@ -11,7 +11,7 @@
 
 {% macro reconcile_lock() %}
   {% if not dbt_dqm.empty_mode() and target.type == 'postgres' %}
-    select pg_advisory_xact_lock(hashtext({{ dbt_dqm.sql_string('dbt_dqm:' ~ dbt_dqm.dqm_relation('dqm_install').schema) }}));
+    select pg_advisory_xact_lock(hashtext({{ dbt_dqm.sql_string(dbt_dqm.installation_lock_key()) }}));
   {% endif %}
 {% endmacro %}
 
@@ -42,10 +42,10 @@
     {% endif %};
   {% endfor %}
   {% if target.type == 'postgres' %}
-    create index if not exists dqm_occurrence_identity_history on {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} (test_unique_id, unique_id, occurrence_number);
-    create index if not exists dqm_occurrence_active_identity on {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} (test_unique_id, unique_id) where record_status='Active';
-    create index if not exists dqm_execution_order on {{ dbt_dqm.dqm_relation('dqm_test_executions') }} (test_unique_id, captured_at, invocation_id);
-    create index if not exists dqm_observation_identity on {{ dbt_dqm.dqm_relation('dqm_issue_observations') }} (test_unique_id, unique_id, invocation_id);
+    create index if not exists {{ adapter.quote(dbt_dqm.index_name('dqm_issue_occurrences','identity_history')) }} on {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} (test_unique_id, unique_id, occurrence_number);
+    create index if not exists {{ adapter.quote(dbt_dqm.index_name('dqm_issue_occurrences','active_identity')) }} on {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} (test_unique_id, unique_id) where record_status='Active';
+    create index if not exists {{ adapter.quote(dbt_dqm.index_name('dqm_test_executions','execution_order')) }} on {{ dbt_dqm.dqm_relation('dqm_test_executions') }} (test_unique_id, captured_at, invocation_id);
+    create index if not exists {{ adapter.quote(dbt_dqm.index_name('dqm_issue_observations','identity')) }} on {{ dbt_dqm.dqm_relation('dqm_issue_observations') }} (test_unique_id, unique_id, invocation_id);
 
   {% endif %}
 {% endmacro %}
@@ -65,7 +65,7 @@
 {% endmacro %}
 {% macro default__event_payload_mode_verify() %}
   {% set names = [] %}{% for column in dbt_dqm.event_payload_columns() %}{% do names.append(dbt_dqm.sql_string(column)) %}{% endfor %}
-  {{ dbt_dqm.assert_sql('(select count(*) from ' ~ dbt_dqm.columns_catalog() ~ ' where table_schema=' ~ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_issue_events').schema) ~ " and table_name='dqm_issue_events' and lower(column_name) in (" ~ names|join(',') ~ ')) = ' ~ names|length,
+  {{ dbt_dqm.assert_sql('(select count(*) from ' ~ dbt_dqm.columns_catalog() ~ ' where table_schema=' ~ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_issue_events').schema) ~ " and table_name=" ~ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_issue_events').identifier) ~ " and lower(column_name) in (" ~ names|join(',') ~ ')) = ' ~ names|length,
       dbt_dqm.sql_string('Event payload columns are missing. Rerun setup with the current package.')) }}
 {% endmacro %}
 
@@ -81,7 +81,7 @@
     );
     {% for column, kind in [('base_annotation_version','int64'),('installation_id','string')] %}
       if not exists(select 1 from {{ dbt_dqm.columns_catalog() }}
-        where table_name='dqm_app_change_staging' and lower(column_name)={{ dbt_dqm.sql_string(column) }}) then
+        where table_name={{ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_app_change_staging').identifier) }} and lower(column_name)={{ dbt_dqm.sql_string(column) }}) then
         alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} add column {{ column }} {{ kind }};
       end if;
     {% endfor %}
@@ -99,11 +99,11 @@
   {% if target.type == 'bigquery' %}
     {% for column, kind in [('upload_id','string'),('staged_at','timestamp')] %}
       if not exists(select 1 from {{ dbt_dqm.columns_catalog() }}
-        where table_name='dqm_app_change_staging' and lower(column_name)={{ dbt_dqm.sql_string(column) }}) then
+        where table_name={{ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_app_change_staging').identifier) }} and lower(column_name)={{ dbt_dqm.sql_string(column) }}) then
         alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} add column {{ column }} {{ kind }};
       end if;
     {% endfor %}
-    if not exists(select 1 from {{ dbt_dqm.columns_catalog() }} where table_name='dqm_app_change_staging'
+    if not exists(select 1 from {{ dbt_dqm.columns_catalog() }} where table_name={{ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_app_change_staging').identifier) }}
       and lower(column_name)='staged_at' and upper(coalesce(column_default,''))='CURRENT_TIMESTAMP()') then
       alter table {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} alter column staged_at set default current_timestamp();
     end if;
@@ -116,9 +116,9 @@
 {% endmacro %}
 {% macro default__app_staging_safety_verify() %}
   {% if target.type == 'bigquery' %}
-    {{ dbt_dqm.assert_sql('(select count(*) from ' ~ dbt_dqm.columns_catalog() ~ " where table_name='dqm_app_change_staging' and column_name in ('upload_id','staged_at'))=2",
+    {{ dbt_dqm.assert_sql('(select count(*) from ' ~ dbt_dqm.columns_catalog() ~ " where table_name=" ~ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_app_change_staging').identifier) ~ " and column_name in ('upload_id','staged_at'))=2",
       "'App staging safety columns are missing. Rerun setup.'") }}
-    {{ dbt_dqm.assert_sql("exists(select 1 from " ~ dbt_dqm.columns_catalog() ~ " where table_name='dqm_app_change_staging' and column_name='staged_at' and lower(column_default)='current_timestamp()')",
+    {{ dbt_dqm.assert_sql("exists(select 1 from " ~ dbt_dqm.columns_catalog() ~ " where table_name=" ~ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_app_change_staging').identifier) ~ " and column_name='staged_at' and lower(column_default)='current_timestamp()')",
       "'App staging timestamp default is missing. Rerun setup.'") }}
     {{ dbt_dqm.assert_sql('not exists(select 1 from ' ~ dbt_dqm.dqm_relation('dqm_app_change_staging') ~ ' where staged_at is null)',
       "'App staging timestamp backfill is incomplete. Rerun setup.'") }}
@@ -154,7 +154,7 @@
   {% set timestamp_types = "('timestamp','timestamp without time zone')" %}
   {% set string_types = "('string','character varying','text')" %}
   {{ dbt_dqm.assert_sql('(select count(*) from ' ~ dbt_dqm.columns_catalog() ~ ' where table_schema=' ~ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_maintenance_log').schema)
-      ~ " and table_name='dqm_maintenance_log' and ((lower(column_name)='trigger_marker_at' and lower(data_type) in " ~ timestamp_types
+      ~ " and table_name=" ~ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_maintenance_log').identifier) ~ " and ((lower(column_name)='trigger_marker_at' and lower(data_type) in " ~ timestamp_types
       ~ ") or (lower(column_name)='trigger_kind' and lower(data_type) in " ~ string_types ~ '))) = 2',
     dbt_dqm.sql_string('Maintenance attribution columns are missing or have the wrong type. Rerun setup with the current package.')) }}
 {% endmacro %}
@@ -170,14 +170,14 @@
 {% macro browse_priority_rank_sql() %}(case lower(coalesce(test_priority, '')) when 'critical' then 0 when 'high' then 1 when 'medium' then 2 when 'low' then 3 else 4 end){% endmacro %}
 {% macro default__browse_keyset_index_apply() %}
   {% if target.type == 'postgres' %}
-    create index if not exists dqm_occurrence_browse_active on {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }}
+    create index if not exists {{ adapter.quote(dbt_dqm.index_name('dqm_issue_occurrences','browse_active')) }} on {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }}
       (({{ dbt_dqm.browse_priority_rank_sql() }}), first_seen_at, occurrence_id)
       where record_status = 'Active';
   {% endif %}
 {% endmacro %}
 {% macro default__browse_keyset_index_verify() %}
   {% if target.type == 'postgres' %}
-    {{ dbt_dqm.assert_sql("exists(select 1 from pg_indexes where schemaname=" ~ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_issue_occurrences').schema) ~ " and indexname='dqm_occurrence_browse_active')",
+    {{ dbt_dqm.assert_sql("exists(select 1 from pg_indexes where schemaname=" ~ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_issue_occurrences').schema) ~ " and indexname=" ~ dbt_dqm.sql_string(dbt_dqm.index_name('dqm_issue_occurrences','browse_active')) ~ ")",
       dbt_dqm.sql_string('The warehouse browsing index is missing. Rerun setup with the current package.')) }}
   {% endif %}
 {% endmacro %}
@@ -208,7 +208,7 @@
 {% macro default__initial_schema_verify() %}
   {% for name, columns in dbt_dqm.table_schemas().items() if name not in ['dqm_annotation_changes','dqm_missed_issues'] %}
     {% set names = [] %}{% for col, kind in columns %}{% do names.append(dbt_dqm.sql_string(col)) %}{% endfor %}
-    {{ dbt_dqm.assert_sql('(select count(*) from ' ~ dbt_dqm.columns_catalog() ~ ' where table_schema=' ~ dbt_dqm.sql_string(dbt_dqm.dqm_relation(name).schema) ~ ' and table_name=' ~ dbt_dqm.sql_string(name) ~ ' and lower(column_name) in (' ~ names|join(',') ~ ')) = ' ~ columns|length,
+    {{ dbt_dqm.assert_sql('(select count(*) from ' ~ dbt_dqm.columns_catalog() ~ ' where table_schema=' ~ dbt_dqm.sql_string(dbt_dqm.dqm_relation(name).schema) ~ ' and table_name=' ~ dbt_dqm.sql_string(dbt_dqm.dqm_relation(name).identifier) ~ ' and lower(column_name) in (' ~ names|join(',') ~ ')) = ' ~ columns|length,
       dbt_dqm.sql_string('Incomplete DQM schema: ' ~ name ~ '. Rerun setup with the current package.')) }}
   {% endfor %}
 {% endmacro %}
@@ -264,6 +264,11 @@
     declare dqm_needs_setup bool;
   {% endif %}
 
+  {% if install.identifier != 'dqm_install' %}
+    {% set legacy_install = "exists(select 1 from " ~ dbt_dqm.tables_catalog() ~ " where table_schema=" ~ dbt_dqm.sql_string(install.schema) ~ " and table_name in ('dqm_install','dqm_issue_occurrences','dqm_test_executions','dqm_issue_events','dqm_issue_observations','dqm_reconciliation_control','dqm_schema_migrations'))" %}
+    {{ dbt_dqm.assert_sql('(' ~ dbt_dqm.table_exists_sql('dqm_install') ~ ') or not (' ~ legacy_install ~ ')',
+      dbt_dqm.sql_string('DQM naming now isolates state tables at ' ~ install ~ '. Legacy shared dqm_install/history remain untouched. Start this isolated installation explicitly with dbt-dqm run --full-refresh and confirm its scope (--yes for unattended use). History is not copied.')) }}
+  {% endif %}
   {#- 1-2. A 0.1 schema has tracking tables but no install marker. #}
   {{ dbt_dqm.assert_sql(
     '(' ~ dbt_dqm.table_exists_sql('dqm_install') ~ ') or not (' ~ legacy_checks | join(' or ') ~ ')',

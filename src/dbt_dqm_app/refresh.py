@@ -12,7 +12,8 @@ CONTRACT = "dqm-full-v1"
 
 def confirm_refresh(config, manifest, workflow) -> bool:
     """Describe the actual destinations before any reset preparation or warehouse writes."""
-    print(f"DQM full refresh · target {config.target} · {config.project_id}.{config.dataset}",
+    destination = workflow.settings["refresh"]["dqm_install"]
+    print(f"DQM full refresh · target {config.target} · {destination['database']}.{destination['schema']}",
           flush=True)
     print("Tracking history and reviewer annotations in these relations will be discarded:",
           flush=True)
@@ -76,7 +77,7 @@ def _postgres_refresh(config, contract, views):
         # external dependents; PostgreSQL rolls back the entire reset in that case.
         anchor = contract["dqm_install"]
         cursor.execute("select pg_advisory_xact_lock(hashtext(%s))",
-                       ("dbt_dqm:" + anchor["schema"],))
+                       ("dbt_dqm:" + anchor["schema"] + ("." + anchor["identifier"] if anchor["identifier"] != "dqm_install" else ""),))
         for schema in {item["schema"] for item in contract.values()}:
             cursor.execute(sql.SQL("create schema if not exists {}").format(sql.Identifier(schema)))
         for item in [*contract.values(), *[
@@ -167,7 +168,7 @@ def _bigquery_refresh(config, contract):
         # Prepare and inspect all destinations before overwriting any existing data.
         for name, item in contract.items():
             destination = f"{item['database']}.{item['schema']}.{item['identifier']}"
-            stage = f"{item['database']}.{item['schema']}.dqm_reset_{token}_{name}"
+            stage = f"{item['database']}.{item['schema']}.{item['identifier']}__dqm_reset_{token}"
             try:
                 existing = client.get_table(destination)
                 policies[destination] = _policy_access(client.get_iam_policy(destination))

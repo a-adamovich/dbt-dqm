@@ -9,7 +9,7 @@ runs.
 
 | | |
 | --- | --- |
-| Latest release | `0.2.0a6`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a6/), Git tag [`v0.2.0a6`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a6). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a6`. |
+| Latest release | `0.2.0a7`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a7/), Git tag [`v0.2.0a7`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a7). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a7`. |
 | Upgrade | From `0.2.0a4` or `0.2.0a5`: update both packages and run normally; history is preserved. Earlier versions require `dbt-dqm run --full-refresh`, which resets tracking history while preserving consumer models and stored test failures. |
 | dbt | dbt-core 1.11 and 1.12, with dbt-bigquery 1.11 or 1.12 and dbt-postgres 1.11 (there is no dbt-postgres 1.12; 1.11 supports dbt-core 1.12) |
 | Warehouses | BigQuery; Postgres 14 and 16 (needs the `pgcrypto` extension) |
@@ -18,7 +18,7 @@ runs.
 The Python app pins dbt-core 1.12.5; its optional extras use dbt-bigquery 1.12.1 and dbt-postgres 1.11.x;
 the dbt package accepts the wider dbt range above. Python support is `>=3.11,<3.15`.
 The [release checklist](docs/release-checklist.md) lists what must pass before a release is tagged;
-the [0.2.0a6 evidence](docs/release-0.2.0a6.md) records this alpha's results.
+the [0.2.0a7 evidence](docs/release-0.2.0a7.md) records this alpha's results.
 Package contracts (relations, migrations, grants, recovery, retention, maintenance) are in
 [warehouse interfaces](docs/warehouse-interfaces.md).
 
@@ -29,10 +29,10 @@ Install the alpha through Git by adding it to your consumer project's `packages.
 ```yaml
 packages:
   - git: "https://github.com/a-adamovich/dbt-dqm.git"
-    revision: v0.2.0a6
+    revision: v0.2.0a7
 ```
 
-The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a6`, so
+The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a7`, so
 install this alpha through the Git revision above. Hub registration is planned for 0.2.0.
 
 The 0.2 app expects the matching 0.2 package; don't mix it with 0.1.
@@ -50,7 +50,7 @@ In a Python 3.14 environment (recommended; 3.11–3.14 supported), install the a
 ```bash
 python3.14 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a6'
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a7'
 ```
 
 Warehouse adapters are optional. In a checkout, install
@@ -58,9 +58,9 @@ only the adapter you need with `uv sync --extra bigquery` or `uv sync --extra po
 use `uv sync --all-extras` for both. Select the extra in your installed environment:
 
 ```bash
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a6'          # BigQuery
-python -m pip install 'dbt-dqm[postgres]==0.2.0a6'          # Postgres
-python -m pip install 'dbt-dqm[bigquery,postgres]==0.2.0a6' # Both
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a7'          # BigQuery
+python -m pip install 'dbt-dqm[postgres]==0.2.0a7'          # Postgres
+python -m pip install 'dbt-dqm[bigquery,postgres]==0.2.0a7' # Both
 ```
 
 A plain install includes the app and dbt-core but no warehouse adapters.
@@ -72,7 +72,7 @@ On Windows PowerShell, create and activate the environment with:
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a6'
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a7'
 ```
 
 Activation is optional: `uv run --extra bigquery dbt-dqm app` uses the checkout environment.
@@ -165,9 +165,18 @@ local service-account credentials; no new keys are created or downloaded. Option
 ## Migrating existing tests
 
 DQM is disabled by default and runs as a separate workflow. Install the matching warehouse extra,
-update the Git package revision above, and run `dbt deps`. Projects already on `0.2.0a4` or `0.2.0a5` can then
-run `dbt-dqm run` without a full refresh; history and annotations are preserved. The reset procedure
-below applies to older versions or an intentional history reset:
+update the Git package revision above, and run `dbt deps`. For a4–a6 installations whose resolved relation names are unchanged, run `dbt-dqm run` without a
+full refresh; history and annotations are preserved. **If your alias macro prefixes package models,
+a7 now applies it to state tables too.** An ordinary run refuses to silently initialize the new
+namespace while legacy shared tables exist. Apply or preserve pending edits in the old app before
+upgrading both the Python app and dbt Git package, stop old app processes, then run
+`dbt-dqm run --full-refresh` with the same target and naming variables. Review and confirm the exact
+resolved destinations (`--yes` for unattended use). This starts fresh isolated history and rebuilds
+that namespace's incremental models; old shared tables and other developer prefixes remain untouched.
+Shared history is not copied or automatically divided among developers. Old local drafts remain in
+their old workspace and must not be submitted to the fresh installation.
+
+The reset procedure below also applies to older versions or an intentional history reset:
 
 1. Stop reviewer apps and preserve any annotations you need outside the package. No history migration is provided.
 2. Mark each DQM test with a `meta.dbt_dqm` object. Tags are optional business categories; the legacy
@@ -291,7 +300,7 @@ and `captured_issue_count`. They reconcile observed positive evidence but never 
 issues through absence. A later complete execution can resolve them. Health shows limited collections.
 
 Serialize DQM workflows sharing stored-failure tables: equal counts do not prove two invocations
-read the same rows. BigQuery supports one reconciliation per dataset at a time. Per-test capture
+read the same rows. BigQuery supports one reconciliation per resolved DQM installation at a time. Per-test capture
 commits preserve earlier successful captures if a later test fails during collection.
 
 `dbt_dqm_schema` optionally chooses the tracking schema. With standard dbt schema naming,
@@ -324,6 +333,29 @@ credentialed benchmarks establish a benefit; SQL-rendering tests do not establis
 > full capture they can contain personal data. Set event retention, or choose
 > `changed_columns` (column names plus hashes, which are not anonymization) or `none`.
 
+### Owner workload summary
+
+`dbt-dqm run --summary` keeps the normal completion line and adds current **NEW** and **ACTIVE**
+counts grouped by the saved owner shown in the app, including reviewer edits. ACTIVE is every
+unarchived issue in this installation; NEW is the subset with workflow status NEW. ACTIVE includes
+NEW and can include issues retained when a collection hits its limit. These are current workload
+counts, not changes introduced by this invocation. Total appears first, owners sort by NEW descending,
+and Unassigned is always included. Comma-separated owners remain one label. Without `--summary`,
+no extra reporting query runs. A reporting failure warns without changing the workflow exit code.
+
+Package state tables, views, incremental models and staging objects follow the project's
+`generate_alias_name`; custom schemas follow the package's resolved model schema. Set the same
+variables when opening the app or inspecting a workspace:
+
+```bash
+dbt-dqm run --vars '{table_alias_prefix: alice}' --summary
+dbt-dqm app --vars '{table_alias_prefix: alice}'
+dbt-dqm workspace info --vars '{table_alias_prefix: alice}'
+```
+
+PowerShell accepts the same single-quoted YAML arguments. Normal console output contains one line
+per selected test with its status and reported row count; `--verbose` retains full dbt output.
+
 ## Local review app
 
 ```bash
@@ -339,7 +371,8 @@ dbt-dqm app \
 - It caches a project-and-target-specific snapshot plus pending edits in an owner-only SQLite
   workspace under the user-data directory. Credentials are never copied into it.
   `dbt-dqm workspace info` and `dbt-dqm workspace purge` (with `--project-dir` and `--target`)
-  inspect or delete it.
+  inspect or delete it. Resolved installations have separate local workspaces; use the same
+  `--vars` naming overrides as `run`. Switching namespace in an open session requires restarting it.
 - Edits use compare-and-set versions: a concurrent change produces an explicit conflict rather than
   a silent overwrite. On Postgres, a write blocked by a running reconciliation gives up after
   `--lock-timeout` seconds (default 5) and reports the warehouse as busy.
@@ -373,9 +406,17 @@ replace existing drafts for those fields; notes, tickets and other drafts are ke
 limited to 2,000 issues or 32 MiB and clears after staging, filter changes, Sync or successful Apply.
 There is no automatic selection of every issue belonging to a test.
 
-**Prepare CSV** and **Prepare Excel** export all filtered results across pages, using saved values;
+Expand **Export saved issues** above the issue cards. **Prepare CSV** and **Prepare Excel** export all filtered results across pages, using saved values;
 pending edits are excluded. Archived issues are included only when the current lifecycle filter and
 archive window include them. Disable **Pending edits only** before exporting.
+
+Export columns start with test name, owner and captured data (Excel `record.*`, CSV
+`record_values_json`), followed by lifecycle/workflow status, verdict, test status, first seen,
+last seen, annotation updated, call to action, ticket URL, notes, then remaining metadata.
+Excel puts configured granularity fields first within captured data, followed by captured JSON
+field order; heterogeneous fields append in first-seen order. Timestamp headers explicitly label
+UTC, included offsets or an unspecified timezone. Values retain their original precision and offsets;
+there is no implicit Eastern-time conversion, and captured JSON timestamps are untouched.
 
 - CSV is UTF-8 with BOM and standard quoting. It preserves `record_values_json` and other JSON
   columns. Formula-like text is prefixed with an apostrophe so opening it in a spreadsheet does not
