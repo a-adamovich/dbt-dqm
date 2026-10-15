@@ -541,3 +541,36 @@ def test_naming_resolution_is_offline_and_never_opens_connections(protocol_proje
         assert result['granularity']
     finally:
         path.write_text(original)
+
+
+def test_concurrent_naming_preserves_consumer_artifacts(protocol_project, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.relations import resolve_config
+
+    original, profiles = protocol_project
+    project = tmp_path / "concurrent-naming"
+    shutil.copytree(original, project, ignore=shutil.ignore_patterns("dbt_packages", "target", "logs"))
+    (project / "dbt_packages").mkdir()
+    (project / "dbt_packages/dbt_dqm").symlink_to(ROOT, target_is_directory=True)
+    target = project / "target"
+    target.mkdir()
+    (target / "manifest.json").write_text('{"nodes": {}, "consumer_artifact": true}')
+    (target / "partial_parse.msgpack").write_bytes(b"consumer-owned parse cache")
+    before = {p.relative_to(target): p.read_bytes() for p in target.rglob("*") if p.is_file()}
+    config = load_config(project, profiles, "dev")
+    barrier = Barrier(3)
+
+    def resolve():
+        barrier.wait(timeout=30)
+        return resolve_config(config)
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = [pool.submit(resolve) for _ in range(3)]
+        resolved = [future.result(timeout=90) for future in futures]
+    assert all(value.relations == resolved[0].relations for value in resolved)
+    assert resolved[0].relations
+    assert {p.relative_to(target): p.read_bytes() for p in target.rglob("*") if p.is_file()} == before
+    assert not (project / "logs").exists()

@@ -5,6 +5,7 @@
 - Apply consumer alias naming to package state, upload and reconciliation staging tables, and use
   the same resolved contract for app reads/writes, reset, migration checks and maintenance.
   Scope Postgres locks/indexes and local workspaces to the installation.
+  Resolve naming offline with private artifacts, preserving consumer manifests during concurrent reads.
 - Refuse implicit initialization when corrected naming would abandon legacy shared history.
   Require a confirmed fresh start of the selected namespace; preserve legacy and other-prefix data.
   Install the matching app and dbt package and pass the same `--vars` to run, app and workspace.

@@ -126,8 +126,6 @@ def main():
         request["profiles_dir"],
         "--target",
         request["target"],
-        "--target-path",
-        request["target_path"],
         "--vars",
         yaml.safe_dump(variables),
         "--no-defer",
@@ -162,10 +160,17 @@ def main():
             errors.append(value.info.msg)
 
     with (
+        tempfile.TemporaryDirectory(prefix="dbt-dqm-naming-artifacts-") as artifacts,
         tempfile.TemporaryFile(mode="w+", encoding="utf-8") as captured,
         contextlib.redirect_stdout(captured),
         contextlib.redirect_stderr(captured),
     ):
+        # Concurrent app requests (or another dbt process) must never overwrite the
+        # consumer's manifest/partial-parse cache while discovering physical names.
+        flags.extend([
+            "--target-path", str(Path(artifacts) / "target"),
+            "--log-path", str(Path(artifacts) / "logs"),
+        ])
         runner = dbtRunner(callbacks=[event])
         parsed = runner.invoke(["parse", *flags])
         result = (

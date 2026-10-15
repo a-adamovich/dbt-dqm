@@ -14,9 +14,7 @@ exact source revisions, CI and warehouse counts, restricted identities, browser/
 protected approval, trusted publishing, artifact hashes/provenance and public installation matrix.
 This is a preparation record; final publication evidence is recorded on that release page.
 
-Production candidate: `120b24ff4c00ffe9c3aef9cc40efd1b6d3c1a169`. Subsequent documentation records
-verification without changing production files. The installed-wheel Python suite passed 374 tests;
-only the native Windows UNC case is unavailable on macOS and is covered by native CI. The
-export-enabled 50,000-issue memory gate passed at 435.3 MiB peak RSS;
-[raw result](scale-results/candidate-120b24f-cache-boundary.json). Complete CI and live warehouse
-gates are recorded on the final linked release page.
+Naming discovery uses private artifacts so concurrent reviewer requests cannot overwrite the
+consumer manifest or partial-parse cache. It opens no warehouse connection. Final source, complete
+CI/live warehouse results and installed-wheel browser/memory evidence are recorded on the linked
+release page after verification of the corrected candidate.
