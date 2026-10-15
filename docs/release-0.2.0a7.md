@@ -13,3 +13,10 @@ PR and [v0.2.0a7 release page](https://github.com/a-adamovich/dbt-dqm/releases/t
 exact source revisions, CI and warehouse counts, restricted identities, browser/memory checks,
 protected approval, trusted publishing, artifact hashes/provenance and public installation matrix.
 This is a preparation record; final publication evidence is recorded on that release page.
+
+Production candidate: `120b24ff4c00ffe9c3aef9cc40efd1b6d3c1a169`. Subsequent documentation records
+verification without changing production files. The installed-wheel Python suite passed 374 tests;
+only the native Windows UNC case is unavailable on macOS and is covered by native CI. The
+export-enabled 50,000-issue memory gate passed at 435.3 MiB peak RSS;
+[raw result](scale-results/candidate-120b24f-cache-boundary.json). Complete CI and live warehouse
+gates are recorded on the final linked release page.
