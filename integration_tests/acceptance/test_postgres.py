@@ -609,12 +609,16 @@ def test_app_write_fails_fast_while_reconciliation_holds_the_table(demo):
 
     from dbt_dqm_app.config import load_config
     from dbt_dqm_app.errors import WarehouseBusy, classify
+    from dbt_dqm_app.relations import resolve_config
     from dbt_dqm_app.store import Patch
     from dbt_dqm_app.warehouse import apply_patches
 
     demo.capture()
     demo.dbt("build", "--select", "package:dbt_dqm")
-    config = replace(load_config(demo.project, demo.profiles, "dev"), lock_timeout_seconds=1)
+    # Match app startup: resolve naming before timing warehouse lock refusal.
+    config = resolve_config(
+        replace(load_config(demo.project, demo.profiles, "dev"), lock_timeout_seconds=1)
+    )
     row = demo.occurrences()[0]
     patch = Patch(
         row["occurrence_id"],
@@ -1487,7 +1491,11 @@ def test_package_initialization_and_app_with_custom_aliases(demo):
     demo.dbt("run", "--select", "package:dbt_dqm", "--threads", "4")
     demo.sql("insert into @schema.dqm_missed_issues (missed_issue_id,description) "
              "values ('kept-before-alias','existing canonical data')")
+    demo.dbt("run", "--select", "demo_records")
     (project / "macros/consumer_naming.sql").write_text(NAMING_MACROS, encoding="utf-8")
+    refused = dedicated(demo, code=2)
+    assert "Legacy shared" in refused.stderr
+    dedicated(demo, "--full-refresh")
     # First install and idempotent reruns must work at the normal four-thread setting.
     for _ in range(3):
         demo.dbt("run", "--select", "package:dbt_dqm", "--threads", "4")
@@ -1680,14 +1688,14 @@ def test_dedicated_full_refresh_aliases_grants_and_external_dependency_failure(d
     demo.schema = base + "_review"
     try:
         dedicated(demo)
-        assert len(demo.occurrences()) == 7
+        assert demo.sql("select count(*) n from @schema.reviewer_dqm_issue_occurrences")[0]["n"] == 7
         demo.sql("grant select on @schema.reviewer_dqm_all_issues to public")
-        demo.sql("grant select on @schema.dqm_issue_observations to public")
-        before = demo.sql("select * from @schema.dqm_install")
+        demo.sql("grant select on @schema.reviewer_dqm_issue_observations to public")
+        before = demo.sql("select * from @schema.reviewer_dqm_install")
         demo.sql("create view @schema.consumer_dependent as select occurrence_id from @schema.reviewer_dqm_all_issues")
         refused = dedicated(demo, "--full-refresh", code=2)
         assert "depend" in refused.stderr.lower()
-        assert demo.sql("select * from @schema.dqm_install") == before
+        assert demo.sql("select * from @schema.reviewer_dqm_install") == before
         assert demo.sql("select count(*) n from @schema.consumer_dependent")[0]["n"] == 7
         demo.sql("drop view @schema.consumer_dependent")
         demo.sql("create table @schema.consumer_keep as select 'preserved'::text as value")
@@ -1695,8 +1703,8 @@ def test_dedicated_full_refresh_aliases_grants_and_external_dependency_failure(d
         assert demo.sql("select * from @schema.consumer_keep") == [{"value": "preserved"}]
         grants = demo.sql("select table_name from information_schema.table_privileges "
                           "where table_schema=%s and grantee='PUBLIC' and privilege_type='SELECT'", [demo.schema])
-        assert {row["table_name"] for row in grants} >= {"reviewer_dqm_all_issues", "dqm_issue_observations"}
-        assert not demo.sql("select pending_view_grants from @schema.dqm_install")[0]["pending_view_grants"]
+        assert {row["table_name"] for row in grants} >= {"reviewer_dqm_all_issues", "reviewer_dqm_issue_observations"}
+        assert not demo.sql("select pending_view_grants from @schema.reviewer_dqm_install")[0]["pending_view_grants"]
         config = load_config(demo.project, demo.profiles, "dev")
         validate_dbt(config)
         assert len(fetch_issues(config)) == 7
@@ -1705,3 +1713,8 @@ def test_dedicated_full_refresh_aliases_grants_and_external_dependency_failure(d
     finally:
         demo.sql("drop schema if exists @schema cascade")
         demo.schema = base
+
+
+def test_two_developer_namespaces_are_isolated(demo):
+    from namespace_checks import check_namespace_isolation
+    check_namespace_isolation(demo, dedicated)

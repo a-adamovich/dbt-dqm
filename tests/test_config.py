@@ -100,3 +100,14 @@ consumer_profile:
     )
 
     assert load_config(project, profiles, "dev").password == "spelled-out"
+
+
+def test_naming_vars_retain_yaml_dates_and_lists(tmp_path):
+    from datetime import date
+
+    import yaml
+    project,profiles=_project(tmp_path)
+    variables={'table_alias_prefix':'alice','as_of':date(2026,10,14),'labels':['a','b']}
+    (profiles/'profiles.yml').write_text(yaml.safe_dump({'consumer_profile': {'target':'dev','outputs': {'dev': {'type':'postgres','host':'localhost','user':'reviewer','password':'test','dbname':'analytics','schema':'quality'}}}}))
+    config=load_config(project,profiles,'dev',cli_vars=variables)
+    assert yaml.safe_load(config.vars_yaml)==variables

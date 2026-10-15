@@ -389,3 +389,9 @@ def test_disposed_export_keeps_private_storage_until_worker_completion(tmp_path)
     del job
     gc.collect()
     assert not path.exists()
+
+
+@pytest.fixture(autouse=True)
+def isolated_naming_for_ui_unit_tests(monkeypatch):
+    import dbt_dqm_app.streamlit_app as ui
+    monkeypatch.setattr(ui, 'resolve_config', lambda config: config)

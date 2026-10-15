@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 from dbt_dqm_app.config import resolve_workspace_path
 from dbt_dqm_app.limits import MAX_CACHE_ISSUES, MAX_CACHE_MIB, validate_limits
 
@@ -21,6 +23,7 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--exclude", nargs="+")
     run.add_argument("--vars", default="{}")
     run.add_argument("--threads", type=int)
+    run.add_argument("--summary", action="store_true", help="Show current NEW/ACTIVE counts by owner")
     run.add_argument("--verbose", action="store_true", help="Show full dbt console output and timings")
     run.add_argument("--defer", action=argparse.BooleanOptionalAction, default=None,
                      help="Resolve upstream refs using state (default: DBT_DEFER)")
@@ -33,6 +36,7 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--yes", action="store_true",
                      help="Confirm the destructive full refresh without an interactive prompt")
     app = commands.add_parser("app", help="Launch the local review application")
+    app.add_argument("--vars", default="{}", help="dbt YAML variables, including naming overrides")
     app.add_argument("--project-dir", default=None)
     app.add_argument("--profiles-dir", default=None)
     app.add_argument("--target", default=None)
@@ -67,6 +71,7 @@ def parser() -> argparse.ArgumentParser:
         ("purge", "Permanently delete the local snapshot and pending patches"),
     ):
         command = workspace_commands.add_parser(name, help=help_text)
+        command.add_argument("--vars", default="{}", help="dbt YAML variables used by run")
         command.add_argument("--project-dir")
         command.add_argument("--target")
         command.add_argument("--profiles-dir")
@@ -80,7 +85,8 @@ def main() -> None:
 
         raise SystemExit(launch(args))
     if args.command == "workspace":
-        workspace_path = resolve_workspace_path(args.project_dir, args.target, args.profiles_dir)
+        workspace_path = resolve_workspace_path(args.project_dir, args.target, args.profiles_dir,
+                                                cli_vars=yaml.safe_load(args.vars))
         related_paths = [
             workspace_path,
             Path(f"{workspace_path}-wal"),
@@ -118,6 +124,7 @@ def main() -> None:
         environment.update(
             {
                 "STREAMLIT_BROWSER_GATHER_USAGE_STATS": "false",
+                "DBT_DQM_VARS": args.vars,
                 "DBT_DQM_ARCHIVE_CACHE_DAYS": str(args.archive_cache_days),
                 "DBT_DQM_LOCK_TIMEOUT_SECONDS": str(args.lock_timeout),
                 "DBT_DQM_MAX_CACHE_ISSUES": str(args.max_cache_issues),

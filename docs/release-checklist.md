@@ -92,6 +92,17 @@ Scheduled fixture refreshes use `--yes`; earlier baseline benchmark versions ret
 flags. Final source, gate, approval and public artifact evidence is recorded in the release page
 linked from [the a6 preparation record](release-0.2.0a6.md).
 
+### 0.2.0a7 isolation and publication criteria
+
+The maintainer authorized all-relation alias isolation, NEW/ACTIVE owner reporting, export ordering
+and timezone labels, quiet-output deduplication, merging and publication of `v0.2.0a7`.
+All current gates remain required on one frozen production candidate. Verify two prefixes in one
+schema/dataset, preservation of legacy shared history, explicit fresh-start refusal/confirmation,
+namespace-specific app storage and Apply, both export formats and the 50,000-issue boundary.
+Use existing credentials and disposable fixtures, without a shared reset or IAM/key changes.
+Preserve the protected reviewer pause, trusted publisher and provenance checks. Final evidence is
+recorded on the release page linked from [the a7 preparation record](release-0.2.0a7.md).
+
 ## 0.2.0a3 results
 
 Production candidate: `4c362266edd5457dc0bedae6348f455e064fcc90`. The test-only Windows fixture
@@ -146,7 +157,7 @@ not on that commit. The `613e089` results it replaces are in this file's git his
 
 - Captures that share stored-failure tables must be serialized; equal row counts don't prove
   provenance.
-- BigQuery supports one reconciliation per dataset at a time; overlaps are detected, not queued.
+- BigQuery supports one reconciliation per resolved DQM installation at a time; overlaps are detected, not queued.
 - 0.1 users need a fresh schema for 0.2.
 - Event payloads default to `full` with indefinite retention unless configured.
 - App cache ceilings bound serialized data, not process memory. Above them the app browses the

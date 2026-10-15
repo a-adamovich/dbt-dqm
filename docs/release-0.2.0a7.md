@@ -1,0 +1,31 @@
+# 0.2.0a7 release verification
+
+This source implements relation isolation, optional NEW/ACTIVE owner workload reporting, ordered
+CSV/Excel exports with timezone labels, and quiet-mode test deduplication. Python/application/lock
+version: `0.2.0a7`; dbt package: `0.2.0-a7`. The warehouse row schema remains `dqm-full-v1`.
+
+Unchanged destinations retain history. A corrected prefixed namespace requires an explicit,
+confirmed fresh start; legacy shared tables are preserved and history is not copied. Upgrade both
+the app and Git package and preserve pending edits before switching namespaces.
+
+All release-checklist gates must pass on one production candidate before tagging. The preparation
+PR and [v0.2.0a7 release page](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a7) record the
+exact source revisions, CI and warehouse counts, restricted identities, browser/memory checks,
+protected approval, trusted publishing, artifact hashes/provenance and public installation matrix.
+This is a preparation record; final publication evidence is recorded on that release page.
+
+Naming discovery uses private artifacts so concurrent reviewer requests cannot overwrite the
+consumer manifest or partial-parse cache. It opens no warehouse connection. Final source, complete
+CI/live warehouse results and installed-wheel browser/memory evidence are recorded on the linked
+release page after verification of the corrected candidate.
+
+Production candidate: `fe629f1b6bd8b486f09cb3a15f3aaf8f4b3c54a8`. Subsequent documentation records
+verification without changing production files. The export-enabled 50,000-issue memory check
+passed at 448.9 MiB peak RSS; [raw result](scale-results/candidate-fe629f1-cache-boundary.json).
+Complete CI, warehouse, installed-wheel and public verification results are recorded on the
+linked release page.
+
+The Postgres contention acceptance setup resolves the namespace before starting its lock-refusal
+timer, matching app startup. The original four-second bound, unchanged-data checks and successful
+retry remain. This test-only correction changes no production files; final CI and release evidence
+identify its exact revision separately from the frozen production candidate above.

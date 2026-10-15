@@ -104,12 +104,12 @@
 {% macro maintenance_live_stages_sql() %}
   create or replace temp table dqm_live_stages as
     select table_name from {{ dbt_dqm.tables_catalog() }}
-    where starts_with(table_name, 'dqm_reconcile_stage_');
+    where starts_with(table_name, {{ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_reconcile_stage').identifier ~ '_') }});
 {% endmacro %}
 {% macro maintenance_run_retained_sql(run_alias) %}
   {% if target.type == 'bigquery' %}
     and not exists(select 1 from dqm_live_stages live
-      where live.table_name = concat('dqm_reconcile_stage_', replace({{ run_alias }}.run_id, '-', '')))
+      where live.table_name = concat({{ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_reconcile_stage').identifier ~ '_') }}, replace({{ run_alias }}.run_id, '-', '')))
   {% endif %}
 {% endmacro %}
 
@@ -300,9 +300,9 @@
   {% elif step.name == 'staging_expiry' %}
     select 1 from {{ dbt_dqm.dqm_relation('dqm_app_change_staging') }} where staged_at <= timestamp_sub(current_timestamp(),interval 24 hour)
   {% elif step.name == 'stage_drops' %}
-    select 1 from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }}
+    select 1 from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }} dqm_runs
     where (status='abandoned' or (status='completed' and completed_at <= timestamp_sub(current_timestamp(),interval 24 hour)))
-      and strpos(stage_relation,'dqm_reconcile_stage_') > 0
+      and stage_relation = {{ dbt_dqm.expected_stage_sql('dqm_runs') }}
   {% elif step.name == 'run_pruning' %}
     select 1 from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }}
     where status!='started' and completed_at < timestamp_sub(current_timestamp(),interval {{ days }} day)

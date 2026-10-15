@@ -1,6 +1,7 @@
 from concurrent.futures import Future
 from unittest.mock import MagicMock
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
 from dbt_dqm_app.config import AppConfig
@@ -154,3 +155,9 @@ def test_oversized_cache_ui_keeps_pending_and_reports_committed_apply(tmp_path, 
     assert any("Applied batch confirmed-batch" in warning.value for warning in app.warning)
     assert workspace.pending()[0].new_value == "newer local edit"
     assert workspace.health_rows()["synced_at"] == "old"
+
+
+@pytest.fixture(autouse=True)
+def isolated_naming_for_ui_unit_tests(monkeypatch):
+    import dbt_dqm_app.streamlit_app as ui
+    monkeypatch.setattr(ui, 'resolve_config', lambda config: config)

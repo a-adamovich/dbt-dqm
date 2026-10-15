@@ -64,9 +64,9 @@ begin{% if target.type=='bigquery' %} transaction{% endif %};
     stage's run for a retry. Needs `dqm_stage_failed` declared by the calling script. #}
 {% macro cleanup_stages_sql(fail_on_error=false) %}
   {% if target.type=='bigquery' %}
-    for stage in (select stage_relation from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }}
+    for stage in (select run_id,stage_relation from {{ dbt_dqm.dqm_relation('dqm_reconciliation_runs') }}
       where status='abandoned' or (status='completed' and completed_at <= timestamp_sub(current_timestamp(),interval 24 hour))) do
-      if strpos(stage.stage_relation,'dqm_reconcile_stage_') > 0 then
+      if stage.stage_relation = {{ dbt_dqm.expected_stage_sql('stage') }} then
         begin
           {{ dbt_dqm.maintenance_stage_drop_sql('stage.stage_relation') }}
         exception when error then

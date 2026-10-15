@@ -10,6 +10,7 @@ import sys
 import tempfile
 from contextlib import closing
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from .browse import SEARCH_COLUMNS, Filters
@@ -31,6 +32,29 @@ ISSUE_COLUMNS = (
     "previous_close_reason", "previous_workflow_status_at_close", "previous_review_verdict",
     "previous_dqm_owner", "previous_ticket_url", "previous_notes",
 )
+
+
+LEADING_COLUMNS = ('test_name', 'dqm_owner', 'record_values_json', 'record_status',
+                   'workflow_status', 'review_verdict', 'test_status', 'first_seen_at',
+                   'last_seen_at', 'annotation_updated_at', 'call_to_action', 'ticket_url', 'notes')
+TIMESTAMP_COLUMNS = ('first_seen_at', 'last_seen_at', 'annotation_updated_at',
+                     'archived_at', 'previous_archived_at')
+
+
+def _timestamp_zone(value):
+    try:
+        parsed = datetime.fromisoformat(str(value))
+        offset = parsed.utcoffset()
+        return 'timezone unspecified' if offset is None else 'UTC' if offset == timedelta(0) else 'offset included'
+    except (ValueError, TypeError):
+        return 'timezone unspecified'
+
+
+def _title(key, zones):
+    if key not in TIMESTAMP_COLUMNS:
+        return key
+    labels = zones.get(key) or {'UTC'}
+    return key + ' (' + ' / '.join(sorted(labels)) + ')'
 
 
 def _private(path, mode):
@@ -154,7 +178,7 @@ def _sheet_name(test_name, test_id):
     return name[:22] + "_" + hashlib.sha256(test_id.encode()).hexdigest()[:8]
 
 
-def write_export(rows, directory, format):
+def write_export(rows, directory, format, granularity=None):
     if format not in ("csv", "xlsx"):
         raise ValueError("Export format must be csv or xlsx")
     directory = Path(directory)
@@ -164,6 +188,8 @@ def write_export(rows, directory, format):
     destination = directory / ("issues." + format)
     columns = set(ISSUE_COLUMNS)
     tests = {}
+    zones = {}
+    granularity = granularity or {}
     count = size = 0
     try:
         with closing(sqlite3.connect(spool)) as connection:
@@ -177,27 +203,32 @@ def write_export(rows, directory, format):
                 if count > MAX_EXPORT_ISSUES or size > MAX_EXPORT_BYTES:
                     raise AppError("The export exceeds 50,000 issues or 128 MiB of source data. "
                                    "Narrow the filters and prepare it again.")
-                record = _record(public)
+                record = _record(public) if format == 'xlsx' else {}
                 test_id = str(public.get("test_unique_id") or public.get("test_name") or "Unnamed test")
-                test = tests.setdefault(test_id, {"name": public.get("test_name") or "Unnamed test", "keys": set()})
-                test["keys"].update(record)
+                test = tests.setdefault(test_id, {"name": public.get("test_name") or "Unnamed test", "keys": {}})
+                for key in record:
+                    test['keys'].setdefault(key, None)
+                for key in TIMESTAMP_COLUMNS:
+                    if public.get(key) is not None and str(public[key]).strip():
+                        zones.setdefault(key, set()).add(_timestamp_zone(public[key]))
                 columns.update(public)
                 connection.execute("insert into rows values (?,?,?)", (count, test_id, payload))
             connection.commit()
             connection.execute("create index rows_by_test on rows(test_id,position)")
-            headers = [*ISSUE_COLUMNS, *sorted(columns - set(ISSUE_COLUMNS))]
+            headers = [*LEADING_COLUMNS, *[key for key in ISSUE_COLUMNS if key not in LEADING_COLUMNS],
+                       *sorted(columns - set(ISSUE_COLUMNS))]
             if format == "csv":
                 with destination.open("w", encoding="utf-8-sig", newline="") as output:
                     _private(destination, 0o600)
                     writer = csv.writer(output)
-                    writer.writerow(headers)
+                    writer.writerow([_title(key, zones) for key in headers])
                     for (payload,) in connection.execute("select payload from rows order by position"):
                         row = json.loads(payload)
                         writer.writerow([_csv_value(row.get(key)) for key in headers])
                         output.flush()
                         _check_file(destination)
             else:
-                _write_excel(connection, destination, headers, tests)
+                _write_excel(connection, destination, headers, tests, granularity, zones)
             _check_file(destination)
         return ExportResult(str(destination), count, format)
     except BaseException:
@@ -210,17 +241,16 @@ def write_export(rows, directory, format):
             close()
 
 
-def _write_excel(connection, destination, headers, tests):
+def _write_excel(connection, destination, headers, tests, granularity, zones):
     import xlsxwriter
 
-    headers = [key for key in headers if key != "record_values_json"]
     used = set()
     with tempfile.TemporaryDirectory(prefix="xlsx-", dir=destination.parent) as temporary, \
             xlsxwriter.Workbook(destination, {"constant_memory": True,
             "tmpdir": temporary,
             "strings_to_formulas": False, "strings_to_urls": False}) as workbook:
         header_style = workbook.add_format({"bold": True})
-        groups = sorted(tests.items()) or [("", {"name": "No issues", "keys": set()})]
+        groups = sorted(tests.items()) or [("", {"name": "No issues", "keys": {}})]
         for test_id, test in groups:
             name = _sheet_name(test["name"], test_id) if test_id else "No issues"
             counter = 0
@@ -229,8 +259,15 @@ def _write_excel(connection, destination, headers, tests):
                 name = _sheet_name(test["name"], test_id + str(counter))
             used.add(name.casefold())
             sheet = workbook.add_worksheet(name)
-            keys = sorted(test["keys"])
-            titles = headers + ["record." + key for key in keys]
+            keys = list(test['keys'])
+            grain = []
+            for configured in granularity.get(test_id, []):
+                found = next((key for key in keys if key.casefold() == str(configured).strip().casefold()), None)
+                if found is not None and found not in grain:
+                    grain.append(found)
+            keys = grain + [key for key in keys if key not in grain]
+            fields = [*headers[:2], *['record.' + key for key in keys], *headers[3:]]
+            titles = [_title(key, zones) if not key.startswith('record.') else key for key in fields]
             if len(titles) > 16_384:
                 raise AppError("This test has too many columns for Excel. Use CSV instead.")
             for column, title in enumerate(titles):
@@ -240,7 +277,7 @@ def _write_excel(connection, destination, headers, tests):
                 position += 1
                 row = json.loads(payload)
                 record = _record(row)
-                values = [row.get(key) for key in headers] + [record.get(key) for key in keys]
+                values = [row.get(key) for key in headers[:2]] + [record.get(key) for key in keys] + [row.get(key) for key in headers[3:]]
                 for column, value in enumerate(values):
                     _excel_text(sheet, position, column, _text(value))
             sheet.freeze_panes(1, 0)
@@ -259,6 +296,15 @@ def _excel_text(sheet, row, column, text, style=None):
 def prepare_export(config, path, filters, directory, format, population=None, expected=None):
     from .warehouse import iter_export_rows
 
+    artifact = (config.target_path or config.project_dir / 'target') / 'manifest.json'
+    if not config.relations and artifact.exists():
+        from .relations import resolve_config
+        config = resolve_config(config)
     rows = (snapshot_rows(path, filters, expected) if population is None else
             iter_export_rows(config, population, filters, expected))
-    return write_export(rows, directory, format)
+    from .warehouse import manifest_nodes
+    artifact = (config.target_path or config.project_dir / 'target') / 'manifest.json'
+    nodes = manifest_nodes(config) if artifact.exists() else {}
+    granularity = dict(config.test_granularity) or {key: (node.get('config', {}).get('meta', {}).get('dbt_dqm') or {}).get('granularity', [])
+                   for key, node in nodes.items() if node.get('resource_type') == 'test'}
+    return write_export(rows, directory, format, granularity)

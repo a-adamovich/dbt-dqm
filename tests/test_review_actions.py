@@ -101,7 +101,8 @@ def test_refresh_interactive_defaults_no_and_eof_cancels(monkeypatch, answer, ap
     monkeypatch.setattr('builtins.input', respond)
     config = SimpleNamespace(target='dev', project_id='project', dataset='dataset')
     assert confirm_refresh(config, SimpleNamespace(nodes={}),
-                           SimpleNamespace(request={}, settings={'refresh': {}})) is approved
+                           SimpleNamespace(request={}, settings={'refresh': {'dqm_install': {
+                               'database': 'p', 'schema': 's', 'identifier': 'dqm_install'}}})) is approved
 
 
 def test_bulk_does_not_reversion_an_identical_pending_value(tmp_path):

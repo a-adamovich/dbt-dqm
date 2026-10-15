@@ -42,6 +42,7 @@ from dbt_dqm_app.errors import SearchTooCostly, classify
 from dbt_dqm_app.exports import matches_filters, prepare_export
 from dbt_dqm_app.frames import configure_pandas
 from dbt_dqm_app.limits import MAX_CACHE_ISSUES, MAX_CACHE_MIB, CacheLimitExceeded, check_cache_size
+from dbt_dqm_app.relations import resolve_config
 from dbt_dqm_app.selection import Selection
 from dbt_dqm_app.store import EDITABLE_FIELDS, Workspace
 from dbt_dqm_app.warehouse import (
@@ -83,6 +84,7 @@ def run_app() -> None:
             os.environ.get("DBT_DQM_PROFILES_DIR"),
             os.environ.get("DBT_DQM_TARGET"),
         )
+        config = resolve_config(config)
     except Exception as error:  # noqa: BLE001 - configuration errors belong in the UI.
         failure = classify(error)
         st.error(failure.message)
@@ -91,8 +93,17 @@ def run_app() -> None:
                 st.code(failure.details, language=None)
         st.stop()
         return
+    identity = config.relations
+    previous = st.session_state.get('relation_namespace')
+    if previous is not None and previous != identity:
+        st.error('DQM relation namespace changed. Restart this review session before continuing. '
+                 'Existing pending edits are preserved in their original workspace.')
+        st.stop()
+    st.session_state.relation_namespace = identity
     workspace = Workspace(config.workspace_path)
-    st.caption(f"{config.project_id}.{config.dataset} · target {config.target}")
+    anchor = next((row for row in config.relations if row[0] == 'dqm_install'),
+                  ('dqm_install', config.project_id, config.dataset, 'dqm_install'))
+    st.caption(f"{anchor[1]}.{anchor[2]} · {anchor[3]} · target {config.target}")
     st.markdown(
         """
         <style>

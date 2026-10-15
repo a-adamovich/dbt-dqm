@@ -58,6 +58,9 @@ class AppConfig:
     # None preserves explicit flags for programmatically constructed configurations.
     dbt_cli_args: tuple[str, ...] | None = None
     working_dir: Path | None = None
+    vars_yaml: str = "{}"
+    relations: tuple[tuple[str, str | None, str, str], ...] = ()
+    test_granularity: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
     def __post_init__(self) -> None:
         validate_limits(self.max_cache_issues, self.max_cache_mib)
@@ -76,11 +79,16 @@ class AppConfig:
 
     @property
     def workspace_path(self) -> Path:
-        return workspace_path_for(self.project_dir, self.profile_name, self.target)
+        from .relations import namespace
+
+        return workspace_path_for(self.project_dir, self.profile_name, self.target,
+                                  namespace(self) if self.relations else None)
 
 
-def workspace_path_for(project_dir: Path, profile_name: str, target: str) -> Path:
+def workspace_path_for(project_dir: Path, profile_name: str, target: str, namespace: str | None = None) -> Path:
     identity = f"{project_dir.resolve()}|{profile_name}|{target}"
+    if namespace:
+        identity += "|" + namespace
     suffix = hashlib.sha256(identity.encode()).hexdigest()[:16]
     return user_data_path("dbt-dqm") / suffix / "workspace.sqlite"
 
@@ -135,8 +143,11 @@ def _selected_profile(profiles_dir: Path, profile_name: str, target: str | None,
 
 
 def resolve_workspace_path(project_dir: str | Path | None = None, target: str | None = None,
-                           profiles_dir: str | Path | None = None) -> Path:
+                           profiles_dir: str | Path | None = None, *, cli_vars=None) -> Path:
     project_dir = resolve_project_dir(project_dir)
+    if (project_dir / 'packages.yml').exists() or (project_dir / 'dependencies.yml').exists():
+        from .relations import resolve_config
+        return resolve_config(load_config(project_dir, profiles_dir, target, cli_vars=cli_vars)).workspace_path
     profile_name = _profile_name(_read_yaml(project_dir / "dbt_project.yml"))
     target = target if target is not None else os.environ.get("DBT_TARGET") or None
     if target is None:
@@ -154,6 +165,10 @@ def load_config(project_dir: str | Path | None = None, profiles_dir: str | Path 
                 target: str | None = None, *, cli_vars=None,
                 target_path: str | Path | None = None) -> AppConfig:
     working_dir = Path.cwd()
+    if cli_vars is None:
+        cli_vars = yaml.safe_load(os.environ.get('DBT_DQM_VARS', '{}')) or {}
+    if not isinstance(cli_vars, dict):
+        raise TypeError('--vars must be a YAML object')
     explicit = (project_dir, profiles_dir, target)
     project_dir = resolve_project_dir(project_dir)
     profiles_dir = resolve_profiles_dir(profiles_dir)
@@ -215,6 +230,7 @@ def load_config(project_dir: str | Path | None = None, profiles_dir: str | Path 
         target_path=artifact_dir,
         dbt_cli_args=tuple(cli_args),
         working_dir=working_dir,
+        vars_yaml=yaml.safe_dump(cli_vars),
         lock_timeout_seconds=lock_timeout_seconds,
         max_cache_issues=int(os.environ.get("DBT_DQM_MAX_CACHE_ISSUES", str(MAX_CACHE_ISSUES))),
         max_cache_mib=int(os.environ.get("DBT_DQM_MAX_CACHE_MIB", str(MAX_CACHE_MIB))),

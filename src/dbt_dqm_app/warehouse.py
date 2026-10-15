@@ -16,11 +16,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from . import browse
 from .adapters import LazyModule, require_adapter
 from .config import AppConfig
 from .errors import AppError, SearchTooCostly, SnapshotUnavailable, WarehouseBusy, classify
 from .limits import CacheLimitExceeded, check_cache_size, issue_json
+from .relations import lock_key
 from .store import EDITABLE_FIELDS, Patch
 
 psycopg2 = LazyModule("psycopg2", "postgres")
@@ -120,11 +123,14 @@ def validate_dbt(config: AppConfig) -> None:
     environment = os.environ.copy()
     if config.credentials_file is not None:
         environment["GOOGLE_APPLICATION_CREDENTIALS"] = str(config.credentials_file.resolve())
+    variables = yaml.safe_load(config.vars_yaml) or {}
+    if variables:
+        base += ["--vars", config.vars_yaml]
     version = ""
     try:
         version = _dbt_version(dbt_executable)
         for operation in ("debug", "parse"):
-            subprocess.run([dbt_executable, operation, *base, *(["--vars", "{dqm_enabled: true}"] if operation == "parse" else [])], check=True, capture_output=True,
+            subprocess.run([dbt_executable, operation, *base, *(["--vars", yaml.safe_dump({**variables, "dqm_enabled": True})] if operation == "parse" else [])], check=True, capture_output=True,
                            text=True, encoding="utf-8", errors="replace", env=environment,
                            cwd=config.working_dir)
     except subprocess.CalledProcessError as error:
@@ -189,26 +195,19 @@ def client_for(config: AppConfig) -> bigquery.Client:
 
 
 def _relation_parts(config: AppConfig, name: str) -> tuple[str | None, str, str]:
-    manifest_path = (config.target_path or (config.project_dir / "target")) / "manifest.json"
+    if config.relations:
+        found = next((row[1:] for row in config.relations if row[0] == name), None)
+        if found is None:
+            raise AppError(f'DQM relation is absent from the naming contract: {name}')
+        return found
+    manifest_path = (config.target_path or config.project_dir / 'target') / 'manifest.json'
+    if manifest_path.exists() and 'model.dbt_dqm.dqm_reconcile' in manifest_nodes(config):
+        from .relations import resolve_config
+        return _relation_parts(resolve_config(config), name)
     if manifest_path.exists():
-        nodes = manifest_nodes(config)
-        node = nodes.get(f"model.dbt_dqm.{name}")
-        if node is None:
-            node = next(
-                (
-                    candidate
-                    for candidate in nodes.values()
-                    if candidate.get("resource_type") == "model"
-                    and candidate.get("package_name") == "dbt_dqm"
-                    and (candidate.get("alias") or candidate.get("name")) == name
-                ),
-                None,
-            )
+        node = manifest_nodes(config).get('model.dbt_dqm.' + name)
         if node:
-            return node.get("database"), node["schema"], node.get("alias") or name
-        reconcile = nodes.get("model.dbt_dqm.dqm_reconcile")
-        if reconcile and name.startswith("dqm_"):
-            return reconcile.get("database"), reconcile["schema"], name
+            return node.get('database'), node['schema'], node.get('alias') or name
     return config.project_id, config.dataset, name
 
 
@@ -652,8 +651,7 @@ def _apply_bigquery_patches(config: AppConfig, patches: Iterable[Patch]) -> str:
     current_installation = installation_id(config)
     if any(patch.installation_id != current_installation for patch in patches):
         raise AppError("Stale DQM installation. Clear the old workspace after full refresh.")
-    database, schema, _ = _relation_parts(config, "dqm_issue_occurrences")
-    staging_id = f"{database}.{schema}.dqm_app_change_staging"
+    staging_id = ".".join(_relation_parts(config, "dqm_app_change_staging"))
     try:
         table = client.get_table(staging_id)
     except google_errors.NotFound as error:
@@ -794,7 +792,7 @@ def _apply_postgres_patches(config: AppConfig, patches: list[Patch]) -> str:
         _postgres_connection(config) as connection,
         connection.cursor(cursor_factory=pg_extras.RealDictCursor) as cursor,
     ):
-        cursor.execute("select pg_advisory_xact_lock(hashtext(%s))", ("dbt_dqm:" + _relation_parts(config, "dqm_install")[1],))
+        cursor.execute("select pg_advisory_xact_lock(hashtext(%s))", (lock_key(config),))
         cursor.execute(f"select installation_id from {_table(config, 'dqm_install')}")
         installation = cursor.fetchone()["installation_id"]
         if any(patch.installation_id != installation for patch in patches):

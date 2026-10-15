@@ -451,3 +451,126 @@ def test_capture_summary_is_valid_bigquery_script_without_empty_statements(proto
     parsed = sqlglot.parse(scripts[0], read="bigquery")
     assert parsed and all(statement is not None for statement in parsed)
     assert "inconclusive" in scripts[0] and "captured_issue_count" in scripts[0]
+
+
+def test_namespace_contract_covers_state_and_cleanup(protocol_project, monkeypatch):
+    project,_profiles=protocol_project
+    macro=project/'macros/a7_namespace.sql'
+    macro.write_text('''{% macro generate_alias_name(custom_alias_name=none,node=none) %}
+{{ ('alice_' if node.package_name=='dbt_dqm' else '') ~ (custom_alias_name|trim if custom_alias_name else node.name) }}
+{% endmacro %}''')
+    try:
+        names=render(protocol_project,monkeypatch,'relation_contract')
+        assert 'alice_dqm_issue_occurrences' in names and 'alice_dqm_install' in names
+        sql=render(protocol_project,monkeypatch,'cleanup_stages_sql')
+        assert 'alice_dqm_reconciliation_runs' in sql
+        assert 'alice_dqm_reconcile_stage_' in sql and 'stage.stage_relation =' in sql
+        assert 'strpos(' not in sql
+        sql=render(protocol_project,monkeypatch,'default__app_staging_safety_apply')
+        assert "table_name='alice_dqm_app_change_staging'" in sql
+        sql=render(protocol_project,monkeypatch,'maintenance_eligible_sql',"{'name':'stage_drops'},30,90")
+        assert 'dqm_runs.run_id' in sql and 'alice_dqm_reconciliation_runs' in sql
+    finally:
+        macro.unlink()
+
+
+def test_reported_alias_precedence_and_environment_targets(protocol_project,monkeypatch):
+    import importlib.util
+    source=ROOT/'integration_tests/acceptance/namespace_checks.py'
+    spec=importlib.util.spec_from_file_location('a7_namespace_cases',source)
+    cases=importlib.util.module_from_spec(spec);spec.loader.exec_module(cases)
+    project,profiles=protocol_project
+    macro=project/'macros/a7_alias_precedence.sql';macro.write_text(cases.USER_ALIAS_MACRO)
+    profile_path=profiles/'profiles.yml';original=profile_path.read_text()
+    profile=yaml.safe_load(original);settings=profile['dbt_dqm_demo']
+    output=settings['outputs']['dev']
+    for target in ['prod_dev','dw','qa','ple','prod']:
+        settings['outputs'][target]=dict(output)
+    try:
+        for target,variables,environment,expected in [
+            ('dev',{'table_alias_prefix':'chosen'},{'DBT_TABLE_ALIAS_PREFIX':'env','USERNAME':'user'},'chosen_'),
+            ('dev',{}, {'DBT_TABLE_ALIAS_PREFIX':'env','USERNAME':'user'},'env_'),
+            ('dev',{}, {'DBT_TABLE_ALIAS_PREFIX':'','USERNAME':'user'},'user_'),
+            ('dev',{}, {'DBT_TABLE_ALIAS_PREFIX':'','USERNAME':''},'dev_'),
+            ('prod_dev',{'table_alias_prefix':'chosen'}, {},'chosen_'),
+            ('dw',{'table_alias_prefix':'chosen'}, {},'chosen_'),
+            ('qa',{'table_alias_prefix':'chosen'}, {},'qa_'),
+            ('ple',{'table_alias_prefix':'chosen'}, {},''),
+            ('prod',{'table_alias_prefix':'chosen'}, {},'')]:
+            settings['target']=target;profile_path.write_text(yaml.safe_dump(profile))
+            for key in ('DBT_TABLE_ALIAS_PREFIX','USERNAME'):
+                monkeypatch.setenv(key,environment.get(key,''))
+            sql=render(protocol_project,monkeypatch,'internal_alias',"'dqm_issue_events'",variables)
+            assert sql.strip()==expected+'dqm_issue_events'
+    finally:
+        macro.unlink();profile_path.write_text(original)
+
+
+@pytest.mark.parametrize('adapter',['postgres','bigquery'])
+def test_naming_resolution_is_offline_and_never_opens_connections(protocol_project,monkeypatch,adapter):
+    import sys
+
+    from dbt.adapters.postgres.connections import PostgresConnectionManager
+
+    from dbt_dqm_app import relations
+    project,profiles=protocol_project
+    path=profiles/'profiles.yml';original=path.read_text()
+    settings=yaml.safe_load(original)
+    settings['dbt_dqm_demo']['outputs']['dev']=(
+        {'type':'postgres','host':'127.0.0.1','port':1,'user':'offline','password':'offline',
+         'dbname':'offline','schema':'offline','threads':1} if adapter=='postgres' else
+        {'type':'bigquery','method':'oauth','project':'offline','dataset':'offline','threads':1})
+    path.write_text(yaml.safe_dump(settings))
+    manager=PostgresConnectionManager if adapter=='postgres' else BigQueryConnectionManager
+    monkeypatch.setattr(manager,'close',manager.close)
+    attempts=[]
+    def reject(*args,**kwargs):
+        attempts.append(True)
+        raise AssertionError('Naming attempted warehouse access')
+    monkeypatch.setattr(manager,'open',classmethod(reject))
+    monkeypatch.delenv('GOOGLE_APPLICATION_CREDENTIALS',raising=False)
+    source=project/'offline-request.json';output=project/'offline-relations.json'
+    source.write_text(json.dumps({'project_dir':str(project),'profiles_dir':str(profiles),
+                      'target':'dev','target_path':str(project/'target'),'vars':'{}','adapter_type':adapter}))
+    monkeypatch.setattr(sys,'argv',['relations',str(source),str(output)])
+    try:
+        assert relations.main()==0
+        assert not attempts
+        result=json.loads(output.read_text())
+        assert result['relations']['dqm_install']['identifier']=='dqm_install'
+        assert result['granularity']
+    finally:
+        path.write_text(original)
+
+
+def test_concurrent_naming_preserves_consumer_artifacts(protocol_project, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.relations import resolve_config
+
+    original, profiles = protocol_project
+    project = tmp_path / "concurrent-naming"
+    shutil.copytree(original, project, ignore=shutil.ignore_patterns("dbt_packages", "target", "logs"))
+    (project / "dbt_packages").mkdir()
+    (project / "dbt_packages/dbt_dqm").symlink_to(ROOT, target_is_directory=True)
+    target = project / "target"
+    target.mkdir()
+    (target / "manifest.json").write_text('{"nodes": {}, "consumer_artifact": true}')
+    (target / "partial_parse.msgpack").write_bytes(b"consumer-owned parse cache")
+    before = {p.relative_to(target): p.read_bytes() for p in target.rglob("*") if p.is_file()}
+    config = load_config(project, profiles, "dev")
+    barrier = Barrier(3)
+
+    def resolve():
+        barrier.wait(timeout=30)
+        return resolve_config(config)
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = [pool.submit(resolve) for _ in range(3)]
+        resolved = [future.result(timeout=90) for future in futures]
+    assert all(value.relations == resolved[0].relations for value in resolved)
+    assert resolved[0].relations
+    assert {p.relative_to(target): p.read_bytes() for p in target.rglob("*") if p.is_file()} == before
+    assert not (project / "logs").exists()

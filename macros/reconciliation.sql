@@ -15,8 +15,16 @@
   {% if target.type == 'postgres' %}
     {{ return('pg_temp.dqm_stage') }}
   {% else %}
-    {{ return(dbt_dqm.dqm_relation('dqm_reconcile_stage_' ~ invocation_id | replace('-', ''))) }}
+    {% set base=dbt_dqm.dqm_relation('dqm_reconcile_stage') %}
+    {{ return(base.incorporate(path={'identifier':base.identifier ~ '_' ~ invocation_id|replace('-','')})) }}
   {% endif %}
+{% endmacro %}
+
+{% macro expected_stage_sql(run_alias='run') %}
+  {% set base=dbt_dqm.dqm_relation('dqm_reconcile_stage') %}
+  {% set pattern=base.incorporate(path={'identifier':base.identifier ~ '_DQM_RUN_TOKEN'})|string %}
+  {% set parts=pattern.split('DQM_RUN_TOKEN') %}
+  concat({{ dbt_dqm.sql_string(parts[0]) }},replace({{ run_alias }}.run_id,'-',''),{{ dbt_dqm.sql_string(parts[1]) }})
 {% endmacro %}
 
 {% macro tracked_ids_sql() %}
