@@ -1,0 +1,22 @@
+{
+  "issues": 50000,
+  "mean_payload_bytes": 408,
+  "warehouse_read_seconds": 5.54,
+  "total_seconds": 32.55,
+  "baseline_rss_mb": 186.6,
+  "peak_rss_mb": 437.2,
+  "exports": {
+    "csv": {
+      "rows": 50000,
+      "bytes": 42452001,
+      "seconds": 4.12
+    },
+    "xlsx": {
+      "rows": 50000,
+      "bytes": 21191664,
+      "seconds": 19.31
+    }
+  },
+  "scenario": "supported-cache-boundary-real-postgres-sync",
+  "synthetic_processed_history": true
+}

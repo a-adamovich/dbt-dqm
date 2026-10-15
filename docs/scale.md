@@ -437,3 +437,12 @@ in 4.07 s (42,451,937 bytes); Excel exported all 50,000 in 13.28 s (21,231,705 b
 are synthetic processed-history export measurements, not workflow speedup claims.
 [Raw result](scale-results/candidate-11afd08-cache-boundary.json). The disposable test schema
 was removed. This is the final a6 measurement; preliminary unreleased-candidate results are omitted.
+
+### Alpha7 export-enabled verification (2026-10-14)
+
+Production candidate `87152709a085a6ff683a8774aa2fa6b1e18041cc`, Python 3.14 installed wheel, real
+Postgres and 50,000 synthetic processed issues: peak RSS **437.2 MiB**, baseline 186.6 MiB.
+Warehouse read 5.54 s; complete probe 32.55 s. CSV exported all 50,000 rows (42,452,001 bytes,
+4.12 s); Excel exported all 50,000 rows (21,191,664 bytes, 19.31 s). Both formats stayed within
+the source/file limits. This is a capacity check, not a comparable speedup benchmark.
+[Raw measurements](scale-results/candidate-8715270-cache-boundary.json).
