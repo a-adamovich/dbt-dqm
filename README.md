@@ -10,7 +10,7 @@ runs.
 | | |
 | --- | --- |
 | Latest release | `0.2.0a7`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a7/), Git tag [`v0.2.0a7`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a7). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a7`. |
-| Upgrade | From `0.2.0a4` or `0.2.0a5`: update both packages and run normally; history is preserved. Earlier versions require `dbt-dqm run --full-refresh`, which resets tracking history while preserving consumer models and stored test failures. |
+| Upgrade | From a4–a6: update both packages. Unchanged resolved names retain history; corrected prefixed namespaces require a confirmed fresh start. See [Migrating existing tests](#migrating-existing-tests) before upgrading. Earlier versions require `dbt-dqm run --full-refresh`. |
 | dbt | dbt-core 1.11 and 1.12, with dbt-bigquery 1.11 or 1.12 and dbt-postgres 1.11 (there is no dbt-postgres 1.12; 1.11 supports dbt-core 1.12) |
 | Warehouses | BigQuery; Postgres 14 and 16 (needs the `pgcrypto` extension) |
 | Review app | Python 3.11–3.14, the same two warehouses |
