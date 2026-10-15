@@ -609,12 +609,16 @@ def test_app_write_fails_fast_while_reconciliation_holds_the_table(demo):
 
     from dbt_dqm_app.config import load_config
     from dbt_dqm_app.errors import WarehouseBusy, classify
+    from dbt_dqm_app.relations import resolve_config
     from dbt_dqm_app.store import Patch
     from dbt_dqm_app.warehouse import apply_patches
 
     demo.capture()
     demo.dbt("build", "--select", "package:dbt_dqm")
-    config = replace(load_config(demo.project, demo.profiles, "dev"), lock_timeout_seconds=1)
+    # Match app startup: resolve naming before timing warehouse lock refusal.
+    config = resolve_config(
+        replace(load_config(demo.project, demo.profiles, "dev"), lock_timeout_seconds=1)
+    )
     row = demo.occurrences()[0]
     patch = Patch(
         row["occurrence_id"],

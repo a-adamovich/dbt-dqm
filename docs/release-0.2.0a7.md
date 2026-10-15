@@ -24,3 +24,8 @@ verification without changing production files. The export-enabled 50,000-issue 
 passed at 448.9 MiB peak RSS; [raw result](scale-results/candidate-fe629f1-cache-boundary.json).
 Complete CI, warehouse, installed-wheel and public verification results are recorded on the
 linked release page.
+
+The Postgres contention acceptance setup resolves the namespace before starting its lock-refusal
+timer, matching app startup. The original four-second bound, unchanged-data checks and successful
+retry remain. This test-only correction changes no production files; final CI and release evidence
+identify its exact revision separately from the frozen production candidate above.
