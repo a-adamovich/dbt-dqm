@@ -9,7 +9,7 @@ runs.
 
 | | |
 | --- | --- |
-| Latest release | `0.2.0a7`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a7/), Git tag [`v0.2.0a7`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a7). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a7`. |
+| Latest release | `0.2.0a8`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a8/), Git tag [`v0.2.0a8`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a8). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a8`. |
 | Upgrade | From a4–a6: update both packages. Unchanged resolved names retain history; corrected prefixed namespaces require a confirmed fresh start. See [Migrating existing tests](#migrating-existing-tests) before upgrading. Earlier versions require `dbt-dqm run --full-refresh`. |
 | dbt | dbt-core 1.11 and 1.12, with dbt-bigquery 1.11 or 1.12 and dbt-postgres 1.11 (there is no dbt-postgres 1.12; 1.11 supports dbt-core 1.12) |
 | Warehouses | BigQuery; Postgres 14 and 16 (needs the `pgcrypto` extension) |
@@ -18,7 +18,7 @@ runs.
 The Python app pins dbt-core 1.12.5; its optional extras use dbt-bigquery 1.12.1 and dbt-postgres 1.11.x;
 the dbt package accepts the wider dbt range above. Python support is `>=3.11,<3.15`.
 The [release checklist](docs/release-checklist.md) lists what must pass before a release is tagged;
-the [0.2.0a7 evidence](docs/release-0.2.0a7.md) records this alpha's results.
+the [0.2.0a8 evidence](docs/release-0.2.0a8.md) records this alpha's results.
 Package contracts (relations, migrations, grants, recovery, retention, maintenance) are in
 [warehouse interfaces](docs/warehouse-interfaces.md).
 
@@ -29,10 +29,10 @@ Install the alpha through Git by adding it to your consumer project's `packages.
 ```yaml
 packages:
   - git: "https://github.com/a-adamovich/dbt-dqm.git"
-    revision: v0.2.0a7
+    revision: v0.2.0a8
 ```
 
-The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a7`, so
+The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a8`, so
 install this alpha through the Git revision above. Hub registration is planned for 0.2.0.
 
 The 0.2 app expects the matching 0.2 package; don't mix it with 0.1.
@@ -50,7 +50,7 @@ In a Python 3.14 environment (recommended; 3.11–3.14 supported), install the a
 ```bash
 python3.14 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a7'
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a8'
 ```
 
 Warehouse adapters are optional. In a checkout, install
@@ -58,9 +58,9 @@ only the adapter you need with `uv sync --extra bigquery` or `uv sync --extra po
 use `uv sync --all-extras` for both. Select the extra in your installed environment:
 
 ```bash
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a7'          # BigQuery
-python -m pip install 'dbt-dqm[postgres]==0.2.0a7'          # Postgres
-python -m pip install 'dbt-dqm[bigquery,postgres]==0.2.0a7' # Both
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a8'          # BigQuery
+python -m pip install 'dbt-dqm[postgres]==0.2.0a8'          # Postgres
+python -m pip install 'dbt-dqm[bigquery,postgres]==0.2.0a8' # Both
 ```
 
 A plain install includes the app and dbt-core but no warehouse adapters.
@@ -72,7 +72,7 @@ On Windows PowerShell, create and activate the environment with:
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a7'
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a8'
 ```
 
 Activation is optional: `uv run --extra bigquery dbt-dqm app` uses the checkout environment.
