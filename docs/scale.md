@@ -446,3 +446,13 @@ Warehouse read 6.02 s; complete probe 24.93 s. CSV exported all 50,000 rows (42,
 3.33 s); Excel exported all 50,000 rows (21,192,038 bytes, 12.58 s). Both formats stayed within
 the source/file limits. This is a capacity check, not a comparable speedup benchmark.
 [Raw measurements](scale-results/candidate-fe629f1-cache-boundary.json).
+
+### Alpha8 export-enabled verification (2026-10-15)
+
+Production candidate `55efa28b53ac6bf268076d17f5b76c47d17388d1`, Python 3.14.6 installed wheel,
+Postgres 16.11: 50,000 synthetic processed issues, 408-byte mean payload, baseline RSS 177.2 MiB
+and peak RSS **462.0 MiB**. Warehouse reads took 5.54 s; complete sync/render/export probe 27.93 s.
+CSV exported all 50,000 rows in 4.54 s (42,452,001 bytes); Excel exported all 50,000 rows in
+14.35 s (21,193,041 bytes). The disposable schemas were removed. This is a capacity gate with
+other acceptance checks running, not a comparable workflow benchmark or speedup claim.
+[Raw measurements](scale-results/candidate-55efa28-cache-boundary.json).

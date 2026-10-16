@@ -17,3 +17,8 @@ verification gate is not required; Python/UI tests and native-platform CI still 
 
 Final verification and publication evidence:
 [v0.2.0a8 release page](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a8).
+
+Production candidate: `55efa28b53ac6bf268076d17f5b76c47d17388d1`. This later documentation
+records results without changing production files. The installed-wheel 50,000-issue memory
+check passed at 462.0 MiB peak RSS, with complete CSV/Excel exports;
+[raw measurements](scale-results/candidate-55efa28-cache-boundary.json).
