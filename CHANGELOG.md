@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0a8 - 2026-10-15
+
+- Extend `run --summary` with OPENED (NEW), RECURRING and ARCHIVED changes applied by the
+  reconciliation, grouped by saved owner alongside NEW (status) and ACTIVE workload counts.
+  Include archived-only owners and refuse stale-generation reports; record results in metrics.
+- Sort quiet-mode test results by status priority and test name, retaining failure details.
+- Report collections reaching their native limit in the completion line, name affected tests,
+  and record counts and identities in metrics using the existing collection query.
+
 ## 0.2.0a7 - 2026-10-15
 
 - Apply consumer alias naming to package state, upload and reconciliation staging tables, and use

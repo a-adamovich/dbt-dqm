@@ -67,6 +67,12 @@ def validate_test(node, default_limit: int) -> list[str]:
     return problems
 
 
+def test_result_key(result):
+    status = str(result.status).lower()
+    priority = {"error": 0, "fail": 1, "warn": 2, "skipped": 3, "pass": 4}
+    return (priority.get(status, 5), status, result.node.name.casefold(), result.node.unique_id)
+
+
 class Workflow:
     def __init__(self, request, factory=None):
         from dbt.cli.main import dbtRunner
@@ -99,6 +105,7 @@ class Workflow:
         self.outcomes = {}
         self.selected_count = 0
         self.cancelled = False
+        self.reconciliation_id = None
         self.owner_summary = None
         self.summary_status = "not_requested"
         self.factory = factory or dbtRunner
@@ -190,6 +197,16 @@ class Workflow:
             raise RuntimeError(f"DQM phase failed: {' '.join(arguments[:2])}. {self.failure_reason(result)}")
         return result.result
 
+    def report_test_results(self, results):
+        for result in sorted(results, key=test_result_key):
+            status = str(result.status)
+            self.outcomes[status] = self.outcomes.get(status, 0) + 1
+            if not self.request.get('verbose'):
+                count = result.failures if result.failures is not None else 'unavailable'
+                reason = ('; ' + ' '.join((result.message or '').split())
+                          if status in ('error', 'skipped', 'fail') else '')
+                print(f'DQM test {status}: {result.node.name}: {count} rows{reason}', flush=True)
+
     def execute(self) -> int:
         started = time.monotonic()
         config = None
@@ -221,6 +238,7 @@ class Workflow:
                            {0: "success", 1: "test_failures", 2: "error"}[code],
                            "exit_code": code, "maintenance_steps": self.maintenance,
                            "test_outcomes": self.outcomes, "collection": self.collection_summary,
+                           "reconciliation_id": self.reconciliation_id,
                            "owner_summary": self.owner_summary, "summary_status": self.summary_status}
                 try:
                     config.target_path.mkdir(parents=True, exist_ok=True)
@@ -232,12 +250,23 @@ class Workflow:
             capture_notice = (f"{captured} captured issues" if captured is not None else
                               "capture count unavailable" if self.selected_count else "0 captured issues")
             outcomes = ", ".join(f"{count} {status}" for status, count in sorted(self.outcomes.items()))
+            limited = self.collection_summary.get("limit_reached_count")
+            limit_notice = (f"{limited} collections reached the limit" if limited is not None else
+                            "collection limit count unavailable" if self.selected_count else
+                            "0 collections reached the limit")
             if self.cancelled:
                 print("DQM cancelled: no tracking relations reset; no tests run.", flush=True)
             else:
                 print(f"DQM {'complete' if code != 2 else 'stopped'}: {self.selected_count} tests"
-                      f"{f' ({outcomes})' if outcomes else ''}, {capture_notice}, {elapsed:.1f}s.",
+                      f"{f' ({outcomes})' if outcomes else ''}, {capture_notice}, {limit_notice}, "
+                      f"{elapsed:.1f}s.",
                       flush=True)
+                if limited:
+                    tests = sorted(self.collection_summary.get("limit_reached_tests", []),
+                                   key=lambda row: (row["test_name"].casefold(), row["test_unique_id"]))
+                    names = ", ".join(row["test_name"] for row in tests)
+                    print(f"WARNING: Collections reached the limit: {names}. Total failures are "
+                          "unknown; missing issues are not archived from limited evidence.", flush=True)
             if self.owner_summary is not None:
                 from .summary import print_summary
                 print_summary(self.owner_summary)
@@ -263,6 +292,9 @@ class Workflow:
         nodes = [node for key, node in manifest.nodes.items()
                  if key in ids and "dbt_dqm" in (node.config.meta or {})]
         self.selected_count = len(nodes)
+        if not nodes:
+            self.collection_summary = {"captured_issue_count": 0, "limit_reached_count": 0,
+                                       "limit_reached_tests": []}
         errors = []
         for other in manifest.nodes.values():
             if other.resource_type != "test" or other.unique_id in ids or "dbt_dqm" not in (other.config.meta or {}):
@@ -324,14 +356,7 @@ class Workflow:
                 raise RuntimeError(f"DQM test execution failed: {self.failure_reason(tests)}")
             results = [r for r in tests.result.results if r.node.unique_id in ids
                        and "dbt_dqm" in (r.node.config.meta or {})]
-            for result in results:
-                status = str(result.status)
-                self.outcomes[status] = self.outcomes.get(status, 0) + 1
-                if not self.request.get('verbose'):
-                    count = result.failures if result.failures is not None else 'unavailable'
-                    reason = ('; ' + ' '.join((result.message or '').split())
-                              if status in ('error', 'skipped', 'fail') else '')
-                    print(f'DQM test {status}: {result.node.name}: {count} rows{reason}', flush=True)
+            self.report_test_results(results)
             # Write directly from this result object while its invocation context is current.
             # This also avoids stale native artifacts when DBT_WRITE_JSON is disabled.
             target = config.target_path / "dqm_run_results.json"
@@ -364,6 +389,7 @@ class Workflow:
         model_artifact.parent.mkdir(parents=True, exist_ok=True)
         model_results.write(str(model_artifact))
         reconciliation = json.loads(model_artifact.read_text(encoding="utf-8"))["metadata"]["invocation_id"]
+        self.reconciliation_id = reconciliation
         if self.request.get('summary'):
             from .summary import owner_summary
             started = time.monotonic()

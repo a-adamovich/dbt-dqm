@@ -333,15 +333,44 @@ credentialed benchmarks establish a benefit; SQL-rendering tests do not establis
 > full capture they can contain personal data. Set event retention, or choose
 > `changed_columns` (column names plus hashes, which are not anonymization) or `none`.
 
-### Owner workload summary
+### Owner changes and workload summary
 
-`dbt-dqm run --summary` keeps the normal completion line and adds current **NEW** and **ACTIVE**
-counts grouped by the saved owner shown in the app, including reviewer edits. ACTIVE is every
-unarchived issue in this installation; NEW is the subset with workflow status NEW. ACTIVE includes
-NEW and can include issues retained when a collection hits its limit. These are current workload
-counts, not changes introduced by this invocation. Total appears first, owners sort by NEW descending,
-and Unassigned is always included. Comma-separated owners remain one label. Without `--summary`,
-no extra reporting query runs. A reporting failure warns without changing the workflow exit code.
+`dbt-dqm run --summary` keeps the normal completion line and adds changes and current workload
+grouped by the saved owner shown in the app, including reviewer edits:
+
+```text
+Owner                 OPENED (NEW)  RECURRING  ARCHIVED  NEW (status)  ACTIVE
+Total                           0        268         4           274     274
+owner.a@example.com             0        252         4           258     258
+owner.b@example.com             0         16         0            16      16
+Unassigned                      0          0         0             0       0
+```
+
+- **OPENED (NEW):** newly opened occurrences (`APPEARED` lifecycle events).
+- **RECURRING:** occurrences reopened after being archived as Passed (`REAPPEARED`).
+- **ARCHIVED:** occurrences closed as Passed (`DISAPPEARED`); structural closures are excluded.
+- **NEW (status):** active occurrences whose workflow status is NEW, ready for review.
+- **ACTIVE:** all unarchived occurrences in this installation, including those with status NEW
+  and those retained when a collection reaches its limit.
+
+Change counts cover evidence applied by this reconciliation, including previously pending captures;
+they do not use a calendar-day boundary. Each occurrence counts once per change category. An
+occurrence opened and closed within the reconciliation can appear in both columns. Unchanged
+failures produce no change counts. Total appears first, owners sort by NEW (status) descending
+then owner name, and Unassigned is always included, even when zero. Comma-separated owners remain
+one label. Owners with only archived changes are included. Saved owner assignments are read in
+one consistent warehouse snapshot; later reassignment does not alter the report recorded in metrics.
+Without `--summary`, no extra reporting query runs. If the installation or reconciliation generation
+has changed before reporting, the summary warns instead of mixing runs. Reporting failures do not
+change the workflow exit code.
+
+Quiet-mode test results sort by ERROR, FAIL, WARN, SKIPPED, PASS, then by test name. Full dbt
+output remains available with `--verbose`. The completion line always reports the number of
+collections that reached their native limit. When positive, one notice names the affected tests:
+total failures are unknown, and limited evidence does not archive missing issues. The count uses
+the recorded collection status, including an exact-limit result; it is not inferred from the number
+of deduplicated issues. If collection reporting fails, the count is shown as unavailable rather
+than zero. These details and the owner summary are saved in `dqm_workflow_metrics.json`.
 
 Package state tables, views, incremental models and staging objects follow the project's
 `generate_alias_name`; custom schemas follow the package's resolved model schema. Set the same

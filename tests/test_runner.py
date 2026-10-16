@@ -224,7 +224,7 @@ def test_declined_empty_selection_refresh_never_initializes_or_executes_tests(tm
     from dbt_dqm_app import refresh
     config=SimpleNamespace(project_dir=tmp_path,target_path=tmp_path/'target',adapter_type='postgres')
     monkeypatch.setattr(runner,'load_config',lambda *args,**kwargs:config)
-    workflow=runner.Workflow({'full_refresh':True},factory=workflow_factory([]))
+    workflow=runner.Workflow({'full_refresh':True,'summary':True},factory=workflow_factory([]))
     workflow.settings={'default_limit':100,'raw_retention':30,'event_retention':90,
                        'event_payloads':'full','refresh':{}}
     commands=[]
@@ -241,6 +241,7 @@ def test_declined_empty_selection_refresh_never_initializes_or_executes_tests(tm
     assert metrics['completion_status']=='cancelled' and metrics['exit_code']==0
     output=capsys.readouterr().out
     assert 'DQM cancelled' in output and 'DQM complete' not in output
+    assert 'DQM owner summary:' not in output
 
 
 def test_quiet_test_events_are_deduplicated_but_unrelated_warnings_remain(capsys):
@@ -262,3 +263,131 @@ def test_summary_and_naming_vars_are_explicit_cli_options():
     assert parser().parse_args(['run','--summary']).summary
     for command in [['app'],['workspace','info'],['workspace','purge']]:
         assert parser().parse_args([*command,'--vars','{table_alias_prefix: alice}']).vars=='{table_alias_prefix: alice}'
+
+
+def test_results_sort_by_severity_name_and_full_id_without_losing_details(capsys):
+    def result(status, name, identifier, count=3, message=""):
+        return SimpleNamespace(status=status, node=SimpleNamespace(name=name, unique_id=identifier),
+                               failures=count, message=message)
+
+    results = [result("pass", "A", "pass"), result("warn", "z", "warn-z"),
+               result("skipped", "A", "skip", None, "upstream failed"),
+               result("warn", "alpha", "warn-b"), result("warn", "Alpha", "warn-a"),
+               result("fail", "A", "fail", 9, "  Got 9\nresults  "),
+               result("error", "Z", "error", None, "missing relation"),
+               result("unknown-z", "A", "unknown-z"), result("unknown-a", "Z", "unknown-a")]
+    ordered = sorted(results, key=runner.test_result_key)
+    assert [row.node.unique_id for row in ordered] == [
+        "error", "fail", "warn-a", "warn-b", "warn-z", "skip", "pass", "unknown-a", "unknown-z",
+    ]
+    workflow = runner.Workflow({}, factory=workflow_factory([]))
+    workflow.report_test_results(results)
+    output = capsys.readouterr().out.splitlines()
+    assert output[0] == "DQM test error: Z: unavailable rows; missing relation"
+    assert output[1] == "DQM test fail: A: 9 rows; Got 9 results"
+    assert output[5].endswith("upstream failed")
+    assert len(output) == len(results) and workflow.outcomes["warn"] == 3
+    workflow.request["verbose"] = True
+    workflow.report_test_results(results)
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("collection,selected,expected", [
+    ({"captured_issue_count": 5, "limit_reached_count": 0, "limit_reached_tests": []}, 2,
+     "0 collections reached the limit"),
+    ({"captured_issue_count": 2, "limit_reached_count": 2, "limit_reached_tests": [
+        {"test_name": "z", "test_unique_id": "test.z"},
+        {"test_name": "a", "test_unique_id": "test.a"},
+    ]}, 2, "2 collections reached the limit"),
+    ({}, 2, "collection limit count unavailable"),
+    ({}, 0, "0 collections reached the limit"),
+    ({"captured_issue_count": 2}, 2, "collection limit count unavailable"),
+])
+def test_completion_reports_recorded_limits_and_keeps_metrics(
+    collection, selected, expected, tmp_path, monkeypatch, capsys
+):
+    import json
+
+    config = SimpleNamespace(project_dir=tmp_path, target_path=tmp_path / "target")
+    monkeypatch.setattr(runner, "load_config", lambda *args, **kwargs: config)
+    workflow = runner.Workflow({}, factory=workflow_factory([]))
+
+    def execute(config):
+        workflow.selected_count = selected
+        workflow.collection_summary = collection
+        return 0
+
+    monkeypatch.setattr(workflow, "_execute", execute)
+    assert workflow.execute() == 0
+    output = capsys.readouterr().out
+    assert expected in output
+    if collection.get("limit_reached_count"):
+        assert output.count("WARNING: Collections reached the limit:") == 1
+        assert "a, z. Total failures are unknown" in output
+        assert "missing issues are not archived" in output
+    else:
+        assert "WARNING: Collections reached the limit:" not in output
+    metrics = json.loads((config.target_path / "dqm_workflow_metrics.json").read_text())
+    assert metrics["collection"] == collection
+    assert metrics["completion_status"] == "success"
+
+
+@pytest.mark.parametrize("requested,code", [(False, 0), (True, 0), (True, 1), (True, 2)])
+def test_summary_is_optional_and_reporting_failure_preserves_outcomes(
+    requested, code, tmp_path, monkeypatch, capsys
+):
+    import json
+
+    from dbt_dqm_app import refresh, summary
+
+    config = SimpleNamespace(project_dir=tmp_path, target_path=tmp_path / "target",
+                             adapter_type="postgres")
+    config.target_path.mkdir()
+    monkeypatch.setattr(runner, "load_config", lambda *args, **kwargs: config)
+    monkeypatch.setattr(refresh, "restore_view_grants", lambda *args: None)
+    test_node = node(limit=100)
+    test_node.unique_id = "test.sample"
+    test_node.name = "sample"
+    test_node.original_file_path = "tests/sample.sql"
+    test_node.fqn = ["project", "sample"]
+    test_node.resource_type = "test"
+    result = SimpleNamespace(node=test_node, status={0: "warn", 1: "fail", 2: "error"}[code],
+                             failures=3, message="useful test detail", execution_time=0.1)
+
+    def write(path):
+        Path(path).write_text(json.dumps({"metadata": {"invocation_id": "reconciliation"}}))
+
+    native = SimpleNamespace(results=[result], write=write)
+    workflow = runner.Workflow({"summary": requested}, factory=lambda **kwargs: SimpleNamespace(
+        invoke=lambda *args, **kwargs: SimpleNamespace(result=native, exception=None, success=code == 0)))
+    workflow.settings = {"default_limit": 100, "raw_retention": 30, "event_retention": 30,
+                         "event_payloads": "none"}
+    commands = []
+
+    def checked(arguments, **kwargs):
+        commands.append(arguments)
+        if arguments[0] == "parse":
+            return SimpleNamespace(nodes={test_node.unique_id: test_node})
+        if arguments[0] == "ls":
+            return [json.dumps({"unique_id": test_node.unique_id})]
+        if arguments[0] == "run":
+            return native
+        return None
+
+    monkeypatch.setattr(workflow, "checked", checked)
+    reported = []
+
+    def unavailable(config, reconciliation):
+        reported.append(reconciliation)
+        raise RuntimeError("generation has changed")
+
+    monkeypatch.setattr(summary, "owner_summary", unavailable)
+    assert workflow.execute() == code
+    assert reported == (["reconciliation"] if requested else [])
+    output = capsys.readouterr()
+    assert ("Owner summary unavailable: generation has changed" in output.err) is requested
+    assert "DQM owner summary:" not in output.out
+    metrics = json.loads((config.target_path / "dqm_workflow_metrics.json").read_text())
+    assert metrics["summary_status"] == ("unavailable" if requested else "not_requested")
+    assert metrics["exit_code"] == code
+    assert metrics["reconciliation_id"] == "reconciliation"

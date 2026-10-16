@@ -23,7 +23,8 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--exclude", nargs="+")
     run.add_argument("--vars", default="{}")
     run.add_argument("--threads", type=int)
-    run.add_argument("--summary", action="store_true", help="Show current NEW/ACTIVE counts by owner")
+    run.add_argument("--summary", action="store_true",
+                     help="Show OPENED (NEW), RECURRING, ARCHIVED, NEW (status) and ACTIVE by owner")
     run.add_argument("--verbose", action="store_true", help="Show full dbt console output and timings")
     run.add_argument("--defer", action=argparse.BooleanOptionalAction, default=None,
                      help="Resolve upstream refs using state (default: DBT_DEFER)")
