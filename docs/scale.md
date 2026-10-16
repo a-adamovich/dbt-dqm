@@ -456,3 +456,13 @@ CSV exported all 50,000 rows in 4.54 s (42,452,001 bytes); Excel exported all 50
 14.35 s (21,193,041 bytes). The disposable schemas were removed. This is a capacity gate with
 other acceptance checks running, not a comparable workflow benchmark or speedup claim.
 [Raw measurements](scale-results/candidate-55efa28-cache-boundary.json).
+
+### Stable 0.2.0 export-enabled verification (2026-10-15)
+
+Production candidate `955e6dc7d06b20d93eeefc50dd1495ed6e5c90b4`, Python 3.14 installed
+wheel on Linux with Postgres 16: 50,000 synthetic processed issues, 408-byte mean payload,
+206.7 MiB baseline RSS and 593.4 MiB peak RSS. Warehouse reads took 7.36 s and the complete
+probe 34.07 s. CSV exported all 50,000 rows in 3.99 s (42,452,001 bytes); Excel exported all
+50,000 rows in 19.47 s (21,193,772 bytes). The disposable schema was removed. This is a
+capacity check on a different host from the prior alpha figures, not a comparable speed or
+memory regression measurement. [Raw measurements](scale-results/candidate-955e6dc-cache-boundary.json).
