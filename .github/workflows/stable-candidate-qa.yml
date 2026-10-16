@@ -8,6 +8,92 @@ permissions:
   contents: read
 
 jobs:
+  upgrade-from-a8:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: dbtdqm
+          POSTGRES_DB: dbt_dqm_qa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v0.2.0a8
+          path: a8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 955e6dc7d06b20d93eeefc50dd1495ed6e5c90b4
+          path: candidate
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.14"
+      - name: Install a8 and the exact stable candidate
+        run: |
+          uv venv /tmp/dqm-upgrade-a8 --python 3.14
+          uv pip install --python /tmp/dqm-upgrade-a8/bin/python 'dbt-dqm[postgres]==0.2.0a8'
+          cd candidate
+          uv build --no-create-gitignore
+          uv venv /tmp/dqm-upgrade-stable --python 3.14
+          uv pip install --python /tmp/dqm-upgrade-stable/bin/python "$(pwd)/dist/dbt_dqm-0.2.0-py3-none-any.whl[postgres]"
+          uv pip check --python /tmp/dqm-upgrade-a8/bin/python
+          uv pip check --python /tmp/dqm-upgrade-stable/bin/python
+      - name: Configure isolated Postgres profile
+        run: |
+          psql -h localhost -U postgres -d dbt_dqm_qa -c 'create extension if not exists pgcrypto;'
+          mkdir -p /tmp/dqm-upgrade-profiles
+          cat > /tmp/dqm-upgrade-profiles/profiles.yml <<'PROFILES'
+          dbt_dqm_demo_postgres:
+            target: release
+            outputs:
+              release:
+                type: postgres
+                host: localhost
+                port: 5432
+                user: postgres
+                pass: dbtdqm
+                dbname: dbt_dqm_qa
+                schema: dqm_upgrade
+                threads: 4
+          PROFILES
+        env:
+          PGPASSWORD: dbtdqm
+      - name: Create populated a8 installation
+        working-directory: a8/integration_tests/demo_postgres
+        env:
+          PATH: /tmp/dqm-upgrade-a8/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          DBT_PROFILES_DIR: /tmp/dqm-upgrade-profiles
+        run: |
+          dbt deps
+          dbt seed
+          dbt run --select demo_records --vars '{demo_scenario: initial}'
+          dbt-dqm run --full-refresh --yes --vars '{demo_scenario: initial}'
+          dbt test --select assert_scenario_outcomes --vars '{demo_scenario: initial, dqm_enabled: true}'
+      - name: Verify stable rerun preserves a8 issue identities without refresh
+        working-directory: candidate/integration_tests/demo_postgres
+        env:
+          PATH: /tmp/dqm-upgrade-stable/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          DBT_PROFILES_DIR: /tmp/dqm-upgrade-profiles
+          PGPASSWORD: dbtdqm
+        run: |
+          set -euo pipefail
+          before="$(psql -h localhost -U postgres -d dbt_dqm_qa -Atc "select count(*), md5(string_agg(occurrence_id::text, ',' order by occurrence_id::text)) from dqm_upgrade.dqm_issue_occurrences")"
+          test "${before%%|*}" -gt 0
+          dbt deps
+          dbt-dqm run --vars '{demo_scenario: initial}'
+          dbt test --select assert_scenario_outcomes --vars '{demo_scenario: initial, dqm_enabled: true}'
+          after="$(psql -h localhost -U postgres -d dbt_dqm_qa -Atc "select count(*), md5(string_agg(occurrence_id::text, ',' order by occurrence_id::text)) from dqm_upgrade.dqm_issue_occurrences")"
+          test "$before" = "$after"
+          echo "a8-to-stable ordinary rerun preserved $before"
+
   memory-and-exports:
     runs-on: ubuntu-latest
     services:
