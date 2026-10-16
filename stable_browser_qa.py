@@ -62,9 +62,11 @@ def run_browser(project, browse, port):
                 page.goto(f"http://127.0.0.1:{port}/", wait_until="domcontentloaded")
                 expect(page.get_by_role("button", name="Sync", exact=True)).to_be_visible(timeout=90_000)
                 page.get_by_role("button", name="Sync", exact=True).click()
+                expect(page.get_by_role("button", name="Sync", exact=True)).to_be_disabled(timeout=30_000)
+                expect(page.get_by_role("button", name="Sync", exact=True)).to_be_enabled(timeout=180_000)
                 wait_for_rows(page)
                 page.get_by_role("tab", name="Health").click()
-                expect(page.get_by_text("Test health")).to_be_visible()
+                expect(page.get_by_text("Test health")).to_be_visible(timeout=30_000)
                 expect(page.get_by_text("Maintenance", exact=True)).to_be_visible()
                 page.get_by_role("tab", name="Issues").click()
 
