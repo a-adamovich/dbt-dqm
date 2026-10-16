@@ -1718,3 +1718,9 @@ def test_dedicated_full_refresh_aliases_grants_and_external_dependency_failure(d
 def test_two_developer_namespaces_are_isolated(demo):
     from namespace_checks import check_namespace_isolation
     check_namespace_isolation(demo, dedicated)
+
+
+def test_run_changes_sorted_results_and_collection_limits(demo):
+    from reporting_checks import check_run_reporting
+
+    check_run_reporting(demo, dedicated)

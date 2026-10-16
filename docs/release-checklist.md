@@ -103,6 +103,17 @@ Use existing credentials and disposable fixtures, without a shared reset or IAM/
 Preserve the protected reviewer pause, trusted publisher and provenance checks. Final evidence is
 recorded on the release page linked from [the a7 preparation record](release-0.2.0a7.md).
 
+### 0.2.0a8 reporting and publication criteria
+
+The maintainer authorized publishing `v0.2.0a8` with per-owner reconciliation changes, sorted
+quiet-mode results and collection-limit reporting. All current gates apply to one frozen
+candidate. Use existing credentials and disposable fixtures; do not reset shared QA data, create
+keys or change IAM. Run restricted runner/reviewer verification serially after the complete
+BigQuery suite. Runtime code changed, so repeat the export-enabled 50,000-issue memory gate.
+The app and dependencies are unchanged, so the conditional browser gate is not required.
+Preserve the protected approval, trusted publisher and provenance checks. Exact verification and
+publication evidence is linked from [the a8 record](release-0.2.0a8.md).
+
 ## 0.2.0a3 results
 
 Production candidate: `4c362266edd5457dc0bedae6348f455e064fcc90`. The test-only Windows fixture

@@ -412,7 +412,17 @@ def test_dbt_dqm_schema_places_every_package_model(protocol_project):
     assert set(selected.values()) == {"dqm_governance"}
 
 
-def test_capture_summary_is_valid_bigquery_script_without_empty_statements(protocol_project, monkeypatch):
+@pytest.mark.parametrize("rows", [
+    [],
+    [("limited", "limit_reached", None, 1, "test.limited")],
+    [("duplicate_name", "limit_reached", None, 1, "test.a"),
+     ("duplicate_name", "limit_reached", None, 2, "test.b"),
+     ("complete", "success", None, 5, "test.complete"),
+     ("broken", "collection_error", "stored failures changed", 0, "test.broken")],
+])
+def test_capture_summary_is_valid_bigquery_script_without_empty_statements(
+    protocol_project, monkeypatch, rows
+):
     """A real dbt render catches delimiters that PostgreSQL accepts but BigQuery rejects."""
     import agate
     import sqlglot
@@ -421,10 +431,14 @@ def test_capture_summary_is_valid_bigquery_script_without_empty_statements(proto
 
     project, profiles = protocol_project
     scripts = []
+    messages = []
 
     def execute(self, sql, **kwargs):
         scripts.append(sql)
-        return BigQueryAdapterResponse(_message="OK"), agate.Table([], [])
+        return BigQueryAdapterResponse(_message="OK"), agate.Table(
+            rows, ["test_name", "collection_status", "collection_message", "captured_issue_count",
+                   "test_unique_id"],
+            column_types=[agate.Text(), agate.Text(), agate.Text(), agate.Number(), agate.Text()])
 
     def closed(cls, connection):
         connection.state = ConnectionState.CLOSED
@@ -442,7 +456,7 @@ def test_capture_summary_is_valid_bigquery_script_without_empty_statements(proto
     payload = {"invocation_id": "test-invocation", "results": [{
         "unique_id": "test.dbt_dqm_demo.demo_customer_email_invalid", "status": "error",
         "failures": None, "execution_time": 0, "message": "test execution failed"}]}
-    result = dbtRunner().invoke([
+    result = dbtRunner(callbacks=[lambda event: messages.append(event.info.msg)]).invoke([
         "--no-populate-cache", "run-operation", "dbt_dqm.collect_results", "--args",
         json.dumps({"payload": payload}), "--project-dir", str(project),
         "--profiles-dir", str(profiles), "--vars", "{dqm_enabled: true}"])
@@ -451,6 +465,14 @@ def test_capture_summary_is_valid_bigquery_script_without_empty_statements(proto
     parsed = sqlglot.parse(scripts[0], read="bigquery")
     assert parsed and all(statement is not None for statement in parsed)
     assert "inconclusive" in scripts[0] and "captured_issue_count" in scripts[0]
+    summary = json.loads(next(message.removeprefix("DQM_COLLECTION_SUMMARY=")
+                             for message in messages if message.startswith("DQM_COLLECTION_SUMMARY=")))
+    limited = [row for row in rows if row[1] == "limit_reached"]
+    assert summary == {
+        "captured_issue_count": sum(row[3] for row in rows),
+        "limit_reached_count": len(limited),
+        "limit_reached_tests": [{"test_name": row[0], "test_unique_id": row[4]} for row in limited],
+    }
 
 
 def test_namespace_contract_covers_state_and_cleanup(protocol_project, monkeypatch):

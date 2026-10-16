@@ -1313,3 +1313,9 @@ select 'record-1' as id, [1,2] as attributes, struct('nested' as label) as detai
 def test_two_developer_namespaces_are_isolated(demo):
     from namespace_checks import check_namespace_isolation
     check_namespace_isolation(demo, dedicated)
+
+
+def test_run_changes_sorted_results_and_collection_limits(demo):
+    from reporting_checks import check_run_reporting
+
+    check_run_reporting(demo, dedicated)

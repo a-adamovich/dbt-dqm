@@ -9,7 +9,7 @@ runs.
 
 | | |
 | --- | --- |
-| Latest release | `0.2.0a7`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a7/), Git tag [`v0.2.0a7`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a7). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a7`. |
+| Latest release | `0.2.0a8`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a8/), Git tag [`v0.2.0a8`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a8). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a8`. |
 | Upgrade | From a4–a6: update both packages. Unchanged resolved names retain history; corrected prefixed namespaces require a confirmed fresh start. See [Migrating existing tests](#migrating-existing-tests) before upgrading. Earlier versions require `dbt-dqm run --full-refresh`. |
 | dbt | dbt-core 1.11 and 1.12, with dbt-bigquery 1.11 or 1.12 and dbt-postgres 1.11 (there is no dbt-postgres 1.12; 1.11 supports dbt-core 1.12) |
 | Warehouses | BigQuery; Postgres 14 and 16 (needs the `pgcrypto` extension) |
@@ -18,7 +18,7 @@ runs.
 The Python app pins dbt-core 1.12.5; its optional extras use dbt-bigquery 1.12.1 and dbt-postgres 1.11.x;
 the dbt package accepts the wider dbt range above. Python support is `>=3.11,<3.15`.
 The [release checklist](docs/release-checklist.md) lists what must pass before a release is tagged;
-the [0.2.0a7 evidence](docs/release-0.2.0a7.md) records this alpha's results.
+the [0.2.0a8 evidence](docs/release-0.2.0a8.md) records this alpha's results.
 Package contracts (relations, migrations, grants, recovery, retention, maintenance) are in
 [warehouse interfaces](docs/warehouse-interfaces.md).
 
@@ -29,10 +29,10 @@ Install the alpha through Git by adding it to your consumer project's `packages.
 ```yaml
 packages:
   - git: "https://github.com/a-adamovich/dbt-dqm.git"
-    revision: v0.2.0a7
+    revision: v0.2.0a8
 ```
 
-The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a7`, so
+The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a8`, so
 install this alpha through the Git revision above. Hub registration is planned for 0.2.0.
 
 The 0.2 app expects the matching 0.2 package; don't mix it with 0.1.
@@ -50,7 +50,7 @@ In a Python 3.14 environment (recommended; 3.11–3.14 supported), install the a
 ```bash
 python3.14 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a7'
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a8'
 ```
 
 Warehouse adapters are optional. In a checkout, install
@@ -58,9 +58,9 @@ only the adapter you need with `uv sync --extra bigquery` or `uv sync --extra po
 use `uv sync --all-extras` for both. Select the extra in your installed environment:
 
 ```bash
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a7'          # BigQuery
-python -m pip install 'dbt-dqm[postgres]==0.2.0a7'          # Postgres
-python -m pip install 'dbt-dqm[bigquery,postgres]==0.2.0a7' # Both
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a8'          # BigQuery
+python -m pip install 'dbt-dqm[postgres]==0.2.0a8'          # Postgres
+python -m pip install 'dbt-dqm[bigquery,postgres]==0.2.0a8' # Both
 ```
 
 A plain install includes the app and dbt-core but no warehouse adapters.
@@ -72,7 +72,7 @@ On Windows PowerShell, create and activate the environment with:
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a7'
+python -m pip install 'dbt-dqm[bigquery]==0.2.0a8'
 ```
 
 Activation is optional: `uv run --extra bigquery dbt-dqm app` uses the checkout environment.
@@ -333,15 +333,44 @@ credentialed benchmarks establish a benefit; SQL-rendering tests do not establis
 > full capture they can contain personal data. Set event retention, or choose
 > `changed_columns` (column names plus hashes, which are not anonymization) or `none`.
 
-### Owner workload summary
+### Owner changes and workload summary
 
-`dbt-dqm run --summary` keeps the normal completion line and adds current **NEW** and **ACTIVE**
-counts grouped by the saved owner shown in the app, including reviewer edits. ACTIVE is every
-unarchived issue in this installation; NEW is the subset with workflow status NEW. ACTIVE includes
-NEW and can include issues retained when a collection hits its limit. These are current workload
-counts, not changes introduced by this invocation. Total appears first, owners sort by NEW descending,
-and Unassigned is always included. Comma-separated owners remain one label. Without `--summary`,
-no extra reporting query runs. A reporting failure warns without changing the workflow exit code.
+`dbt-dqm run --summary` keeps the normal completion line and adds changes and current workload
+grouped by the saved owner shown in the app, including reviewer edits:
+
+```text
+Owner                 OPENED (NEW)  RECURRING  ARCHIVED  NEW (status)  ACTIVE
+Total                           0        268         4           274     274
+owner.a@example.com             0        252         4           258     258
+owner.b@example.com             0         16         0            16      16
+Unassigned                      0          0         0             0       0
+```
+
+- **OPENED (NEW):** newly opened occurrences (`APPEARED` lifecycle events).
+- **RECURRING:** occurrences reopened after being archived as Passed (`REAPPEARED`).
+- **ARCHIVED:** occurrences closed as Passed (`DISAPPEARED`); structural closures are excluded.
+- **NEW (status):** active occurrences whose workflow status is NEW, ready for review.
+- **ACTIVE:** all unarchived occurrences in this installation, including those with status NEW
+  and those retained when a collection reaches its limit.
+
+Change counts cover evidence applied by this reconciliation, including previously pending captures;
+they do not use a calendar-day boundary. Each occurrence counts once per change category. An
+occurrence opened and closed within the reconciliation can appear in both columns. Unchanged
+failures produce no change counts. Total appears first, owners sort by NEW (status) descending
+then owner name, and Unassigned is always included, even when zero. Comma-separated owners remain
+one label. Owners with only archived changes are included. Saved owner assignments are read in
+one consistent warehouse snapshot; later reassignment does not alter the report recorded in metrics.
+Without `--summary`, no extra reporting query runs. If the installation or reconciliation generation
+has changed before reporting, the summary warns instead of mixing runs. Reporting failures do not
+change the workflow exit code.
+
+Quiet-mode test results sort by ERROR, FAIL, WARN, SKIPPED, PASS, then by test name. Full dbt
+output remains available with `--verbose`. The completion line always reports the number of
+collections that reached their native limit. When positive, one notice names the affected tests:
+total failures are unknown, and limited evidence does not archive missing issues. The count uses
+the recorded collection status, including an exact-limit result; it is not inferred from the number
+of deduplicated issues. If collection reporting fails, the count is shown as unavailable rather
+than zero. These details and the owner summary are saved in `dqm_workflow_metrics.json`.
 
 Package state tables, views, incremental models and staging objects follow the project's
 `generate_alias_name`; custom schemas follow the package's resolved model schema. Set the same

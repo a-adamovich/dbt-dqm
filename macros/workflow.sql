@@ -51,21 +51,26 @@
     {% do results.append({'node':node,'status':row.status,'failures':row.failures,'execution_time':row.execution_time,'message':row.message}) %}
   {% endfor %}
   {% set summary_sql %}
-    select test_name,collection_status,collection_message,captured_issue_count
+    select test_name,collection_status,collection_message,captured_issue_count,test_unique_id
     from {{ dbt_dqm.dqm_relation('dqm_test_executions') }}
     where invocation_id={{ dbt_dqm.sql_string(payload.invocation_id) }}
   {% endset %}
   {% set failures=run_query(dbt_dqm.capture_test_results(results,payload.invocation_id,initialized=true) ~ summary_sql) %}
   {% set errors=[] %}
+  {% set limited=[] %}
   {% set counts=namespace(captured=0) %}
   {% for row in failures.rows %}
-    {% set counts.captured=counts.captured+(row[3] or 0) %}
+    {% set counts.captured=counts.captured+((row[3] or 0)|int) %}
+    {% if row[1] == 'limit_reached' %}
+      {% do limited.append({'test_name':row[0],'test_unique_id':row[4]}) %}
+    {% endif %}
     {% if row[1] not in ['success','not_applicable','limit_reached'] %}
       {% do errors.append({'test_name':row[0],'status':row[1],'message':row[2]}) %}
     {% endif %}
   {% endfor %}
   {% do log('DQM_COLLECTION_ERRORS=' ~ tojson(errors),info=false) %}
-  {% do log('DQM_COLLECTION_SUMMARY=' ~ tojson({'captured_issue_count':counts.captured}),info=false) %}
+  {% do log('DQM_COLLECTION_SUMMARY=' ~ tojson({'captured_issue_count':counts.captured,
+    'limit_reached_count':limited|length,'limit_reached_tests':limited}),info=false) %}
 {% endmacro %}
 
 {% macro maintain_dqm() %}
