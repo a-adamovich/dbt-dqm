@@ -6,7 +6,7 @@
 - Package the matching Python app and dbt project as version `0.2.0`; prepare Hub registration
   after the public GitHub release. Install the dbt package from the Git tag until Hub is live.
 - Upgrading both components from 0.2.0a7 or 0.2.0a8 requires no warehouse migration or full
-  refresh. Keep the [migration guidance](README.md#migrating-existing-tests) for older alphas.
+  refresh. Keep the [migration guidance](docs/operations.md#upgrading) for older alphas.
 
 ## 0.2.0a8 - 2026-10-15
 
