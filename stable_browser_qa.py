@@ -43,7 +43,7 @@ def app_process(project, port, browse):
 
 
 def wait_for_rows(page):
-    expect(page.get_by_text(re.compile(r"Showing \d+ of \d+ issue record"))).to_be_visible(timeout=180_000)
+    expect(page.get_by_text(re.compile(r"showing \d+ of \d+ (?:matching )?issue record", re.I))).to_be_visible(timeout=180_000)
 
 
 def run_browser(project, browse, port):
