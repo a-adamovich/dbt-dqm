@@ -114,6 +114,16 @@ The app and dependencies are unchanged, so the conditional browser gate is not r
 Preserve the protected approval, trusted publisher and provenance checks. Exact verification and
 publication evidence is linked from [the a8 record](release-0.2.0a8.md).
 
+### 0.2.0 stable release and dbt Hub criteria
+
+Promote the a8 behavior without changing warehouse relations or lifecycle rules. All current
+gates apply to one frozen candidate. Repeat installed-wheel browser QA and the export-enabled
+50,000-issue memory check for this first stable release. Use existing credentials and disposable
+fixtures; run restricted BigQuery permissions verification serially after the complete suite.
+Preserve the protected reviewer pause, trusted publisher and provenance checks. Verify public
+PyPI artifacts and Git-tag installation before submitting the package to dbt Hub through Hubcap.
+Record release and Hub verification in [the 0.2.0 record](release-0.2.0.md).
+
 ## 0.2.0a3 results
 
 Production candidate: `4c362266edd5457dc0bedae6348f455e064fcc90`. The test-only Windows fixture

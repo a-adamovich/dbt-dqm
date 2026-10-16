@@ -9,8 +9,8 @@ runs.
 
 | | |
 | --- | --- |
-| Latest release | `0.2.0a8`, **alpha**: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0a8/), Git tag [`v0.2.0a8`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0a8). Interfaces may change between alpha releases. dbt only accepts SemVer, so the package's `dbt_project.yml` spells the same version `0.2.0-a8`. |
-| Upgrade | From a4–a6: update both packages. Unchanged resolved names retain history; corrected prefixed namespaces require a confirmed fresh start. See [Migrating existing tests](#migrating-existing-tests) before upgrading. Earlier versions require `dbt-dqm run --full-refresh`. |
+| Latest release | `0.2.0`, stable: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0/), Git tag [`v0.2.0`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0). The dbt package version is also `0.2.0`. |
+| Upgrade | From a7 or a8: update both packages, run `dbt deps`, and restart the app; no warehouse migration or full refresh. From a4–a6: unchanged resolved names retain history, while corrected prefixed namespaces require a confirmed fresh start. See [Migrating existing tests](#migrating-existing-tests). Earlier versions require `dbt-dqm run --full-refresh`. |
 | dbt | dbt-core 1.11 and 1.12, with dbt-bigquery 1.11 or 1.12 and dbt-postgres 1.11 (there is no dbt-postgres 1.12; 1.11 supports dbt-core 1.12) |
 | Warehouses | BigQuery; Postgres 14 and 16 (needs the `pgcrypto` extension) |
 | Review app | Python 3.11–3.14, the same two warehouses |
@@ -18,22 +18,23 @@ runs.
 The Python app pins dbt-core 1.12.5; its optional extras use dbt-bigquery 1.12.1 and dbt-postgres 1.11.x;
 the dbt package accepts the wider dbt range above. Python support is `>=3.11,<3.15`.
 The [release checklist](docs/release-checklist.md) lists what must pass before a release is tagged;
-the [0.2.0a8 evidence](docs/release-0.2.0a8.md) records this alpha's results.
+the [0.2.0 release record](docs/release-0.2.0.md) records stable verification.
 Package contracts (relations, migrations, grants, recovery, retention, maintenance) are in
 [warehouse interfaces](docs/warehouse-interfaces.md).
 
 ## Install the dbt package
 
-Install the alpha through Git by adding it to your consumer project's `packages.yml`:
+Install the dbt package through Git by adding it to your consumer project's `packages.yml`:
 
 ```yaml
 packages:
   - git: "https://github.com/a-adamovich/dbt-dqm.git"
-    revision: v0.2.0a8
+    revision: v0.2.0
 ```
 
-The alpha is not listed on dbt Hub: Hub's SemVer tag parser does not accept `v0.2.0a8`, so
-install this alpha through the Git revision above. Hub registration is planned for 0.2.0.
+Hub registration follows the public `0.2.0` release. Once the listing is live and verified,
+the same dbt package can be installed with `package: a-adamovich/dbt_dqm` and `version: 0.2.0`.
+Until then, use the Git revision above.
 
 The 0.2 app expects the matching 0.2 package; don't mix it with 0.1.
 
@@ -50,7 +51,7 @@ In a Python 3.14 environment (recommended; 3.11–3.14 supported), install the a
 ```bash
 python3.14 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a8'
+python -m pip install 'dbt-dqm[bigquery]==0.2.0'
 ```
 
 Warehouse adapters are optional. In a checkout, install
@@ -58,9 +59,9 @@ only the adapter you need with `uv sync --extra bigquery` or `uv sync --extra po
 use `uv sync --all-extras` for both. Select the extra in your installed environment:
 
 ```bash
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a8'          # BigQuery
-python -m pip install 'dbt-dqm[postgres]==0.2.0a8'          # Postgres
-python -m pip install 'dbt-dqm[bigquery,postgres]==0.2.0a8' # Both
+python -m pip install 'dbt-dqm[bigquery]==0.2.0'          # BigQuery
+python -m pip install 'dbt-dqm[postgres]==0.2.0'          # Postgres
+python -m pip install 'dbt-dqm[bigquery,postgres]==0.2.0' # Both
 ```
 
 A plain install includes the app and dbt-core but no warehouse adapters.
@@ -72,7 +73,7 @@ On Windows PowerShell, create and activate the environment with:
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install 'dbt-dqm[bigquery]==0.2.0a8'
+python -m pip install 'dbt-dqm[bigquery]==0.2.0'
 ```
 
 Activation is optional: `uv run --extra bigquery dbt-dqm app` uses the checkout environment.
@@ -121,10 +122,10 @@ executable and its version. Technical details include failed commands, exit code
 streams. If tracking relations are missing, run `dbt-dqm run` first.
 This package command works at the normal multithreaded setting; its setup models are ordered.
 
-Custom `generate_schema_name` and `generate_alias_name` macros are supported for package models.
-The app and SQL helpers use the parsed model relations. Macro-created internal tracking tables,
-such as `dqm_issue_occurrences`, keep their fixed identifiers in the reconciliation model's schema.
-Changing naming macros does not migrate or delete existing warehouse data.
+Custom `generate_schema_name` and `generate_alias_name` macros are supported for package models
+and internal tracking tables. The app and SQL helpers use the same resolved relations. Changing
+naming macros does not migrate or delete existing warehouse data; pass matching naming variables
+to `run`, `app`, and `workspace` so they select the same installation.
 
 ## BigQuery authentication through WIF
 
@@ -165,8 +166,10 @@ local service-account credentials; no new keys are created or downloaded. Option
 ## Migrating existing tests
 
 DQM is disabled by default and runs as a separate workflow. Install the matching warehouse extra,
-update the Git package revision above, and run `dbt deps`. For a4–a6 installations whose resolved relation names are unchanged, run `dbt-dqm run` without a
-full refresh; history and annotations are preserved. **If your alias macro prefixes package models,
+update the dbt package revision above, and run `dbt deps`. From a7 or a8, restart the app and run
+normally with no full refresh. For a4–a6 installations whose resolved relation names are unchanged,
+run `dbt-dqm run` without a full refresh; history and annotations are preserved.
+**If your alias macro prefixes package models,
 a7 now applies it to state tables too.** An ordinary run refuses to silently initialize the new
 namespace while legacy shared tables exist. Apply or preserve pending edits in the old app before
 upgrading both the Python app and dbt Git package, stop old app processes, then run

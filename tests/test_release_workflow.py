@@ -240,7 +240,10 @@ def test_only_pre_release_tags_create_a_github_pre_release(tmp_path):
     assert "dbt-dqm[bigquery]==0.2.0a1" in notes and "Git revision v0.2.0a1" in notes
     assert "spells the version 0.2.0-a1" in notes
     stable = _create_release(tmp_path, "v0.2.0")
-    assert "--prerelease" not in stable and "--notes" not in stable and "--title" not in stable
+    assert "--prerelease" not in stable and "--title" not in stable
+    assert stable[stable.index("--notes-file") + 1] == "docs/release-notes-0.2.0.md"
+    later_stable = _create_release(tmp_path, "v0.2.1")
+    assert "--generate-notes" in later_stable and "--prerelease" not in later_stable
 
 
 def test_alpha_version_is_accepted_by_python_and_dbt():
