@@ -1,0 +1,62 @@
+name: Stable candidate QA
+
+on:
+  push:
+    branches: [codex/stable-qa]
+
+permissions:
+  contents: read
+
+jobs:
+  memory-and-exports:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: dbtdqm
+          POSTGRES_DB: dbt_dqm_qa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: qa
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 955e6dc7d06b20d93eeefc50dd1495ed6e5c90b4
+          path: candidate
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.14"
+      - name: Build and install exact candidate wheel
+        working-directory: candidate
+        run: |
+          uv build --no-create-gitignore
+          uv venv /tmp/dbt-dqm-stable-wheel --python 3.14
+          uv pip install --python /tmp/dbt-dqm-stable-wheel/bin/python "$(pwd)/dist/dbt_dqm-0.2.0-py3-none-any.whl[postgres]" psutil
+          uv pip check --python /tmp/dbt-dqm-stable-wheel/bin/python
+          /tmp/dbt-dqm-stable-wheel/bin/python -c 'import dbt_dqm_app; assert dbt_dqm_app.__version__ == "0.2.0"; assert "site-packages" in str(dbt_dqm_app.__file__)'
+      - name: Enable pgcrypto
+        run: psql -h localhost -U postgres -d dbt_dqm_qa -c "create extension if not exists pgcrypto;"
+        env:
+          PGPASSWORD: dbtdqm
+      - name: Exercise 50,000 saved issues and both exports
+        working-directory: candidate
+        run: |
+          /tmp/dbt-dqm-stable-wheel/bin/python integration_tests/scale/cache_boundary.py --output stable-memory.json
+          /tmp/dbt-dqm-stable-wheel/bin/python -c 'import json; d=json.load(open("stable-memory.json")); assert d["issues"] == 50000; assert all(d["exports"][kind]["rows"] == 50000 for kind in ("csv", "xlsx")); print(d)'
+        env:
+          PATH: /tmp/dbt-dqm-stable-wheel/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          DBT_DQM_TEST_DSN: postgresql://postgres:dbtdqm@localhost:5432/dbt_dqm_qa
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: stable-candidate-memory
+          path: candidate/stable-memory.json
+          if-no-files-found: warn
