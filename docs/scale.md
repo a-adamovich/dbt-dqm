@@ -466,3 +466,13 @@ probe 34.07 s. CSV exported all 50,000 rows in 3.99 s (42,452,001 bytes); Excel 
 50,000 rows in 19.47 s (21,193,772 bytes). The disposable schema was removed. This is a
 capacity check on a different host from the prior alpha figures, not a comparable speed or
 memory regression measurement. [Raw measurements](scale-results/candidate-955e6dc-cache-boundary.json).
+
+### 0.2.1 candidate verification (2026-10-19)
+
+The installed wheel from production candidate `7ce7e96` synced 50,000 synthetic saved issues
+with 408-byte mean payloads at **585.3 MiB peak RSS** (198.8 MiB baseline). Warehouse reads took
+7.74 seconds; the complete probe, including exports, took 35.13 seconds. Both CSV and Excel
+contained all 50,000 rows. This is a single measurement with the same scope and limitations as
+the earlier cache-boundary probes, not a whole-server memory guarantee.
+[Raw result](scale-results/candidate-7ce7e96-cache-boundary.json) and
+[candidate QA run](https://github.com/a-adamovich/dbt-dqm/actions/runs/39323083904).
