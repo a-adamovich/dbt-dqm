@@ -1350,7 +1350,7 @@ where not {{ var('probe_pass', false) }}
                        '@dataset.INFORMATION_SCHEMA.COLUMNS` where starts_with(table_name,\'dqm_\')')
     assert columns and all(row['collation_name'] in (None, '', 'NULL') for row in columns)
     assert demo.client.get_dataset(f'{PROJECT}.{demo.dataset}').to_api_repr()['defaultCollation'] == 'und:ci'
-    assert demo.sql("select count(*) n from @dataset.dqm_issue_events` where event_type='OPENED'")[0]['n'] == 1
+    assert demo.sql("select count(*) n from @dataset.dqm_issue_events` where event_type='APPEARED'")[0]['n'] == 1
 
     config = load_config(demo.path, demo.profiles, 'dev')
     epoch = demo.sql('select installation_id from @dataset.dqm_install`')[0]['installation_id']
