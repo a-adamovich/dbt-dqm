@@ -706,7 +706,7 @@ def _bigquery_annotation_apply_sql(config: AppConfig) -> str:
     return f"""
       declare audited_count int64;
       begin transaction;
-      create temp table attempt as
+      create temp table attempt default collate '' as
         select * from {staging} where upload_id=@upload_id and batch_id=@batch_id;
       assert (select count(*) from attempt)=@patch_count
         as 'Missing or duplicate annotation upload; retry with a new upload.';
@@ -729,7 +729,7 @@ def _bigquery_annotation_apply_sql(config: AppConfig) -> str:
         assert audited_count=@patch_count and not exists (
           select 1 from attempt s left join {audit} a
             on a.batch_id=@batch_id and a.occurrence_id=s.occurrence_id and a.field_name=s.field_name
-          where a.occurrence_id is null or a.new_value is distinct from s.new_value
+          where a.occurrence_id is null or collate(a.new_value, '') is distinct from collate(s.new_value, '')
             or a.base_annotation_version is distinct from s.base_annotation_version
         ) as 'Incomplete prior annotation batch; synchronize before retrying.';
       else

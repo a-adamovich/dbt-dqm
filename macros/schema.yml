@@ -1,6 +1,15 @@
 version: 2
 
 macros:
+  - name: uncollated_string
+    description: >
+      Renders a string expression without inherited BigQuery collation, preserving its value,
+      case and NULLs. Other adapters pass the expression through.
+    arguments:
+      - name: expression
+        type: string
+        description: SQL expression whose result is a string.
+
   - name: sql_string
     description: >
       Converts a Jinja value into a safe SQL string expression, dispatched per adapter since

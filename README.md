@@ -17,14 +17,14 @@ for DQM, captures their results, and updates the issue history.
 
 Start with an existing dbt project, a configured profile, and a supported warehouse adapter.
 dbt-dqm has **two installations**: the dbt package supplies warehouse models and macros; the
-Python package supplies the `dbt-dqm` command and local review app. Use matching `0.2.0` versions.
+Python package supplies the `dbt-dqm` command and local review app. Use matching `0.2.1` versions.
 
 1. Add the dbt package to your project's `packages.yml`, then install it:
 
    ```yaml
    packages:
      - git: "https://github.com/a-adamovich/dbt-dqm.git"
-       revision: v0.2.0
+       revision: v0.2.1
    ```
 
    ```bash
@@ -38,8 +38,8 @@ Python package supplies the `dbt-dqm` command and local review app. Use matching
    use:
 
    ```bash
-   python -m pip install 'dbt-dqm[bigquery]==0.2.0'
-   # or: python -m pip install 'dbt-dqm[postgres]==0.2.0'
+   python -m pip install 'dbt-dqm[bigquery]==0.2.1'
+   # or: python -m pip install 'dbt-dqm[postgres]==0.2.1'
    ```
 
    The Python command supports Python 3.11–3.14; the dbt package supports dbt Core
@@ -108,7 +108,7 @@ for its controls and limits.
   maintenance, resets, upgrades, and troubleshooting.
 - [Try the demo projects](docs/operations.md#demo-projects) or inspect the
   [warehouse contract](docs/warehouse-interfaces.md) and [scale measurements](docs/scale.md).
-- [Stable 0.2.0 release notes](docs/release-notes-0.2.0.md) and
-  [verification record](docs/release-0.2.0.md).
+- [Stable 0.2.1 release notes](docs/release-notes-0.2.1.md) and
+  [verification record](docs/release-0.2.1.md).
 
 dbt-dqm is Apache-2.0 open source. See the [roadmap](docs/roadmap.md) and [license](LICENSE.md).

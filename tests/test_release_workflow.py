@@ -243,7 +243,9 @@ def test_only_pre_release_tags_create_a_github_pre_release(tmp_path):
     assert "--prerelease" not in stable and "--title" not in stable
     assert stable[stable.index("--notes-file") + 1] == "docs/release-notes-0.2.0.md"
     later_stable = _create_release(tmp_path, "v0.2.1")
-    assert "--generate-notes" in later_stable and "--prerelease" not in later_stable
+    assert "--prerelease" not in later_stable
+    assert later_stable[later_stable.index("--notes-file") + 1] == "docs/release-notes-0.2.1.md"
+    assert "--generate-notes" in _create_release(tmp_path, "v0.2.2")
 
 
 def test_alpha_version_is_accepted_by_python_and_dbt():

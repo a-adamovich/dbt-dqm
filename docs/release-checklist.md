@@ -174,6 +174,17 @@ Production candidate: `708b6c27460be0669b55d68c7096c43e41f8c5ae` for 0.2.0a2. Fu
 This table was added by a later documentation-only commit; the warehouse suites ran on `69703f7`,
 not on that commit. The `613e089` results it replaces are in this file's git history.
 
+## 0.2.1 collation patch criteria
+
+The maintainer authorized the BigQuery collation fix and publication of `v0.2.1`. Run all current
+gates on one frozen production candidate, including the new `und:ci` dataset regressions and the
+serial restricted runner/reviewer gate. Use existing credential files and disposable fixtures;
+the collation recovery test resets only its disposable installation. Existing production/QA
+history is not reset, and no key or IAM changes are part of this release. The candidate QA workflow
+checks the installed wheel in a browser and at the 50,000-issue memory/export boundary. Preserve
+the protected `pypi` reviewer gate, trusted publishing and provenance verification. Record actual
+results in [the 0.2.1 verification record](release-0.2.1.md).
+
 ## Operating limits that stay true after release
 
 - Captures that share stored-failure tables must be serialized; equal row counts don't prove

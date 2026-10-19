@@ -3,7 +3,7 @@
 {{
   config(enabled=var('dqm_enabled',false),
     schema=var('dbt_dqm_schema', none),
-    materialized='incremental',
+    materialized='dqm_app_table' if target.type == 'bigquery' else 'incremental',
     incremental_strategy=dbt_dqm.incremental_upsert_strategy(),
     unique_key=['batch_id', 'occurrence_id', 'field_name'],
     full_refresh=false,

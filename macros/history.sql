@@ -9,7 +9,7 @@ select cur.*, prev.occurrence_id is not null as has_previous_occurrence,
 from {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} cur
 left join {{ dbt_dqm.dqm_relation('dqm_issue_occurrences') }} prev
   on cur.test_unique_id=prev.test_unique_id and cur.unique_id=prev.unique_id
-  and cur.identity_scheme_signature is not distinct from prev.identity_scheme_signature
+  and {{ dbt_dqm.uncollated_string('cur.identity_scheme_signature') }} is not distinct from {{ dbt_dqm.uncollated_string('prev.identity_scheme_signature') }}
   and cur.occurrence_number=prev.occurrence_number+1
 where {% if active_only %}cur.record_status='Active'{% else %}true{% endif %}
 {% endmacro %}

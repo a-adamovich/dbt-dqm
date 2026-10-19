@@ -7,7 +7,7 @@
     to_base64({{ value }})
   {% elif target.type == 'bigquery' and column.dtype|upper == 'GEOGRAPHY' %}
     st_astext({{ value }})
-  {% else %}cast({{ value }} as {{ dbt.type_string() }}){% endif %} end
+  {% else %}{{ dbt_dqm.uncollated_string('cast(' ~ value ~ ' as ' ~ dbt.type_string() ~ ')') }}{% endif %} end
 {% endmacro %}
 
 {# Scope the ordering wrapper to enabled DQM tests; ordinary tests keep dbt's SQL. #}
