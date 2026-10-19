@@ -56,3 +56,32 @@
   {#- dbt registers returned relations in its relation cache. #}
   {{ return({'relations': [target_relation]}) }}
 {% endmaterialization %}
+
+{# App-owned append-only tables have no model rows to merge. Own their creation so dataset
+   defaults cannot change string semantics. Never replace a populated table on dbt reruns. #}
+{% materialization dqm_app_table, adapter='bigquery' %}
+  {% set existing = load_relation(this) %}
+  {% set relation = this.incorporate(type='table') %}
+  {% if existing is not none and not existing.is_table %}
+    {{ exceptions.raise_compiler_error('Expected a DQM table at ' ~ this ~ '; no relation was replaced.') }}
+  {% endif %}
+  {{ run_hooks(pre_hooks) }}
+  {% if dbt_dqm.empty_mode() %}
+    {% call statement('main') %}select * from {{ relation }} where false{% endcall %}
+  {% else %}
+    {% call statement('main') %}
+      create table if not exists {{ relation }} default collate '' as ({{ sql }});
+    {% endcall %}
+    {% set columns = adapter.get_columns_in_relation(relation) %}
+    {% set names = columns|map(attribute='name')|map('lower')|list %}
+    {% for column, kind in dbt_dqm.table_schemas()[model.name] if column|lower not in names %}
+      {% call statement() %}
+        {{ dbt_dqm.ensure_column(relation, column, context['dbt']['type_' ~ kind]()) }}
+      {% endcall %}
+    {% endfor %}
+    {% do apply_grants(relation, config.get('grants'), should_revoke(existing, false)) %}
+    {% do persist_docs(relation, model) %}
+  {% endif %}
+  {{ run_hooks(post_hooks) }}
+  {{ return({'relations': [relation]}) }}
+{% endmaterialization %}

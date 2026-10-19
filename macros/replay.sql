@@ -129,11 +129,11 @@ execution_identity_states as (
     on execution.invocation_id = observation.invocation_id
    and candidate.test_unique_id = observation.test_unique_id
    and candidate.unique_id = observation.unique_id
-   and candidate.identity_scheme_signature is not distinct from observation.execution_identity_scheme_signature
+   and {{ dbt_dqm.uncollated_string('candidate.identity_scheme_signature') }} is not distinct from {{ dbt_dqm.uncollated_string('observation.execution_identity_scheme_signature') }}
   left join active_existing active
     on candidate.test_unique_id = active.test_unique_id
    and candidate.unique_id = active.unique_id
-   and candidate.identity_scheme_signature is not distinct from active.identity_scheme_signature
+   and {{ dbt_dqm.uncollated_string('candidate.identity_scheme_signature') }} is not distinct from {{ dbt_dqm.uncollated_string('active.identity_scheme_signature') }}
   where execution.collection_status != 'limit_reached' or observation.unique_id is not null
 ),
 
@@ -254,7 +254,7 @@ episode_occurrences as (
       when episode.first_absence_at is null then cast(null as {{ dbt.type_string() }})
       when episode.identity_scheme_signature is null
         or episode.absence_identity_scheme_signature is null
-        or episode.identity_scheme_signature != episode.absence_identity_scheme_signature
+        or {{ dbt_dqm.uncollated_string('episode.identity_scheme_signature') }} != {{ dbt_dqm.uncollated_string('episode.absence_identity_scheme_signature') }}
       then 'IDENTITY_CHANGED'
       else 'Passed'
     end as close_reason,
@@ -284,7 +284,7 @@ episode_occurrences as (
   left join active_existing active
     on episode.test_unique_id = active.test_unique_id
    and episode.unique_id = active.unique_id
-   and episode.identity_scheme_signature is not distinct from active.identity_scheme_signature
+   and {{ dbt_dqm.uncollated_string('episode.identity_scheme_signature') }} is not distinct from {{ dbt_dqm.uncollated_string('active.identity_scheme_signature') }}
    and episode.episode_group = 0
   left join occurrence_counts counts
     on episode.test_unique_id = counts.test_unique_id
@@ -345,10 +345,10 @@ transition_events as (
       when state.is_failing=1 and state.previous_failing=0 then
         case when prev.close_reason='Passed' then 'REAPPEARED' else 'APPEARED' end
       when state.is_failing=0 and state.previous_failing=1 then
-        case when state.identity_scheme_signature is distinct from state.execution_identity_scheme_signature
+        case when {{ dbt_dqm.uncollated_string('state.identity_scheme_signature') }} is distinct from {{ dbt_dqm.uncollated_string('state.execution_identity_scheme_signature') }}
           then 'CLOSED_STRUCTURAL' else 'DISAPPEARED' end
       when state.is_failing=1 and state.previous_failing=1
-        and state.record_values_json is distinct from state.previous_payload then 'VALUES_CHANGED'
+        and {{ dbt_dqm.uncollated_string('state.record_values_json') }} is distinct from {{ dbt_dqm.uncollated_string('state.previous_payload') }} then 'VALUES_CHANGED'
       else 'STILL_FAILING' end as event_type,
     state.previous_payload as previous_record_values_json,
     coalesce(state.record_values_json,state.previous_payload) as record_values_json,
@@ -356,15 +356,15 @@ transition_events as (
   from states_grouped state
   inner join episode_occurrences episode on state.test_unique_id=episode.test_unique_id
     and state.unique_id=episode.unique_id
-    and state.identity_scheme_signature is not distinct from episode.identity_scheme_signature
+    and {{ dbt_dqm.uncollated_string('state.identity_scheme_signature') }} is not distinct from {{ dbt_dqm.uncollated_string('episode.identity_scheme_signature') }}
     and state.episode_group=episode.episode_group
   left join all_history prev on episode.test_unique_id=prev.test_unique_id and episode.unique_id=prev.unique_id
-    and episode.identity_scheme_signature is not distinct from prev.identity_scheme_signature
+    and {{ dbt_dqm.uncollated_string('episode.identity_scheme_signature') }} is not distinct from {{ dbt_dqm.uncollated_string('prev.identity_scheme_signature') }}
     and prev.occurrence_number=episode.occurrence_number-1
   where (state.is_failing=1 and state.previous_failing=0)
      or (state.is_failing=0 and state.previous_failing=1)
      or (state.is_failing=1 and state.previous_failing=1 and (
-          (state.record_values_json is distinct from state.previous_payload)
+          ({{ dbt_dqm.uncollated_string('state.record_values_json') }} is distinct from {{ dbt_dqm.uncollated_string('state.previous_payload') }})
           {% if var('dbt_dqm_emit_still_failing_events',false) %}or true{% endif %}))
 ),
 event_changes_full as (

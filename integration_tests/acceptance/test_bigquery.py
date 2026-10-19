@@ -111,7 +111,7 @@ class Demo:
 
 
 @pytest.fixture
-def demo(tmp_path, acceptance_run_id):
+def demo(tmp_path, acceptance_run_id, request):
     from bigquery_datasets import PREFIX, labels
 
     dataset = PREFIX + uuid.uuid4().hex[:12]
@@ -121,6 +121,9 @@ def demo(tmp_path, acceptance_run_id):
     value.location = location
     # Lets the session-end sweep remove it if this test's own cleanup never runs.
     value.labels = labels(acceptance_run_id)
+    if getattr(request, 'param', None):
+        value = bigquery.Dataset.from_api_repr(
+            {**value.to_api_repr(), 'defaultCollation': request.param})
     client.create_dataset(value)
     path = tmp_path / "project"
     shutil.copytree(
@@ -1319,3 +1322,98 @@ def test_run_changes_sorted_results_and_collection_limits(demo):
     from reporting_checks import check_run_reporting
 
     check_run_reporting(demo, dedicated)
+
+
+@pytest.mark.parametrize('demo', ['und:ci'], indirect=True)
+def test_bigquery_collated_dataset_lifecycle_and_case_sensitive_changes(demo):
+    from dbt_dqm_app.config import load_config
+    from dbt_dqm_app.store import Patch
+    from dbt_dqm_app.warehouse import apply_patches
+
+    (demo.path / 'tests/collation_probe.sql').write_text("""
+{{ config(enabled=var('dqm_enabled',false),store_failures=true,severity='warn',
+    meta={'dbt_dqm':{'granularity':['id'],'owner':'fallback'}}) }}
+select collate('key', 'und:ci') as id,
+       collate({{ dbt.string_literal(var('probe_payload', 'Alpha')) }}, 'und:ci') as detail,
+       collate(owner, 'und:ci') as dqm_owner
+from unnest(['Team', 'team']) owner
+where not {{ var('probe_pass', false) }}
+""")
+    dedicated(demo, '--select', 'collation_probe')
+    initial = demo.snapshot()
+    assert len(initial) == 1 and initial[0]['dqm_owner'] == 'fallback'
+    assert initial[0]['failure_row_count'] == 2
+    assert json.loads(initial[0]['record_values_json'])['detail'] == 'Alpha'
+    executions = demo.sql('select owner_conflict_identity_count from @dataset.dqm_test_executions`')
+    assert executions == [{'owner_conflict_identity_count': 1}]
+    columns = demo.sql('select table_name,column_name,collation_name from '
+                       '@dataset.INFORMATION_SCHEMA.COLUMNS` where starts_with(table_name,\'dqm_\')')
+    assert columns and all(row['collation_name'] in (None, '', 'NULL') for row in columns)
+    assert demo.client.get_dataset(f'{PROJECT}.{demo.dataset}').to_api_repr()['defaultCollation'] == 'und:ci'
+    assert demo.sql("select count(*) n from @dataset.dqm_issue_events` where event_type='OPENED'")[0]['n'] == 1
+
+    config = load_config(demo.path, demo.profiles, 'dev')
+    epoch = demo.sql('select installation_id from @dataset.dqm_install`')[0]['installation_id']
+    patch = Patch(initial[0]['occurrence_id'], 'notes', None, 'Case', 1,
+                  datetime.now(UTC).isoformat(), initial[0]['annotation_version'], installation_id=epoch)
+    batch = apply_patches(config, [patch])
+    assert apply_patches(config, [patch]) == batch
+    # Case-only differences must invalidate a purported retry of the immutable audit batch.
+    demo.sql("update @dataset.dqm_annotation_changes` set new_value='case' where true")
+    with pytest.raises(Exception, match='Incomplete prior annotation batch'):
+        apply_patches(config, [patch])
+    demo.sql("update @dataset.dqm_annotation_changes` set new_value='Case' where true")
+
+    dedicated(demo, '--select', 'collation_probe')
+    assert demo.snapshot()[0]['occurrence_id'] == initial[0]['occurrence_id']
+    assert demo.sql("select count(*) n from @dataset.dqm_issue_events` where event_type='VALUES_CHANGED'")[0]['n'] == 0
+    dedicated(demo, '--select', 'collation_probe', variables={'probe_payload': 'alpha'})
+    assert demo.snapshot()[0]['occurrence_id'] == initial[0]['occurrence_id']
+    assert demo.sql("select count(*) n from @dataset.dqm_issue_events` where event_type='VALUES_CHANGED'")[0]['n'] == 1
+    dedicated(demo, '--select', 'collation_probe', variables={'probe_pass': True})
+    assert demo.snapshot()[0]['record_status'] == 'Archived'
+    dedicated(demo, '--select', 'collation_probe')
+    history = demo.sql('select * from @dataset.dqm_all_issues` order by occurrence_number')
+    assert len(history) == 2 and history[1]['is_recurrence']
+    assert history[1]['previous_occurrence_id'] == initial[0]['occurrence_id']
+    assert history[1]['occurrence_number'] == 2 and history[1]['record_status'] == 'Active'
+
+    # Exercise the helper itself on collated values, including SQL NULLs.
+    (demo.path / 'macros/collation_truth.sql').write_text("""
+{% macro collation_truth() %}
+{% set query %}
+select countif(actual != expected) as mismatches from (
+ select {{ dbt_dqm.uncollated_string("collate(a, 'und:ci')") }} is not distinct from
+        {{ dbt_dqm.uncollated_string("collate(b, 'und:ci')") }} as actual, expected
+ from unnest([struct(cast(null as string) as a, cast(null as string) as b, true as expected),
+              (null,'' ,false), ('',null,false), ('','',true), ('a','a',true),
+              ('a','A',false), ('é','É',false)])
+)
+{% endset %}
+{% if execute %}{% set result=run_query(query) %}
+ {% if result.rows[0][0] != 0 %}{{ exceptions.raise_compiler_error('Collation truth table failed') }}{% endif %}
+{% endif %}
+{% endmacro %}
+""")
+    demo.dbt('run-operation', 'collation_truth')
+
+
+@pytest.mark.parametrize('demo', ['und:ci'], indirect=True)
+def test_bigquery_collated_tracking_refuses_writes_and_explicit_refresh_recovers(demo):
+    demo.sql("create table @dataset.dqm_install` (marker string) default collate 'und:ci'")
+    demo.sql("insert into @dataset.dqm_install` values ('preserve-me')")
+    demo.sql('create table @dataset.consumer_keep` as select 42 as value')
+    before = demo.sql('select * from @dataset.dqm_install`')
+    demo.dbt('run', '--select', 'demo_records')
+    result = dedicated(demo, code=2)
+    assert 'unsupported BigQuery collation' in result.stdout + result.stderr
+    assert demo.sql('select * from @dataset.dqm_install`') == before
+    assert not demo.sql("select table_name from @dataset.INFORMATION_SCHEMA.TABLES` "
+                        "where table_name='dqm_test_executions'")
+    demo.dbt('run', '--select', 'demo_records')
+    dedicated(demo, '--full-refresh')
+    assert demo.snapshot()
+    assert demo.sql('select * from @dataset.consumer_keep`') == [{'value': 42}]
+    assert not demo.sql("select column_name from @dataset.INFORMATION_SCHEMA.COLUMNS` "
+                        "where starts_with(table_name,'dqm_') and collation_name='und:ci'")
+    assert demo.client.get_dataset(f'{PROJECT}.{demo.dataset}').to_api_repr()['defaultCollation'] == 'und:ci'

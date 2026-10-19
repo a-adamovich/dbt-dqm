@@ -6,8 +6,8 @@ dbt package are separate installations and must use matching 0.2 versions.
 
 ## Installation and compatibility
 
-The stable release is `0.2.0`: [PyPI](https://pypi.org/project/dbt-dqm/0.2.0/) and
-[Git tag `v0.2.0`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0).
+The stable release is `0.2.1`: [PyPI](https://pypi.org/project/dbt-dqm/0.2.1/) and
+[Git tag `v0.2.1`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.1).
 The dbt package supports dbt Core 1.11–1.12 with dbt-bigquery 1.11–1.12 or dbt-postgres
 1.11. There is no dbt-postgres 1.12; its 1.11 line supports dbt Core 1.12. Warehouse
 support is BigQuery and Postgres 14/16. The Python app supports Python 3.11–3.14 and pins
@@ -20,19 +20,19 @@ verified, install the dbt package from Git in the consumer project's `packages.y
 ```yaml
 packages:
   - git: "https://github.com/a-adamovich/dbt-dqm.git"
-    revision: v0.2.0
+    revision: v0.2.1
 ```
 
 Run `dbt deps`, then install the separate Python command in the environment where it
 can find your project's dbt executable and warehouse adapter:
 
 ```bash
-python -m pip install 'dbt-dqm[bigquery]==0.2.0'
-# or: python -m pip install 'dbt-dqm[postgres]==0.2.0'
+python -m pip install 'dbt-dqm[bigquery]==0.2.1'
+# or: python -m pip install 'dbt-dqm[postgres]==0.2.1'
 ```
 
 The extras select the adapter; `dbt-dqm[bigquery,postgres]` installs both. A plain
-`dbt-dqm==0.2.0` install includes the command, app, and dbt Core, but no warehouse
+`dbt-dqm==0.2.1` install includes the command, app, and dbt Core, but no warehouse
 adapter. Existing environments retain adapters already installed. In a source checkout,
 `uv sync --extra bigquery` or `uv sync --extra postgres` installs only the needed
 adapter; `uv sync --all-extras` installs both. The 0.2 app expects the matching 0.2 dbt
@@ -43,7 +43,7 @@ On Windows PowerShell, for example:
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install 'dbt-dqm[bigquery]==0.2.0'
+python -m pip install 'dbt-dqm[bigquery]==0.2.1'
 ```
 
 On Postgres, an administrator must create the `pgcrypto` extension once:
@@ -52,7 +52,7 @@ often requires elevated privileges. For BigQuery authentication, use the existin
 profile and credentials available to the command; the app uses the same profile.
 
 The [release checklist](release-checklist.md) describes release gates, and the
-[0.2.0 release record](release-0.2.0.md) records what was verified.
+[0.2.1 release record](release-0.2.1.md) records what was verified.
 
 ## Project, target, and artifact resolution
 
@@ -215,3 +215,29 @@ recurrence order. For Postgres, create `pgcrypto` first and start from
 `profiles.yml.example`. For BigQuery, keep any service-account key outside the
 repository; the demo's pre-created dataset needs BigQuery Job User on the project and
 BigQuery Data Editor on that dataset.
+
+
+## BigQuery dataset collation
+
+Version 0.2.1 supports datasets whose default collation is `und:ci`. DQM tables explicitly use
+`DEFAULT COLLATE ''` and tracking comparisons remain case-sensitive. The package does not change
+your dataset default or your test's own comparison rules. Identity normalization still lowercases
+and trims granularity values; original payload and owner casing is retained.
+
+Install matching Python and dbt package versions and run `dbt deps`. Existing uncollated DQM
+installations upgrade normally, without a schema migration or history reset.
+
+If an earlier package created collated tracking columns, 0.2.1 refuses setup before tracking
+writes. Changing a table's default does not repair existing columns, and BigQuery cannot change
+their collation in place. For this affected installation only:
+
+1. Export any history or annotations you need to retain, and stop its reviewer apps.
+2. Upgrade both packages to 0.2.1 and run `dbt deps`.
+3. Run `dbt-dqm run --full-refresh` with the same project, profile, target and naming `--vars`.
+   Review the printed relation scope and confirm. This discards that installation's history and
+   annotations; use `--yes` only after reviewing that scope for an unattended invocation.
+4. Clear the installation's old reviewer workspaces and restart the apps. Old drafts are invalid.
+
+The refresh preserves unrelated tables, dataset collation and existing table access. No automatic
+reset or history-preserving conversion is performed. A separate tracking schema is another option
+if you need to leave the old installation intact.

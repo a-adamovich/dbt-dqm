@@ -16,6 +16,15 @@
   ) }}
 {% endmacro %}
 
+{# Remove inherited BigQuery collation without changing values, case, or NULLs. #}
+{% macro uncollated_string(expression) -%}
+  {{ return("collate(" ~ expression ~ ", '')" if target.type == 'bigquery' else expression) }}
+{%- endmacro %}
+
+{% macro default_collation() -%}
+  {{ return("default collate ''" if target.type == 'bigquery' else '') }}
+{%- endmacro %}
+
 {# A single-row source usable in a FROM clause to select typed literals from, e.g. building an
    empty typed CTE with `from {{ dbt_dqm.dual() }} where false`. BigQuery has no bare-SELECT
    dummy-row source usable with WHERE, so it needs UNNEST([1]); every other supported adapter can
@@ -244,6 +253,6 @@
    from unnest(array_concat(
      json_keys(parse_json(coalesce({{ before }}, '{}')), 1),
      json_keys(parse_json(coalesce({{ after }}, '{}')), 1))) changed_key
-   where to_json_string(parse_json(coalesce({{ before }}, '{}'))[changed_key])
-     is distinct from to_json_string(parse_json(coalesce({{ after }}, '{}'))[changed_key]))
+   where collate(to_json_string(parse_json(coalesce({{ before }}, '{}'))[changed_key]), '')
+     is distinct from collate(to_json_string(parse_json(coalesce({{ after }}, '{}'))[changed_key]), ''))
 {%- endmacro %}

@@ -65,7 +65,7 @@
     create temporary table dqm_prune on commit drop as {{ eligible }};
   {% else %}
     {% if var('dbt_dqm_maintenance_shortcuts',false) %}if exists({{ eligible }}) then{% endif %}
-    create or replace temp table dqm_prune as {{ eligible }};
+    create or replace temp table dqm_prune default collate '' as {{ eligible }};
   {% endif %}
   {% for name in ['dqm_issue_observations', 'dqm_reconciliation_receipts', 'dqm_test_executions'] %}
     delete from {{ dbt_dqm.dqm_relation(name) }} target where exists(select 1 from dqm_prune prune
@@ -102,7 +102,7 @@
     transaction; if the lookup fails, the step fails before deleting anything. A stage that
     disappears after the snapshot only keeps its run for one more cycle. #}
 {% macro maintenance_live_stages_sql() %}
-  create or replace temp table dqm_live_stages as
+  create or replace temp table dqm_live_stages default collate '' as
     select table_name from {{ dbt_dqm.tables_catalog() }}
     where starts_with(table_name, {{ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_reconcile_stage').identifier ~ '_') }});
 {% endmacro %}

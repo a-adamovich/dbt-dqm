@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 - 2026-10-19
+
+- Fix BigQuery initialization in datasets with default `und:ci` collation. Create tracking, app,
+  reset and staging tables with empty collation and strip inherited string collation for comparisons.
+- Preserve case-sensitive payload changes and owner conflict detection while retaining existing
+  identity normalization. Add credentialed lifecycle and explicit recovery regression coverage.
+- Refuse existing collated tracking columns before writes and document confirmed scoped recovery.
+  Uncollated installations upgrade without a migration or history reset.
+
 ## 0.2.0 - 2026-10-15
 
 - First stable release of the 0.2 series, with the behavior validated in 0.2.0a8.

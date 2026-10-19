@@ -36,7 +36,7 @@
         {% if column in dbt_dqm.table_keys()[name] %}not null{% endif %}{% if not loop.last %},{% endif %}
       {% endfor %}
       {% if target.type == 'postgres' %}, primary key ({{ dbt_dqm.table_keys()[name] | join(', ') }}){% endif %}
-    )
+    ) {{ dbt_dqm.default_collation() }}
     {% if target.type == 'bigquery' and name in ['dqm_test_executions', 'dqm_issue_observations', 'dqm_issue_events'] %}
       partition by date({{ 'captured_at' if name == 'dqm_test_executions' else 'observed_at' if name == 'dqm_issue_observations' else 'event_at' }}) cluster by test_unique_id
     {% endif %};
@@ -78,7 +78,7 @@
       batch_id string, occurrence_id string, field_name string, old_value string,
       new_value string, changed_at timestamp, changed_by string, base_annotation_version int64,
       installation_id string, upload_id string, staged_at timestamp default current_timestamp()
-    );
+    ) default collate '';
     {% for column, kind in [('base_annotation_version','int64'),('installation_id','string')] %}
       if not exists(select 1 from {{ dbt_dqm.columns_catalog() }}
         where table_name={{ dbt_dqm.sql_string(dbt_dqm.dqm_relation('dqm_app_change_staging').identifier) }} and lower(column_name)={{ dbt_dqm.sql_string(column) }}) then
@@ -135,7 +135,7 @@
     outcome {{ dbt.type_string() }} not null,
     description {{ dbt.type_string() }},
     diagnostic_id {{ dbt.type_string() }}
-  );
+  ) {{ dbt_dqm.default_collation() }};
 {% endmacro %}
 {% macro default__maintenance_log_verify() %}
   {{ dbt_dqm.assert_sql(dbt_dqm.table_exists_sql('dqm_maintenance_log'),
@@ -214,6 +214,29 @@
 {% endmacro %}
 
 {% macro latest_migration() %}{{ return(dbt_dqm.migrations()[-1]['id']) }}{% endmacro %}
+
+{# Only inspect this installation's resolved tables, including per-model schemas/aliases. #}
+{% macro bigquery_collation_check_sql(existing_only=false) %}
+  {% set groups = {} %}
+  {% for item in dbt_dqm.refresh_contract().values() %}
+    {% set key = item.database ~ '.' ~ item.schema %}
+    {% if key not in groups %}{% do groups.update({key: []}) %}{% endif %}
+    {% do groups[key].append(dbt_dqm.sql_string(item.identifier)) %}
+  {% endfor %}
+  {% set included = namespace(count=0) %}
+  {% for dataset, names in groups.items() %}
+    {% set parts = dataset.split('.') %}
+    {% if existing_only and not adapter.check_schema_exists(parts[0], parts[1]) %}{% continue %}{% endif %}
+    {% if included.count %}union all{% endif %}
+    {% set included.count = included.count + 1 %}
+    select table_name,column_name from `{{ dataset }}.INFORMATION_SCHEMA.COLUMNS`
+    {# The catalog can report the literal string 'NULL' for an uncollated column. #}
+    where collation_name is not null and collation_name not in ('', 'NULL')
+      and collate(table_name, '') in ({{ names|join(',') }})
+  {% endfor %}
+  {% if not included.count %}select cast(null as string) as table_name,cast(null as string) as column_name where false{% endif %}
+{% endmacro %}
+
 {% macro ready_sql() %}
   {{ dbt_dqm.assert_sql('(select count(*) from ' ~ dbt_dqm.dqm_relation('dqm_reconciliation_control') ~ " where setup_status='ready' and schema_version=" ~ dbt_dqm.sql_string(dbt_dqm.latest_migration()) ~ ')=1',
       dbt_dqm.sql_string('DQM setup is incomplete or package versions differ. Retry setup with the current version.')) }}
@@ -239,6 +262,12 @@
   {% set install = dbt_dqm.dqm_relation('dqm_install') %}
   {% set control = dbt_dqm.dqm_relation('dqm_reconciliation_control') %}
   {% set ledger = dbt_dqm.dqm_relation('dqm_schema_migrations') %}
+  {% if target.type == 'bigquery' and flags.INTROSPECT|default(true) %}
+    {% set collated = run_query(dbt_dqm.bigquery_collation_check_sql(existing_only=true)) %}
+    {% if collated.rows|length %}
+      {{ exceptions.raise_compiler_error('DQM tracking columns have unsupported BigQuery collation. Upgrade both packages to 0.2.1 or later, then explicitly run dbt-dqm run --full-refresh with the same target and naming vars. This resets this installation history and annotations; clear old reviewer workspaces afterward. No reset has been performed.') }}
+    {% endif %}
+  {% endif %}
   {% set installed = adapter.get_relation(database=install.database,schema=install.schema,identifier=install.identifier) if flags.INTROSPECT|default(true) else none %}
   {% if installed %}
     {% set marker = run_query('select marker from ' ~ install) %}
@@ -273,11 +302,11 @@
   {{ dbt_dqm.assert_sql(
     '(' ~ dbt_dqm.table_exists_sql('dqm_install') ~ ') or not (' ~ legacy_checks | join(' or ') ~ ')',
     dbt_dqm.sql_string('dbt-dqm 0.2 requires a fresh DQM schema. Set dbt_dqm_schema to a new schema; run dbt-dqm run --full-refresh; existing history is not migrated.')) }}
-  create table if not exists {{ install }} as select 'dqm-full-v1' as marker, {{ dbt.current_timestamp() }} as created_at, {{ dbt_dqm.sql_string(invocation_id) }} as installation_id, cast(null as {{ dbt.type_string() }}) as pending_view_grants;
-  create table if not exists {{ control }} as select cast(0 as {{ dbt.type_bigint() }}) as generation,
+  create table if not exists {{ install }} {{ dbt_dqm.default_collation() }} as select 'dqm-full-v1' as marker, {{ dbt.current_timestamp() }} as created_at, {{ dbt_dqm.sql_string(invocation_id) }} as installation_id, cast(null as {{ dbt.type_string() }}) as pending_view_grants;
+  create table if not exists {{ control }} {{ dbt_dqm.default_collation() }} as select cast(0 as {{ dbt.type_bigint() }}) as generation,
     'ready' as setup_status, cast(null as {{ dbt.type_string() }}) as migration_owner,
     cast(null as {{ dbt.type_timestamp() }}) as migration_lease_until, cast(null as {{ dbt.type_string() }}) as schema_version, cast(null as {{ dbt.type_timestamp() }}) as raw_pruned_before;
-  create table if not exists {{ ledger }} (migration_id {{ dbt.type_string() }} not null {% if target.type == 'postgres' %}primary key{% endif %}, applied_at {{ dbt.type_timestamp() }});
+  create table if not exists {{ ledger }} (migration_id {{ dbt.type_string() }} not null {% if target.type == 'postgres' %}primary key{% endif %}, applied_at {{ dbt.type_timestamp() }}) {{ dbt_dqm.default_collation() }};
   {{ dbt_dqm.assert_sql(
     '(select count(*) from ' ~ install ~ ")=1 and (select marker from " ~ install ~ ")='dqm-full-v1' and (select count(*) from " ~ control ~ ')=1',
     dbt_dqm.sql_string('Incompatible DQM schema. Run dbt-dqm run --full-refresh.')) }}

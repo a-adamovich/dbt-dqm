@@ -108,7 +108,7 @@
     set local enable_nestloop = off;
     create temporary table dqm_stage on commit drop as
   {% else %}
-    create table {{ dbt_dqm.stage_relation() }} options(expiration_timestamp=timestamp_add(current_timestamp(), interval 24 hour)) as
+    create table {{ dbt_dqm.stage_relation() }} default collate '' options(expiration_timestamp=timestamp_add(current_timestamp(), interval 24 hour)) as
   {% endif %}
     {{ dbt_dqm.reconcile_change_set_sql(invocation_id, 'dqm_observation_floor' if target.type == 'bigquery' else none) }};
   {% if target.type == 'postgres' %}

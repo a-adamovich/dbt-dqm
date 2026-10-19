@@ -41,7 +41,7 @@ def confirm_refresh(config, manifest, workflow) -> bool:
 def _views(manifest):
     nodes = {key: node for key, node in manifest.nodes.items()
              if node.package_name == "dbt_dqm" and node.resource_type == "model"
-             and node.config.materialized not in ("incremental", "table")}
+             and node.config.materialized not in ("incremental", "table", "dqm_app_table")}
     ordered = []
 
     def visit(key):
@@ -188,6 +188,8 @@ def _bigquery_refresh(config, contract):
                     description=original.description if original else None,
                     policy_tags=original.policy_tags if original else None,
                     default_value_expression=original.default_value_expression if original else None))
+            fields = [bigquery.SchemaField.from_api_repr({**field.to_api_repr(), "collation": ""})
+                      if field.field_type == "STRING" else field for field in fields]
             table = bigquery.Table(stage, schema=fields)
             if existing:
                 if existing.table_type != "TABLE":
@@ -205,6 +207,7 @@ def _bigquery_refresh(config, contract):
                          "dqm_issue_events": "event_at"}[name]
                 table.time_partitioning = bigquery.TimePartitioning(field=field)
                 table.clustering_fields = ["test_unique_id"]
+            table = bigquery.Table.from_api_repr({**table.to_api_repr(), "defaultCollation": ""})
             client.create_table(table)
             replacements.append((name, stage, destination))
         # A failed multi-table reset leaves the installation unreadable until an explicit retry.

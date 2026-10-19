@@ -238,7 +238,7 @@
               case when {{ adapter.quote(column.name) }} is null then null
                    else lower(trim(cast({{ adapter.quote(column.name) }} as {{ dbt.type_string() }}))) end
             {% endset %}
-            {% do key_pairs.append((column.name | lower, value_sql)) %}
+            {% do key_pairs.append((column.name | lower, dbt_dqm.uncollated_string(value_sql))) %}
           {% endfor %}
 
           {% set record_pairs = [] %}
@@ -246,7 +246,7 @@
             {% do record_pairs.append((column.name, dbt_dqm.column_value_sql(column))) %}
           {% endfor %}
 
-          {% set owner_value %}{% if resolved_owner %}nullif(trim(cast({{ adapter.quote(resolved_owner[0].name) }} as {{ dbt.type_string() }})),''){% else %}cast(null as {{ dbt.type_string() }}){% endif %}{% endset %}
+          {% set owner_value %}{% if resolved_owner %}nullif({{ dbt_dqm.uncollated_string('trim(cast(' ~ adapter.quote(resolved_owner[0].name) ~ ' as ' ~ dbt.type_string() ~ '))') }},''){% else %}cast(null as {{ dbt.type_string() }}){% endif %}{% endset %}
           {# Read the stored failures exactly once into a capture stage. The consistency check and
              the observation merge both use that copy, so another invocation overwriting the failure
              table can't slip in between them. Equal counts don't prove provenance, though; runs
@@ -255,7 +255,7 @@
           {% set stage_count = '(select count(*) from dqm_capture_stage)' %}
           {% set capture_stage %}
             {% if target.type == 'postgres' %}create temporary table dqm_capture_stage on commit drop as
-            {% else %}create or replace temp table dqm_capture_stage as{% endif %}
+            {% else %}create or replace temp table dqm_capture_stage default collate '' as{% endif %}
             select
               {{ dbt_dqm.sha256_hex(dbt_dqm.canonical_identity_string(key_pairs)) }} as unique_id,
               {{ dbt_dqm.json_object_string(record_pairs) }} as record_values_json,
