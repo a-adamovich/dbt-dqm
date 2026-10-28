@@ -20,7 +20,7 @@ classifiers = [
   "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = [
-  "dbt-core==1.12.5",
+  "dbt-core==1.12.6",
   # Security floors for transitive dependencies (#24): wheels don't carry uv.lock, so these keep
   # installs from retaining versions with known advisories.
   # dbt's older serializer cannot initialize on Python 3.14.
