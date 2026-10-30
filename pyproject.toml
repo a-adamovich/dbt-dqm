@@ -22,6 +22,7 @@ classifiers = [
 dependencies = [
   # Security floors for transitive dependencies (#24): wheels don't carry uv.lock, so these keep
   # installs from retaining versions with known advisories.
+  "certifi>=2026.10.19",
   "Jinja2>=3.1.6,<4",
   "packaging>=24,<27",
   "pandas>=2.2,<4",
