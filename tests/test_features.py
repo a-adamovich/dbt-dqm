@@ -29,20 +29,20 @@ def test_oauth_clients_use_explicit_independent_credentials(tmp_path, monkeypatc
     assert [call.args[0]["client_email"] for call in built.call_args_list] == ["runner", "reviewer"]
 
 
-def test_reviewer_dbt_subprocess_credentials_do_not_change_global_adc(tmp_path, monkeypatch):
+def test_reviewer_dbt_subprocess_credentials_do_not_change_global_adc(tmp_path, monkeypatch, fake_dbt_process):
     import json
     import os
 
     from dbt_dqm_app import warehouse
 
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "unrelated-original-adc")
-    run = MagicMock()
+    run = MagicMock(side_effect=fake_dbt_process)
     monkeypatch.setattr(warehouse.subprocess, "run", run)
     reviewer_file = tmp_path / "reviewer-adc.json"
     reviewer_file.write_text(json.dumps(
         {"type": "authorized_user", "client_id": "c", "client_secret": "s", "refresh_token": "r"}
     ))
-    monkeypatch.setattr(warehouse, "_dbt_version", lambda executable: "test version")
+    monkeypatch.setattr(warehouse.DbtCLI, "validate", lambda *args: None)
     monkeypatch.setattr(warehouse, "check_required_relations", lambda config: None)
     warehouse.validate_dbt(replace(config(tmp_path, "bigquery"), credentials_file=reviewer_file))
     assert run.call_count == 2

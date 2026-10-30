@@ -278,14 +278,18 @@
    Custom dispatched steps may do work beyond the package eligibility predicates. #}
 {% macro maintenance_probe_steps(steps) %}
   {% set probe=[] %}
-  {% set dispatch=adapter.dispatch %}
-  {% set logging=dispatch('maintenance_log_insert_sql','dbt_dqm').macro %}
+  {% set maintenance_adapter=adapter %}
+  {% set logging_impl=maintenance_adapter.dispatch('maintenance_log_insert_sql','dbt_dqm') %}
+  {# dbt 2 does not expose dispatch metadata. Execute all steps when overrides
+     cannot be identified; skipping an overridden step would be unsafe. #}
+  {% if logging_impl.macro is not defined %}{{ return(probe) }}{% endif %}
+  {% set logging=logging_impl.macro %}
   {% if logging.package_name != 'dbt_dqm' or logging.name != 'default__maintenance_log_insert_sql' %}{{ return(probe) }}{% endif %}
   {% for step in steps if step.name != 'raw_pruning' %}
-    {% set implementation=dispatch('maintenance_' ~ step.name,'dbt_dqm').macro %}
+    {% set implementation=maintenance_adapter.dispatch('maintenance_' ~ step.name,'dbt_dqm').macro %}
     {% if implementation.package_name == 'dbt_dqm' and implementation.name == 'default__maintenance_' ~ step.name %}
       {# Stage drop dispatch is independently overridable. #}
-      {% set drop=dispatch('maintenance_stage_drop_sql','dbt_dqm').macro if step.name=='stage_drops' else none %}
+      {% set drop=maintenance_adapter.dispatch('maintenance_stage_drop_sql','dbt_dqm').macro if step.name=='stage_drops' else none %}
       {% if drop is none or (drop.package_name=='dbt_dqm' and drop.name=='default__maintenance_stage_drop_sql') %}
         {% do probe.append(step) %}
       {% endif %}
@@ -373,14 +377,14 @@
       {% do observed.append({'step': step.name, 'ok': ok,'action':'executed',
                              'seconds':(modules.datetime.datetime.now()-started).total_seconds()}) %}
       {% endif %}
-      {% do log('DQM_MAINTENANCE_STEP=' ~ tojson(observed[-1]),info=false) %}
+      {% do log('DQM_MAINTENANCE_STEP=' ~ tojson(observed[-1]),info=true) %}
     {% endfor %}
     {% do run_query(dbt_dqm.bigquery__maintenance_log_script(outcomes, run.marker, kind)) %}
   {% else %}
     {% do run_query(dbt_dqm.postgres__maintenance_script(steps, days, events_days, kind)) %}
     {% for step in steps %}
       {% do observed.append({'step': step.name, 'ok': none,'action':'executed','seconds':none}) %}
-      {% do log('DQM_MAINTENANCE_STEP=' ~ tojson(observed[-1]),info=false) %}
+      {% do log('DQM_MAINTENANCE_STEP=' ~ tojson(observed[-1]),info=true) %}
     {% endfor %}
   {% endif %}
   {{ return(observed) }}

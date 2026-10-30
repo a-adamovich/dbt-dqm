@@ -394,13 +394,13 @@ event_changes as (
 )
 select 'occurrence' as row_kind, changes.*,
  {% for col,kind in dbt_dqm.table_schemas()['dqm_issue_events'] if col not in ['test_unique_id','occurrence_id','unique_id','record_values_json'] %}
-   cast(null as {{ context['dbt']['type_' ~ kind]() }}) as {{ col }}{% if not loop.last %},{% endif %}
+   cast(null as {{ dbt_dqm.column_type(kind) }}) as {{ col }}{% if not loop.last %},{% endif %}
  {% endfor %}
 from occurrence_changes changes
 union all
 select 'event' as row_kind,
  {% for col,kind in dbt_dqm.table_schemas()['dqm_issue_occurrences'] %}
-   {% if col in ['test_unique_id','occurrence_id','unique_id','record_values_json'] %}events.{{ col }}{% else %}cast(null as {{ context['dbt']['type_' ~ kind]() }}){% endif %},
+   {% if col in ['test_unique_id','occurrence_id','unique_id','record_values_json'] %}events.{{ col }}{% else %}cast(null as {{ dbt_dqm.column_type(kind) }}){% endif %},
  {% endfor %}
  {% for col,kind in dbt_dqm.table_schemas()['dqm_issue_events'] if col not in ['test_unique_id','occurrence_id','unique_id','record_values_json'] %}
    {% if col=='event_id' %}{{ dbt_dqm.event_id_sql('events.test_unique_id','events.occurrence_id','events.invocation_id','events.event_type') }}{% else %}events.{{ col }}{% endif %}{% if not loop.last %},{% endif %}

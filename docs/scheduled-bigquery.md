@@ -3,12 +3,15 @@
 `.github/workflows/bigquery-scheduled.yml` runs every Monday (and on demand) from `main`:
 
 1. a check that the CI identity **cannot** read the shared QA dataset (`dbt_dqm_qa`);
-2. the full demo lifecycle in its own dataset, `dbt_dqm_scheduled_ci`;
+2. the full demo lifecycle for both dbt Core 1.12.5 and dbt 2.0.9, using separate
+   `dbt_dqm_scheduled_dbt1` and `dbt_dqm_scheduled_dbt2` datasets;
 3. the credentialed acceptance suite in parallel (`pytest -n 6`), each test in a disposable,
    labelled `dqm_acceptance_*` dataset;
 4. a sweep of leftover acceptance datasets older than six hours.
 
-Results are uploaded as the `scheduled-bigquery-results` artifact. A failure opens (or comments on)
+Results are uploaded as `scheduled-bigquery-dbt1-results` and
+`scheduled-bigquery-dbt2-results` artifacts. Both matrix jobs must pass on the exact
+candidate commit before the 0.2.2 release; see the [compatibility gate](dbt-2-compatibility.md#release-gate). A failure opens (or comments on)
 one issue labelled `scheduled-bigquery`.
 
 It authenticates **without a stored key**: GitHub's OIDC token for this repository's `main` branch

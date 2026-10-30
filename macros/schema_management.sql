@@ -32,7 +32,7 @@
   {% for name, columns in dbt_dqm.table_schemas().items() if name not in ['dqm_annotation_changes','dqm_missed_issues'] %}
     create table if not exists {{ dbt_dqm.dqm_relation(name) }} (
       {% for column, kind in columns %}
-        {{ adapter.quote(column) }} {{ context['dbt']['type_' ~ kind]() }}
+        {{ adapter.quote(column) }} {{ dbt_dqm.column_type(kind) }}
         {% if column in dbt_dqm.table_keys()[name] %}not null{% endif %}{% if not loop.last %},{% endif %}
       {% endfor %}
       {% if target.type == 'postgres' %}, primary key ({{ dbt_dqm.table_keys()[name] | join(', ') }}){% endif %}
@@ -256,8 +256,7 @@
   claims a lease in the control row and every later step re-checks it (bigquery_migration_*).
 #}
 {% macro setup_sql(grants=true) %}
-  {#- Aliased: dbt's static parser rejects adapter.dispatch with a non-literal macro name. #}
-  {% set migration_dispatch = adapter.dispatch %}
+  {% set migration_adapter = adapter %}
   {% if not execute or dbt_dqm.empty_mode() %}{{ return('') }}{% endif %}
   {% set install = dbt_dqm.dqm_relation('dqm_install') %}
   {% set control = dbt_dqm.dqm_relation('dqm_reconciliation_control') %}
@@ -319,9 +318,9 @@
     {% for spec in dbt_dqm.migrations() %}
       do $dqm_migration$ begin if not exists(select 1 from {{ ledger }} where migration_id={{ dbt_dqm.sql_string(spec.id) }}) then
         update {{ control }} set setup_status='migrating', generation=generation+1 where true;
-        {{ migration_dispatch(spec.apply, 'dbt_dqm')() }}
-        {% if spec.get('backfill') %}{{ migration_dispatch(spec.backfill, 'dbt_dqm')() }}{% endif %}
-        {{ migration_dispatch(spec.verify, 'dbt_dqm')() }}
+        {{ migration_adapter.dispatch(spec.apply, 'dbt_dqm')() }}
+        {% if spec.get('backfill') %}{{ migration_adapter.dispatch(spec.backfill, 'dbt_dqm')() }}{% endif %}
+        {{ migration_adapter.dispatch(spec.verify, 'dbt_dqm')() }}
         insert into {{ ledger }} values ({{ dbt_dqm.sql_string(spec.id) }}, {{ dbt.current_timestamp() }});
         update {{ control }} set setup_status='ready', schema_version={{ dbt_dqm.sql_string(spec.id) }}, generation=generation+1 where true;
       end if; end $dqm_migration$;
@@ -379,6 +378,7 @@
 {% endmacro %}
 
 {% macro empty_preflight() %}
+  {% if not execute or not var('dqm_enabled',false) or not dbt_dqm.empty_mode() %}{{ return('') }}{% endif %}
   {% if execute and var('dqm_enabled',false) and dbt_dqm.empty_mode() %}
     {% set r=dbt_dqm.dqm_relation('dqm_reconciliation_control') %}
     {% if adapter.get_relation(database=r.database,schema=r.schema,identifier=r.identifier) is none %}
@@ -443,20 +443,19 @@
 {% endmacro %}
 
 {% macro bigquery_migration_apply(spec, token) %}
-  {#- Aliased: dbt's static parser rejects adapter.dispatch with a non-literal macro name. #}
-  {% set migration_dispatch = adapter.dispatch %}
+  {% set migration_adapter = adapter %}
   {{ dbt_dqm.bigquery_migration_guard(token) }}
-  {{ migration_dispatch(spec.apply, 'dbt_dqm')() }}
+  {{ migration_adapter.dispatch(spec.apply, 'dbt_dqm')() }}
 {% endmacro %}
 
 {% macro bigquery_migration_commit(spec, token) %}
+  {% set migration_adapter = adapter %}
   {% set control = dbt_dqm.dqm_relation('dqm_reconciliation_control') %}
   {% set lease = dbt_dqm.positive_integer_var('dbt_dqm_reconcile_timeout_minutes', 60) %}
-  {% set migration_dispatch = adapter.dispatch %}
   begin transaction;
   {{ dbt_dqm.bigquery_migration_guard(token) }}
-  {% if spec.get('backfill') %}{{ migration_dispatch(spec.backfill, 'dbt_dqm')() }}{% endif %}
-  {{ migration_dispatch(spec.verify, 'dbt_dqm')() }}
+  {% if spec.get('backfill') %}{{ migration_adapter.dispatch(spec.backfill, 'dbt_dqm')() }}{% endif %}
+  {{ migration_adapter.dispatch(spec.verify, 'dbt_dqm')() }}
   insert into {{ dbt_dqm.dqm_relation('dqm_schema_migrations') }} values ({{ dbt_dqm.sql_string(spec.id) }}, current_timestamp());
   update {{ control }} set migration_lease_until=timestamp_add(current_timestamp(), interval {{ lease }} minute) where true;
   commit transaction;

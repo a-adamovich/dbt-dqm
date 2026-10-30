@@ -8,6 +8,7 @@ permissions:
   contents: write
   id-token: write
   attestations: write
+  actions: read
 
 jobs:
   release:
@@ -48,11 +49,15 @@ jobs:
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: "3.14"
+      - name: Require credentialed BigQuery verification for both engines
+        run: python3 scripts/check_bigquery_release_gate.py
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: Verify, build, and inspect distributions
         run: |
           uv sync --locked --all-groups --all-extras
-          uv run ruff check .
-          uv run pytest -q
+          uv run --group dbt1 ruff check .
+          uv run --group dbt1 pytest -q
           uv build --no-create-gitignore
           uvx --from twine twine check dist/*
       - name: Configure release-gate Postgres
@@ -78,13 +83,13 @@ jobs:
       - name: Full Postgres release lifecycle
         working-directory: integration_tests/demo_postgres
         run: |
-          uv run dbt deps
-          uv run dbt run-operation reset_demo_dqm
-          uv run dbt seed
+          uv run --group dbt1 dbt deps
+          uv run --group dbt1 dbt run-operation reset_demo_dqm
+          uv run --group dbt1 dbt seed
           for scenario in initial passed recurrence; do
-            uv run dbt run --select demo_records --vars "{demo_scenario: $scenario}"
-            uv run dbt-dqm run --vars "{demo_scenario: $scenario}"
-            uv run dbt test --select assert_scenario_outcomes --vars "{demo_scenario: $scenario, dqm_enabled: true}"
+            uv run --group dbt1 dbt run --select demo_records --vars "{demo_scenario: $scenario}"
+            uv run --group dbt1 dbt-dqm run --vars "{demo_scenario: $scenario}"
+            uv run --group dbt1 dbt test --select assert_scenario_outcomes --vars "{demo_scenario: $scenario, dqm_enabled: true}"
           done
       - name: Attest distribution provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -142,6 +147,8 @@ jobs:
               --notes "Pre-release: interfaces may change. Install the Python app with pip install 'dbt-dqm[bigquery]==${version}' or 'dbt-dqm[postgres]==${version}' and install the dbt package separately from Git revision ${GITHUB_REF_NAME} (its dbt_project.yml spells the version ${dbt_version}). Version 0.2.0a8 preserves a4-a7 history when resolved names are unchanged. Alias naming now applies to state tables too: changed namespaces require a confirmed fresh start, leaving legacy shared history untouched. Pass matching naming vars to run, app and workspace. The optional --summary reports OPENED (NEW), RECURRING and ARCHIVED changes applied by the reconciliation alongside NEW (status) and ACTIVE workload by saved owner. Quiet test results sort by status and name, and completion reports collections reaching their native limit. Export columns follow review order and timestamp zones are labeled. Upgrades from earlier alphas still require the migration steps documented in README.md. Scheduled full refreshes now require --yes. The app supports cross-page bulk edits and filtered CSV/Excel exports of saved issues. DQM is disabled during ordinary commands. Use dbt-dqm run for full capture and bounded native test limits (default 100). Ownership uses dqm_owner with owner metadata fallback. See README.md and CHANGELOG.md at this tag for supported versions and operating limits."
           elif [[ "$GITHUB_REF_NAME" == "v0.2.0" ]]; then
             gh release create "${GITHUB_REF_NAME}" dist/* --notes-file docs/release-notes-0.2.0.md --verify-tag
+          elif [[ "$GITHUB_REF_NAME" == "v0.2.2" ]]; then
+            gh release create "${GITHUB_REF_NAME}" dist/* --notes-file docs/release-notes-0.2.2.md --verify-tag
           elif [[ "$GITHUB_REF_NAME" == "v0.2.1" ]]; then
             gh release create "${GITHUB_REF_NAME}" dist/* --notes-file docs/release-notes-0.2.1.md --verify-tag
           else

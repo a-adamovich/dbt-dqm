@@ -35,6 +35,8 @@ from pathlib import Path
 import yaml
 from google.cloud import bigquery
 
+from dbt_dqm_app.dbt_cli import resolve_dbt_executable
+
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE = "dbt_dqm_demo"
 DEMO_TESTS = ("demo_customer_email_invalid", "demo_order_amount_invalid", "demo_order_line_invalid")
@@ -101,7 +103,7 @@ class Harness:
 
     def dbt(self, *args: str) -> None:
         command = [
-            str(Path(sys.executable).with_name("dbt")),
+            resolve_dbt_executable(),
             *args,
             "--project-dir",
             str(self.path),

@@ -35,6 +35,8 @@ import psycopg2
 import yaml
 from psycopg2.extensions import parse_dsn
 
+from dbt_dqm_app.dbt_cli import resolve_dbt_executable
+
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT_NAME = "dbt_dqm_demo_postgres"
 DEMO_TESTS = ("demo_customer_email_invalid", "demo_order_amount_invalid", "demo_order_line_invalid")
@@ -79,7 +81,7 @@ class Project:
 
     def dbt(self, *args: str, variables: dict | None = None) -> subprocess.CompletedProcess:
         command = [
-            str(Path(sys.executable).with_name("dbt")),
+            resolve_dbt_executable(),
             *args,
             "--project-dir",
             str(self.path),

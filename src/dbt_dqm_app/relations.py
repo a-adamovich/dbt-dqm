@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import os
@@ -62,6 +61,7 @@ def resolve_config(config):
             "target_path": str(config.target_path or config.project_dir / "target"),
             "vars": config.vars_yaml,
             "adapter_type": config.adapter_type,
+            "dbt_executable": config.dbt_executable,
         },
         sort_keys=True,
     )
@@ -114,95 +114,54 @@ def lock_key(config):
 
 def main():
     import yaml
-    from dbt.cli.main import dbtRunner
+
+    from .dbt_cli import DbtCLI
 
     request = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     variables = yaml.safe_load(request["vars"]) or {}
     variables["dqm_enabled"] = True
-    flags = [
-        "--project-dir",
-        request["project_dir"],
-        "--profiles-dir",
-        request["profiles_dir"],
-        "--target",
-        request["target"],
-        "--vars",
-        yaml.safe_dump(variables),
-        "--no-defer",
-        "--no-favor-state",
-        "--log-level",
-        "none",
-    ]
-    if request.get("adapter_type") == "bigquery":
-        from dbt.adapters.bigquery.connections import BigQueryConnectionManager
-        from dbt.adapters.contracts.connection import ConnectionState
-
-        original_close = BigQueryConnectionManager.close.__func__
-
-        def close_unused(cls, connection):
-            # dbt-bigquery 1.12 closes INIT handles by dereferencing the lazy client, which
-            # opens it and loads ADC. Naming compilation never needs that unused client.
-            if connection.state != ConnectionState.OPEN:
-                connection.handle = None
-                connection.state = ConnectionState.CLOSED
-                return connection
-            return original_close(cls, connection)
-
-        BigQueryConnectionManager.close = classmethod(close_unused)
+    flags = ["--project-dir", request["project_dir"],
+             "--profiles-dir", request["profiles_dir"], "--target", request["target"],
+             "--vars", yaml.safe_dump(variables), "--no-defer", "--no-favor-state"]
     contract = {}
     errors = []
 
     def event(value):
-        message = getattr(value.data, "msg", "")
+        message = value.info.msg
         if message.startswith("DQM_RELATIONS="):
             contract.update(json.loads(message.removeprefix("DQM_RELATIONS=")))
         if str(value.info.level).lower() == "error":
-            errors.append(value.info.msg)
+            errors.append(message)
 
-    with (
-        tempfile.TemporaryDirectory(prefix="dbt-dqm-naming-artifacts-") as artifacts,
-        tempfile.TemporaryFile(mode="w+", encoding="utf-8") as captured,
-        contextlib.redirect_stdout(captured),
-        contextlib.redirect_stderr(captured),
-    ):
-        # Concurrent app requests (or another dbt process) must never overwrite the
-        # consumer's manifest/partial-parse cache while discovering physical names.
-        flags.extend([
-            "--target-path", str(Path(artifacts) / "target"),
-            "--log-path", str(Path(artifacts) / "logs"),
-        ])
-        runner = dbtRunner(callbacks=[event])
+    runner = DbtCLI(executable=request.get("dbt_executable"), callbacks=[event])
+    runner.validate(request["adapter_type"])
+    with tempfile.TemporaryDirectory(prefix="dbt-dqm-naming-artifacts-") as artifacts:
+        # Naming requests never overwrite the consumer's test evidence or parse cache.
+        flags += ["--target-path", str(Path(artifacts) / "target"),
+                  "--log-path", str(Path(artifacts) / "logs")]
         parsed = runner.invoke(["parse", *flags])
-        result = (
-            dbtRunner(manifest=parsed.result, callbacks=[event]).invoke(
-                [
-                    "--no-populate-cache",
-                    "compile",
-                    "--no-introspect",
-                    "--inline",
-                    "{{ dbt_dqm.resolved_relations() }}",
-                    *flags,
-                ]
-            )
-            if parsed.success
-            else parsed
-        )
+        if parsed.success:
+            arguments = (["run-operation", "dbt_dqm.resolved_relations"] if runner.is_v2 else
+                         ["compile", "--no-populate-cache", "--no-introspect", "--inline",
+                          "{{ dbt_dqm.resolved_relations() }}"])
+            result = runner.invoke([*arguments, *flags])
+        else:
+            result = parsed
     if not result.success or not contract:
-        print(
-            str(result.exception or "\n".join(errors) or "Missing DQM relation contract"),
-            file=sys.stderr,
-        )
+        print(str(result.exception or "\n".join(errors) or "Missing DQM relation contract"),
+              file=sys.stderr)
         return 2
     granularity = {}
     for key, node in parsed.result.nodes.items():
-        metadata = (node.config.meta or {}).get("dbt_dqm")
-        if node.resource_type == "test" and isinstance(metadata, dict):
+        if node.get("resource_type") != "test":
+            continue
+        metadata = (node.get("config", {}).get("meta") or {}).get("dbt_dqm")
+        if isinstance(metadata, dict):
             values = metadata.get("granularity", [])
             if isinstance(values, list):
                 granularity[key] = [value for value in values if isinstance(value, str)]
     Path(sys.argv[2]).write_text(
-        json.dumps({"relations": contract, "granularity": granularity}), encoding="utf-8"
-    )
+        json.dumps({"relations": contract, "granularity": granularity}), encoding="utf-8")
     return 0
 
 

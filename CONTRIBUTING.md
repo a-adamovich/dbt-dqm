@@ -13,5 +13,5 @@ that it is licensed under the repository's Apache-2.0 license.
 
 Install development dependencies and both warehouse extras with
 `uv sync --locked --all-groups --all-extras`. Run checks with
-`uv run --all-extras ruff check .` and `uv run --all-extras pytest -q`.
+`uv run --group dbt1 --all-extras ruff check .` and `uv run --group dbt1 --all-extras pytest -q`.
 For warehouse-specific work, use `--extra postgres` or `--extra bigquery` instead.

@@ -31,9 +31,10 @@ def main():
     selected = {"bigquery", "postgres"} if args.extras == "both" else {args.extras}
     for adapter, driver in [("bigquery", "google-cloud-bigquery"),
                             ("postgres", "psycopg2-binary")]:
-        assert installed(f"dbt-{adapter}") == (adapter in selected)
+        assert not installed(f"dbt-{adapter}")
         assert installed(driver) == (adapter in selected)
-    for name in ("google-cloud-storage", "google-cloud-aiplatform", "oauthlib"):
+    assert not installed("dbt-core") and not installed("dbt")
+    for name in ("oauthlib",):
         assert installed(name) == ("bigquery" in selected), name
     import dbt_dqm_app.streamlit_app  # noqa: F401
 
@@ -64,10 +65,7 @@ def main():
         finally:
             warehouse._query_rows = original
 
-    result = subprocess.run([warehouse.resolve_dbt_executable(), "--version"],
-                            capture_output=True, text=True, check=True)
-    for adapter in ("bigquery", "postgres"):
-        assert (f"{adapter}:" in result.stdout) == (adapter in selected), result.stdout
+    assert "dbt" not in sys.modules
     with TemporaryDirectory() as directory:
         root = Path(directory)
         (root / "dbt_project.yml").write_text("name: smoke\nprofile: smoke\n")

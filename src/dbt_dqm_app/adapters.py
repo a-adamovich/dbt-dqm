@@ -8,16 +8,21 @@ from .errors import AppError
 
 def missing_adapter(adapter: str) -> AppError:
     return AppError(
-        f"The {adapter} adapter is not installed. Install it in this Python environment with "
+        f"The {adapter} warehouse client is not installed. Install it in this Python environment with "
         f"`python -m pip install 'dbt-dqm[{adapter}]'`."
     )
 
 
 def require_adapter(adapter: str) -> None:
-    try:
-        version(f"dbt-{adapter}")
-    except PackageNotFoundError:
-        raise missing_adapter(adapter) from None
+    packages = {"bigquery": ("google-cloud-bigquery",),
+                "postgres": ("psycopg2-binary", "psycopg2")}[adapter]
+    for package in packages:
+        try:
+            version(package)
+        except PackageNotFoundError:
+            continue
+        return
+    raise missing_adapter(adapter) from None
 
 
 class LazyModule:

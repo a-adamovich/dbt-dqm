@@ -23,6 +23,8 @@ import yaml
 from psycopg2.extensions import parse_dsn
 from psycopg2.extras import RealDictCursor
 
+from dbt_dqm_app.dbt_cli import resolve_dbt_executable
+
 ROOT = Path(__file__).resolve().parents[2]
 DSN = os.environ.get("DBT_DQM_TEST_DSN")
 pytestmark = pytest.mark.skipif(
@@ -36,7 +38,7 @@ class Demo:
 
     def dbt(self, *args, variables=None, success=True):
         command = [
-            str(Path(sys.executable).with_name("dbt")),
+            resolve_dbt_executable(),
             *args,
             "--project-dir",
             str(self.project),
@@ -1527,7 +1529,7 @@ def test_dedicated_native_limits_complete_pass_and_stale_edits(demo):
 
     demo.dbt("run", "--select", "demo_records")
     # An ordinary command with DQM disabled runs neither package models nor consumers' DQM tests.
-    ordinary = subprocess.run([str(Path(sys.executable).with_name("dbt")), "build", "--select", "package:dbt_dqm",
+    ordinary = subprocess.run([resolve_dbt_executable(), "build", "--select", "package:dbt_dqm",
                                "--project-dir", str(demo.project), "--profiles-dir", str(demo.profiles)],
                               capture_output=True, text=True, timeout=90, check=False)
     assert ordinary.returncode == 0, ordinary.stdout + ordinary.stderr
@@ -1724,3 +1726,20 @@ def test_run_changes_sorted_results_and_collection_limits(demo):
     from reporting_checks import check_run_reporting
 
     check_run_reporting(demo, dedicated)
+
+
+def test_dedicated_run_preserves_an_existing_root_test_materialization(demo):
+    demo.dbt("run", "--select", "demo_records")
+    macro = demo.project / "macros/custom_native_test.sql"
+    source = """{% materialization test, default %}
+    {% do log('CONSUMER_TEST_MATERIALIZATION', info=true) %}
+    {{ return(dbt.materialization_test_default()) }}
+    {% endmaterialization %}
+    {% macro consumer_helper() %}select 1{% endmacro %}
+    """
+    macro.write_text(source)
+    dedicated(demo)
+    assert len(demo.occurrences()) == 7
+    assert macro.read_text() == source
+    normal = demo.dbt("test", "--select", "demo_customer_email_invalid")
+    assert "CONSUMER_TEST_MATERIALIZATION" in normal.stdout
