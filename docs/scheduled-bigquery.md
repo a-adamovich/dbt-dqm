@@ -1,6 +1,6 @@
-# Scheduled BigQuery verification
+# On-demand BigQuery verification
 
-`.github/workflows/bigquery-scheduled.yml` runs every Monday (and on demand) from `main`:
+`.github/workflows/bigquery-scheduled.yml` runs only when manually started from `main`:
 
 1. a check that the CI identity **cannot** read the shared QA dataset (`dbt_dqm_qa`);
 2. the full demo lifecycle for both dbt Core 1.12.5 and dbt 2.0.9, using separate

@@ -14,7 +14,7 @@ not replace the credentialed release gate below.
 
 ## Release gate
 
-Run **Scheduled BigQuery lifecycle** from `main` on the exact candidate commit, with the
+Run **BigQuery lifecycle** on demand from `main` on the exact candidate commit, with the
 existing WIF repository configuration enabled. Both `lifecycle (dbt1)` and `lifecycle (dbt2)`
 must complete successfully. They run lifecycle and acceptance checks in separate datasets and
 use isolated engine installations. A skipped job or an offline smoke test does not satisfy

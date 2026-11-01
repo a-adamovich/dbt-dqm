@@ -1,12 +1,10 @@
-name: Scheduled BigQuery lifecycle
+name: BigQuery lifecycle
 
-# Weekly credentialed BigQuery verification. Keyless: GitHub's OIDC token is exchanged through
+# On-demand credentialed BigQuery verification. Keyless: GitHub's OIDC token is exchanged through
 # Workload Identity Federation for a short-lived token of a dedicated CI service account, so no
 # long-lived key is stored. Inert until the repository variables below are set.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "17 6 * * 1"
 
 permissions:
   contents: read
@@ -121,5 +119,5 @@ jobs:
             gh issue comment "$existing" --body "Scheduled BigQuery ${{ matrix.engine }} verification failed again: $RUN_URL"
           else
             gh issue create --label scheduled-bigquery --title "Scheduled BigQuery verification failed" \
-              --body "The weekly credentialed BigQuery run failed on \`main\`: $RUN_URL"
+              --body "The credentialed BigQuery run failed on \`main\`: $RUN_URL"
           fi
