@@ -1,6 +1,6 @@
 [project]
 name = "dbt-dqm"
-version = "0.2.1"
+version = "0.2.2"
 description = "Persistent dbt test issue tracking and a local review application"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
@@ -20,12 +20,13 @@ classifiers = [
   "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = [
-  "dbt-core==1.12.5",
   # Security floors for transitive dependencies (#24): wheels don't carry uv.lock, so these keep
   # installs from retaining versions with known advisories.
-  # dbt's older serializer cannot initialize on Python 3.14.
-  "mashumaro>=3.17,<3.18",
+  "certifi>=2026.10.19",
+  "Jinja2>=3.1.6,<4",
+  "packaging>=24,<27",
   "pandas>=2.2,<4",
+  "pillow>=13.0.0,<14",
   "platformdirs>=4,<5",
   "pyarrow>=25.0.1,<26",
   "pyyaml>=6,<7",
@@ -37,11 +38,10 @@ dependencies = [
 
 [project.optional-dependencies]
 bigquery = [
-  "dbt-bigquery==1.12.1",
   "google-cloud-bigquery>=3.25,<4",
   "oauthlib>=4.0.0,<5",  # Security floor for pandas-gbq authentication
 ]
-postgres = ["dbt-postgres>=1.11,<1.12"]
+postgres = ["psycopg2-binary>=2.9.10,<3"]
 
 [project.urls]
 Homepage = "https://github.com/a-adamovich/dbt-dqm"
@@ -53,6 +53,8 @@ Changelog = "https://github.com/a-adamovich/dbt-dqm/blob/main/CHANGELOG.md"
 dbt-dqm = "dbt_dqm_app.cli:main"
 
 [dependency-groups]
+# Engines are development tools, never runtime dependencies of the app.
+dbt1 = ["dbt-core==1.12.5", "dbt-bigquery==1.12.1", "dbt-postgres==1.11.0", "mashumaro>=3.17,<3.18"]
 dev = [
     "pytest>=8,<10",
     "pytest-xdist>=3.8,<4",

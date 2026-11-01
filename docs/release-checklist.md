@@ -13,9 +13,9 @@ ordinary CI itself; the warehouse suites below ran on the candidate, not on that
 | # | Gate | How |
 | --- | --- | --- |
 | 1 | CI passes on the candidate | `.github/workflows/ci.yml`: lint and unit tests, package build and wheel checks (including dependency security floors), Postgres 14 and 16 acceptance, BigQuery compile |
-| 2 | Postgres 14 and 16 acceptance, full suite | `DBT_DQM_TEST_DSN=… uv run --extra postgres pytest integration_tests/acceptance/test_postgres.py` against each server |
-| 3 | Credentialed BigQuery acceptance, **one full run** on the candidate | `DBT_DQM_BIGQUERY_TEST_PROJECT=… uv run --extra bigquery pytest -n 6 --dist load integration_tests/acceptance/test_bigquery.py` (about 25 minutes in parallel; each test uses its own labelled, disposable dataset, and leftovers are swept at session end). Every collected test passes; no credential-related skips; record the actual count. |
-| 4 | Restricted runner/reviewer permissions gate, run serially after 3 | `DBT_DQM_BIGQUERY_RUNNER_CREDENTIALS=… DBT_DQM_BIGQUERY_REVIEWER_CREDENTIALS=… uv run --extra bigquery pytest integration_tests/acceptance/test_bigquery_permissions.py` against the shared QA dataset |
+| 2 | Postgres 14 and 16 acceptance, full suite | `DBT_DQM_TEST_DSN=… uv run --group dbt1 --extra postgres pytest integration_tests/acceptance/test_postgres.py` against each server |
+| 3 | Credentialed BigQuery acceptance, **one full run** on the candidate | `DBT_DQM_BIGQUERY_TEST_PROJECT=… uv run --group dbt1 --extra bigquery pytest -n 6 --dist load integration_tests/acceptance/test_bigquery.py` (about 25 minutes in parallel; each test uses its own labelled, disposable dataset, and leftovers are swept at session end). Every collected test passes; no credential-related skips; record the actual count. |
+| 4 | Restricted runner/reviewer permissions gate, run serially after 3 | `DBT_DQM_BIGQUERY_RUNNER_CREDENTIALS=… DBT_DQM_BIGQUERY_REVIEWER_CREDENTIALS=… uv run --group dbt1 --extra bigquery pytest integration_tests/acceptance/test_bigquery_permissions.py` against the shared QA dataset |
 | 5 | Browser QA of the review app, when the app or its dependencies changed | Sync, edit and Apply, the "busy" message under a held lock, the Health tab including Maintenance; in warehouse mode (`--browse warehouse`) paging, filters, search (including a refusal), an edit applied from a later page, and the offline view |
 | 6 | Cache-boundary memory, when runtime code or dependencies changed | `integration_tests/scale/cache_boundary.py` at 50,000 issues; record it in [scale](scale.md) |
 | 7 | Versions agree | `pyproject.toml` and `dbt_project.yml` versions are equal, and the tag is `v<version>`. A Python pre-release is spelled in SemVer for dbt (`0.2.0a1` → `0.2.0-a1`); no other spelling is accepted. `release.yml` refuses a mismatch before installing or building anything. |
@@ -205,3 +205,11 @@ Dated verification and review records, preserved as written:
 - [Permissions and release safeguards verification](qa-release-safeguards.md) (2026-10-09)
 - [0.2 implementation and verification](implementation-0.2.md) (2026-10-07)
 - [Project review](project-review.md) (2026-08-09)
+
+## 0.2.2 dbt compatibility gate
+
+Before tagging 0.2.2, run the keyless BigQuery lifecycle workflow from `main` on the exact
+candidate commit. Require successful `dbt1` and `dbt2` matrix jobs, including the full live
+acceptance suite. The release workflow verifies this automatically; skipped jobs, earlier
+commits, and offline compilation cannot satisfy the gate. See the
+[compatibility verification record](dbt-2-compatibility.md).

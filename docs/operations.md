@@ -2,48 +2,71 @@
 
 The [README](../README.md) is the shortest path to a first run. This guide covers
 compatibility, environment resolution, maintenance, and upgrades. The Python command and
-dbt package are separate installations and must use matching 0.2 versions.
+dbt package are separate installations and must use matching 0.2.2 versions for this candidate.
 
 ## Installation and compatibility
 
-The stable release is `0.2.1`: [PyPI](https://pypi.org/project/dbt-dqm/0.2.1/) and
-[Git tag `v0.2.1`](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.1).
-The dbt package supports dbt Core 1.11–1.12 with dbt-bigquery 1.11–1.12 or dbt-postgres
-1.11. There is no dbt-postgres 1.12; its 1.11 line supports dbt Core 1.12. Warehouse
-support is BigQuery and Postgres 14/16. The Python app supports Python 3.11–3.14 and pins
-dbt Core 1.12.5; its BigQuery extra uses dbt-bigquery 1.12.1 and its Postgres extra uses
-dbt-postgres 1.11.x.
+The 0.2.2 candidate supports the dbt Core 1.11–1.12 workflow on BigQuery and
+Postgres 14/16, and adds a dbt 2.0.9 BigQuery path. Full v2 compatibility remains gated
+on the credentialed BigQuery acceptance suite; see the [verification record](dbt-2-compatibility.md).
+Python app support remains 3.11–3.14. The last published stable release is
+[0.2.1](https://pypi.org/project/dbt-dqm/0.2.1/).
 
-Until the [dbt Hub registration](https://github.com/dbt-labs/hubcap/pull/464) is live and
-verified, install the dbt package from Git in the consumer project's `packages.yml`:
+Install matching Python and dbt package versions. For this unpublished candidate, install
+the dbt package from a local checkout and the Python package with `pip install -e`:
 
 ```yaml
 packages:
-  - git: "https://github.com/a-adamovich/dbt-dqm.git"
-    revision: v0.2.1
+  - local: /path/to/dbt-dqm
 ```
 
-Run `dbt deps`, then install the separate Python command in the environment where it
-can find your project's dbt executable and warehouse adapter:
+After publication, use Git revision `v0.2.2` and `dbt-dqm==0.2.2`. Hub registration is
+still [pending](https://github.com/dbt-labs/hubcap/pull/464).
+
+Install the engine yourself. The app's `[bigquery]` and `[postgres]` extras install its
+warehouse clients, without installing dbt or its Python adapters:
 
 ```bash
-python -m pip install 'dbt-dqm[bigquery]==0.2.1'
-# or: python -m pip install 'dbt-dqm[postgres]==0.2.1'
+# BigQuery, dbt v2 (candidate; credentialed release gate required)
+python -m pip install 'dbt==2.0.9'
+python -m pip install -e '.[bigquery]'
+
+# BigQuery, dbt v1
+python -m pip install 'dbt-core==1.12.5' 'dbt-bigquery==1.12.1'
+python -m pip install -e '.[bigquery]'
+
+# Postgres, dbt v1
+python -m pip install 'dbt-core==1.12.5' 'dbt-postgres==1.11.0'
+python -m pip install -e '.[postgres]'
 ```
 
-The extras select the adapter; `dbt-dqm[bigquery,postgres]` installs both. A plain
-`dbt-dqm==0.2.1` install includes the command, app, and dbt Core, but no warehouse
-adapter. Existing environments retain adapters already installed. In a source checkout,
-`uv sync --extra bigquery` or `uv sync --extra postgres` installs only the needed
-adapter; `uv sync --all-extras` installs both. The 0.2 app expects the matching 0.2 dbt
-package; do not mix it with 0.1.
+Use separate environments for dbt v1 and v2: both provide a `dbt` command. Engine selection
+follows `--dbt-executable`, then `DBT_DQM_DBT_EXECUTABLE`, then an executable beside the
+app's Python, then `PATH`. The option is available on `run`, `app`, and `workspace`.
+The same selected executable is used by the workflow, app validation, and naming discovery:
+
+```bash
+dbt-dqm run --dbt-executable /path/to/dbt-v2/bin/dbt
+dbt-dqm app --dbt-executable /path/to/dbt-v2/bin/dbt
+```
+
+A base app install includes neither an engine nor warehouse clients. Existing environments
+retain engines already installed; no engine is silently upgraded. Native dbt v2 Postgres is
+outside this release. Use a Python version supported by your separately installed engine;
+the lower-bound Core 1.11.0 checks use an isolated Python 3.11 environment.
+
+When upgrading from earlier releases, install the matching 0.2.2 Python and dbt packages together. Warehouse
+relations, identities, review annotations, and local workspace identity are preserved; no reset
+or new migration is required. Development dependencies and engines are separate groups:
+`uv sync --locked --all-groups --all-extras`, then `uv run --group dbt1 pytest -q`.
 
 On Windows PowerShell, for example:
 
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install 'dbt-dqm[bigquery]==0.2.1'
+python -m pip install 'dbt==2.0.9'
+python -m pip install -e '.[bigquery]'
 ```
 
 On Postgres, an administrator must create the `pgcrypto` extension once:
@@ -71,8 +94,7 @@ From a dbt project or subfolder, `dbt-dqm run`, `dbt-dqm app`, and
 
 `DBT_PROFILE`, profile `env_var()` values, and inherited authentication environment
 variables remain available. Quote paths with spaces using your shell's conventions.
-The app uses dbt beside its Python interpreter before searching `PATH`, and logs the
-executable and version. Failed command details include exit codes and output streams.
+The app uses the selected dbt executable and records its version in diagnostics. Failed command details include exit codes and output streams.
 If tracking relations are missing, run `dbt-dqm run` first.
 
 The package and app resolve custom `generate_schema_name` and `generate_alias_name`
@@ -219,7 +241,7 @@ BigQuery Data Editor on that dataset.
 
 ## BigQuery dataset collation
 
-Version 0.2.1 supports datasets whose default collation is `und:ci`. DQM tables explicitly use
+Version 0.2.1 and later support datasets whose default collation is `und:ci`. DQM tables explicitly use
 `DEFAULT COLLATE ''` and tracking comparisons remain case-sensitive. The package does not change
 your dataset default or your test's own comparison rules. Identity normalization still lowercases
 and trims granularity values; original payload and owner casing is retained.
@@ -227,12 +249,12 @@ and trims granularity values; original payload and owner casing is retained.
 Install matching Python and dbt package versions and run `dbt deps`. Existing uncollated DQM
 installations upgrade normally, without a schema migration or history reset.
 
-If an earlier package created collated tracking columns, 0.2.1 refuses setup before tracking
+If an earlier package created collated tracking columns, 0.2.1 and later refuse setup before tracking
 writes. Changing a table's default does not repair existing columns, and BigQuery cannot change
 their collation in place. For this affected installation only:
 
 1. Export any history or annotations you need to retain, and stop its reviewer apps.
-2. Upgrade both packages to 0.2.1 and run `dbt deps`.
+2. Upgrade both packages to matching current versions and run `dbt deps`.
 3. Run `dbt-dqm run --full-refresh` with the same project, profile, target and naming `--vars`.
    Review the printed relation scope and confirm. This discards that installation's history and
    annotations; use `--yes` only after reviewing that scope for an unattended invocation.

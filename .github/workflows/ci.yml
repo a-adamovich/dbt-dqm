@@ -29,17 +29,17 @@ jobs:
         run: uv pip check
 
       - name: Ruff
-        run: uv run ruff check .
+        run: uv run --group dbt1 ruff check .
 
       - name: Pytest
-        run: uv run pytest -q
+        run: uv run --group dbt1 pytest -q
 
       - name: Streamlit startup smoke test
         run: |
           mkdir -p /tmp/dbt-dqm-smoke-project /tmp/dbt-dqm-smoke-profiles
           printf 'name: smoke\nprofile: smoke\n' > /tmp/dbt-dqm-smoke-project/dbt_project.yml
           printf 'smoke:\n  outputs:\n    dev:\n      type: postgres\n      host: localhost\n      user: smoke\n      pass: smoke\n      dbname: smoke\n      schema: smoke\n' > /tmp/dbt-dqm-smoke-profiles/profiles.yml
-          timeout 20 uv run dbt-dqm app --project-dir /tmp/dbt-dqm-smoke-project --profiles-dir /tmp/dbt-dqm-smoke-profiles --target dev --port 8765 &
+          timeout 20 uv run --group dbt1 dbt-dqm app --project-dir /tmp/dbt-dqm-smoke-project --profiles-dir /tmp/dbt-dqm-smoke-profiles --target dev --port 8765 &
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
             if curl --fail --silent http://127.0.0.1:8765/_stcore/health; then exit 0; fi
             sleep 1
@@ -88,19 +88,19 @@ jobs:
             "$environment/bin/python" "$smoke" "$variant"
           done
       - name: Wheel carries the security floors (#24)
-        run: DBT_DQM_WHEEL="$(ls dist/*.whl)" uv run pytest -q tests/test_dependency_floors.py tests/test_python_compatibility.py
+        run: DBT_DQM_WHEEL="$(ls dist/*.whl)" uv run --group dbt1 pytest -q tests/test_dependency_floors.py tests/test_python_compatibility.py
       - name: Installing the wheel upgrades older vulnerable versions
         run: |
           wheel="$(pwd)/$(ls dist/*.whl)"
           uv venv /tmp/dbt-dqm-old-deps --python ${{ matrix.python }}
-          uv pip install --python /tmp/dbt-dqm-old-deps/bin/python sqlparse==0.5.5 urllib3==2.7.0 oauthlib==3.3.1 mashumaro==3.14
+          uv pip install --python /tmp/dbt-dqm-old-deps/bin/python sqlparse==0.5.5 urllib3==2.7.0 oauthlib==3.3.1
           cd /tmp
           uv pip install --python /tmp/dbt-dqm-old-deps/bin/python "${wheel}[bigquery,postgres]"
           uv pip check --python /tmp/dbt-dqm-old-deps/bin/python
           /tmp/dbt-dqm-old-deps/bin/python - <<'PY'
           from importlib.metadata import version
           from packaging.version import Version
-          floors = {"sqlparse": "0.6.0", "urllib3": "2.8.0", "oauthlib": "4.0.0", "mashumaro": "3.17"}
+          floors = {"sqlparse": "0.6.0", "urllib3": "2.8.0", "oauthlib": "4.0.0"}
           installed = {name: version(name) for name in floors}
           print(installed)
           assert all(Version(installed[n]) >= Version(v) for n, v in floors.items()), installed
@@ -164,33 +164,33 @@ jobs:
 
       - name: dbt deps
         working-directory: integration_tests/demo_postgres
-        run: uv run dbt deps
+        run: uv run --group dbt1 dbt deps
 
       - name: Full lifecycle walkthrough (initial -> passed -> recurrence)
         working-directory: integration_tests/demo_postgres
         run: |
           set -e
-          uv run dbt run-operation reset_demo_dqm
-          uv run dbt seed
+          uv run --group dbt1 dbt run-operation reset_demo_dqm
+          uv run --group dbt1 dbt seed
           for scenario in initial passed recurrence; do
-            uv run dbt run --select demo_records --vars "{demo_scenario: $scenario}"
-            uv run dbt-dqm run --vars "{demo_scenario: $scenario}"
-            uv run dbt test --select assert_scenario_outcomes --vars "{demo_scenario: $scenario, dqm_enabled: true}"
+            uv run --group dbt1 dbt run --select demo_records --vars "{demo_scenario: $scenario}"
+            uv run --group dbt1 dbt-dqm run --vars "{demo_scenario: $scenario}"
+            uv run --group dbt1 dbt test --select assert_scenario_outcomes --vars "{demo_scenario: $scenario, dqm_enabled: true}"
           done
 
       - name: Disabled commands and dedicated-workflow acceptance
         working-directory: integration_tests/demo_postgres
         run: |
-          uv run dbt parse
-          uv run dbt ls --select package:dbt_dqm --resource-type model --output name
-          uv run dbt run-operation assert_postgres_query_plans --vars '{dqm_enabled: true}'
+          uv run --group dbt1 dbt parse
+          uv run --group dbt1 dbt ls --select package:dbt_dqm --resource-type model --output name
+          uv run --group dbt1 dbt run-operation assert_postgres_query_plans --vars '{dqm_enabled: true}'
 
       - name: Transactional acceptance and application interfaces
         shell: bash
         run: |
           set -o pipefail
           mkdir -p acceptance-results
-          uv run pytest -q -rA integration_tests/acceptance/test_postgres.py \
+          uv run --group dbt1 pytest -q -rA integration_tests/acceptance/test_postgres.py \
             --junitxml=acceptance-results/junit.xml 2>&1 | tee acceptance-results/pytest.log
         env:
           DBT_DQM_TEST_DSN: host=localhost port=5432 dbname=dbt_dqm_ci user=postgres password=dbtdqm
@@ -238,9 +238,9 @@ jobs:
       - name: Parse and compile without warehouse introspection
         working-directory: integration_tests/demo_bigquery
         run: |
-          uv run dbt deps
-          uv run dbt parse
-          uv run python ../../scripts/compile_bigquery.py
+          uv run --group dbt1 dbt deps
+          uv run --group dbt1 dbt parse
+          uv run --group dbt1 python ../../scripts/compile_bigquery.py
 
   portability:
     runs-on: ${{ matrix.os }}
@@ -260,8 +260,60 @@ jobs:
       - name: Install adapters and development dependencies
         run: uv sync --locked --all-groups --all-extras
       - name: Native configuration, process pool and authentication checks
-        run: uv run pytest -q tests/test_runner.py tests/test_portability.py tests/test_config.py tests/test_cli.py tests/test_credentials.py tests/test_dependency_floors.py tests/test_python_compatibility.py tests/test_wif.py tests/test_review_actions.py tests/test_exports.py tests/test_store.py tests/test_ui.py tests/test_ui_browse.py
+        run: uv run --group dbt1 pytest -q tests/test_runner.py tests/test_portability.py tests/test_config.py tests/test_cli.py tests/test_credentials.py tests/test_dependency_floors.py tests/test_python_compatibility.py tests/test_wif.py tests/test_review_actions.py tests/test_exports.py tests/test_store.py tests/test_ui.py tests/test_ui_browse.py
       - name: Build and check each installed wheel variant
         run: |
           uv build --no-create-gitignore
-          uv run python scripts/check_wheel_variants.py dist/*.whl
+          uv run --group dbt1 python scripts/check_wheel_variants.py dist/*.whl
+
+  dbt-v2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.14"
+      - name: Install the app and an isolated dbt 2.0.9 engine
+        run: |
+          uv sync --locked --group dev --all-extras
+          uv venv /tmp/dbt-dqm-v2-engine --python 3.14
+          uv pip install --python /tmp/dbt-dqm-v2-engine/bin/python dbt==2.0.9
+      - name: Exercise the real v2 engine and subprocess interface
+        run: uv run --all-extras pytest -q tests/test_dbt_cli.py tests/test_dbt_v2.py tests/test_config.py tests/test_runner.py
+        env:
+          DBT_DQM_V2_EXECUTABLE: /tmp/dbt-dqm-v2-engine/bin/dbt
+
+  dbt-lower-bound:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: dbtdqm
+          POSTGRES_DB: dbt_dqm_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.11"
+      - name: Install app and isolated dbt Core 1.11.0
+        run: |
+          uv sync --locked --all-groups --all-extras
+          uv venv /tmp/dbt-dqm-v111-engine --python 3.11
+          uv pip install --python /tmp/dbt-dqm-v111-engine/bin/python dbt-core==1.11.0 dbt-postgres==1.11.0 dbt-bigquery==1.11.0
+      - name: Enable identity hashing
+        run: psql -h localhost -U postgres -d dbt_dqm_ci -c "create extension if not exists pgcrypto;"
+        env:
+          PGPASSWORD: dbtdqm
+      - name: Run the warehouse acceptance suite with the older engine
+        run: uv run --group dbt1 pytest -q -n 4 integration_tests/acceptance/test_postgres.py
+        env:
+          DBT_DQM_DBT_EXECUTABLE: /tmp/dbt-dqm-v111-engine/bin/dbt
+          DBT_DQM_TEST_DSN: host=localhost port=5432 dbname=dbt_dqm_ci user=postgres password=dbtdqm

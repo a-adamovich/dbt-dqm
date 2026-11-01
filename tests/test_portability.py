@@ -11,7 +11,7 @@ import pytest
 from google.api_core.exceptions import Forbidden, NotFound
 from google.api_core.retry import if_exception_type
 
-from dbt_dqm_app import cli, warehouse
+from dbt_dqm_app import cli, dbt_cli, warehouse
 from dbt_dqm_app.config import AppConfig, load_config, resolve_workspace_path
 from dbt_dqm_app.errors import AppError, WarehouseBusy, classify
 from dbt_dqm_app.limits import CacheLimitExceeded
@@ -147,42 +147,46 @@ def test_cli_does_not_invent_overrides(project, monkeypatch):
 def test_executable_search_prefers_interpreter_directory(tmp_path, monkeypatch):
     calls = []
     executable = tmp_path / "Scripts with spaces" / "dbt.exe"
-    monkeypatch.setattr(warehouse.sys, "executable", str(executable.parent / "python.exe"))
+    monkeypatch.setattr(dbt_cli.sys, "executable", str(executable.parent / "python.exe"))
     def which(name, path=None):
         calls.append(path)
         return str(executable)
-    monkeypatch.setattr(warehouse.shutil, "which", which)
+    monkeypatch.setattr(dbt_cli.shutil, "which", which)
     assert warehouse.resolve_dbt_executable() == str(executable.resolve())
-    assert calls == [str(Path(warehouse.sys.executable).parent)]
+    assert calls == [str(Path(dbt_cli.sys.executable).parent)]
 
 
 def test_executable_search_fallback_and_absence(tmp_path, monkeypatch):
     executable = tmp_path / "dbt"
-    monkeypatch.setattr(warehouse.shutil, "which", lambda name, path=None:
+    monkeypatch.setattr(dbt_cli.shutil, "which", lambda name, path=None:
                         None if path else str(executable))
     assert warehouse.resolve_dbt_executable() == str(executable.resolve())
-    monkeypatch.setattr(warehouse.shutil, "which", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dbt_cli.shutil, "which", lambda *args, **kwargs: None)
     with pytest.raises(AppError, match="could not be found"):
         warehouse.resolve_dbt_executable()
 
 
 def test_real_environment_executable_is_selected():
     executable = Path(warehouse.resolve_dbt_executable())
-    assert executable.parent == Path(warehouse.sys.executable).parent.resolve()
+    assert executable.parent == Path(dbt_cli.sys.executable).parent.resolve()
 
 
-def test_validation_keeps_only_supplied_flags_and_adc(project, monkeypatch):
+def test_validation_keeps_only_supplied_flags_and_adc(project, monkeypatch, fake_dbt_process):
     config = load_config(target="dev")
     calls = []
-    monkeypatch.setattr(warehouse, "_dbt_version", lambda executable: "dbt test version")
+    monkeypatch.setattr(warehouse.DbtCLI, "validate", lambda *args: None)
     monkeypatch.setattr(warehouse, "check_required_relations", lambda config: None)
-    monkeypatch.setattr(warehouse.subprocess, "run", lambda command, **kwargs:
-                        calls.append((command, kwargs)))
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return fake_dbt_process(command, **kwargs)
+    monkeypatch.setattr(warehouse.subprocess, "run", run)
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "existing ADC configuration")
     warehouse.validate_dbt(config)
-    assert calls[0][0][2:] == ["--target", "dev"]
-    assert calls[1][0][2:5] == ["--target", "dev", "--vars"]
-    assert __import__("yaml").safe_load(calls[1][0][5]) == {"dqm_enabled": True}
+    assert all(command[2:4] == ["--target", "dev"] for command, _ in calls)
+    assert all("--project-dir" not in command and "--profiles-dir" not in command
+               for command, _ in calls)
+    command = calls[1][0]
+    assert __import__("yaml").safe_load(command[command.index("--vars") + 1]) == {"dqm_enabled": True}
     assert all(kwargs["cwd"] == project for _, kwargs in calls)
     assert all(kwargs["env"]["GOOGLE_APPLICATION_CREDENTIALS"] == "existing ADC configuration"
                for _, kwargs in calls)
@@ -252,8 +256,8 @@ def test_postgres_preflight_does_not_require_bigquery_staging(tmp_path, monkeypa
 def test_windows_current_directory_does_not_override_the_venv(tmp_path, monkeypatch):
     directory = tmp_path / "venv" / "Scripts"
     expected = directory / "dbt.exe"
-    monkeypatch.setattr(warehouse.sys, "executable", str(directory / "python.exe"))
-    monkeypatch.setattr(warehouse.sys, "platform", "win32")
+    monkeypatch.setattr(dbt_cli.sys, "executable", str(directory / "python.exe"))
+    monkeypatch.setattr(dbt_cli.sys, "platform", "win32")
     calls = []
 
     def which(command, path=None):
@@ -264,7 +268,7 @@ def test_windows_current_directory_does_not_override_the_venv(tmp_path, monkeypa
             return str(expected)
         return None
 
-    monkeypatch.setattr(warehouse.shutil, "which", which)
+    monkeypatch.setattr(dbt_cli.shutil, "which", which)
     assert warehouse.resolve_dbt_executable() == str(expected)
     assert calls == [("dbt", str(directory)), (str(expected), None)]
 

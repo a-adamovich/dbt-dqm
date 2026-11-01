@@ -44,7 +44,7 @@ jobs:
         run: |
           uv build --no-create-gitignore
           uv venv /tmp/dbt-dqm-stable-wheel --python 3.14
-          uv pip install --python /tmp/dbt-dqm-stable-wheel/bin/python "$(pwd)/$(ls dist/*.whl)[postgres]" psutil
+          uv pip install --python /tmp/dbt-dqm-stable-wheel/bin/python "$(pwd)/$(ls dist/*.whl)[postgres]" psutil dbt-core==1.12.5 dbt-postgres==1.11.0 'mashumaro>=3.17,<3.18'
           uv pip check --python /tmp/dbt-dqm-stable-wheel/bin/python
           /tmp/dbt-dqm-stable-wheel/bin/python -c 'import dbt_dqm_app; assert dbt_dqm_app.__version__ == __import__("tomllib").load(open("pyproject.toml", "rb"))["project"]["version"]; assert "site-packages" in str(dbt_dqm_app.__file__)'
       - name: Enable pgcrypto
@@ -94,7 +94,7 @@ jobs:
         run: |
           uv build --no-create-gitignore
           uv venv /tmp/dbt-dqm-stable-browser --python 3.14
-          uv pip install --python /tmp/dbt-dqm-stable-browser/bin/python "$(pwd)/$(ls dist/*.whl)[postgres]" playwright
+          uv pip install --python /tmp/dbt-dqm-stable-browser/bin/python "$(pwd)/$(ls dist/*.whl)[postgres]" playwright dbt-core==1.12.5 dbt-postgres==1.11.0 'mashumaro>=3.17,<3.18'
           uv pip check --python /tmp/dbt-dqm-stable-browser/bin/python
           /tmp/dbt-dqm-stable-browser/bin/python -c 'import dbt_dqm_app; assert dbt_dqm_app.__version__ == __import__("tomllib").load(open("pyproject.toml", "rb"))["project"]["version"]; assert "site-packages" in str(dbt_dqm_app.__file__)'
       - name: Enable pgcrypto

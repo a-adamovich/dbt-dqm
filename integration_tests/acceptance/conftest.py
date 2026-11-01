@@ -2,7 +2,7 @@
 
 The controller (or a plain, non-parallel run) creates the run id and hands it to each worker. At
 the end of the session the controller deletes any BigQuery dataset this run left behind (for
-example from a killed worker) and labelled acceptance datasets older than six hours.
+example from a killed worker). Cleanup of older runs is a separate, explicit operation.
 """
 
 from __future__ import annotations
@@ -15,9 +15,6 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
-
-STALE_HOURS = 6
-
 
 def pytest_configure(config):
     worker = getattr(config, "workerinput", None)
@@ -51,7 +48,7 @@ def pytest_sessionfinish(session):
             bigquery.Client(project=project, location=location),
             project,
             run_id=session.config.dqm_run_id,
-            older_than_hours=STALE_HOURS,
+            older_than_hours=None,
         )
     except Exception as error:  # noqa: BLE001 - cleanup is best effort and never fails a run
         print(f"\nAcceptance dataset cleanup skipped: {type(error).__name__}")

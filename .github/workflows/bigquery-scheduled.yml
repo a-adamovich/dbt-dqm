@@ -1,12 +1,10 @@
-name: Scheduled BigQuery lifecycle
+name: BigQuery lifecycle
 
-# Weekly credentialed BigQuery verification. Keyless: GitHub's OIDC token is exchanged through
+# On-demand credentialed BigQuery verification. Keyless: GitHub's OIDC token is exchanged through
 # Workload Identity Federation for a short-lived token of a dedicated CI service account, so no
 # long-lived key is stored. Inert until the repository variables below are set.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "17 6 * * 1"
 
 permissions:
   contents: read
@@ -15,8 +13,12 @@ permissions:
 
 jobs:
   lifecycle:
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [dbt1, dbt2]
     concurrency:
-      group: dbt-dqm-${{ vars.DBT_DQM_BIGQUERY_PROJECT }}-dbt_dqm_scheduled_ci
+      group: dbt-dqm-${{ vars.DBT_DQM_BIGQUERY_PROJECT }}-dbt_dqm_scheduled_ci-${{ matrix.engine }}
       cancel-in-progress: false
     if: vars.BIGQUERY_LIFECYCLE_ENABLED == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -36,6 +38,16 @@ jobs:
           python-version: "3.14"
       - name: Install dependencies
         run: uv sync --locked --all-groups --extra bigquery
+      - name: Select an isolated dbt engine
+        shell: bash
+        run: |
+          if [ "${{ matrix.engine }}" = dbt2 ]; then
+            uv venv /tmp/dbt-dqm-v2-engine --python 3.14
+            uv pip install --python /tmp/dbt-dqm-v2-engine/bin/python dbt==2.0.9
+            echo "DBT_DQM_DBT_EXECUTABLE=/tmp/dbt-dqm-v2-engine/bin/dbt" >> "$GITHUB_ENV"
+          else
+            echo "DBT_DQM_DBT_EXECUTABLE=$GITHUB_WORKSPACE/.venv/bin/dbt" >> "$GITHUB_ENV"
+          fi
       - name: Write profile (Application Default Credentials from the step above)
         run: |
           mkdir -p ~/.dbt
@@ -47,13 +59,13 @@ jobs:
                 type: bigquery
                 method: oauth
                 project: "{{ env_var('DBT_DQM_BIGQUERY_PROJECT') }}"
-                dataset: dbt_dqm_scheduled_ci
+                dataset: dbt_dqm_scheduled_${{ matrix.engine }}
                 location: US
                 threads: 4
           PROFILES
       - name: The CI identity cannot read the shared QA dataset
         run: |
-          uv run python - <<'PY'
+          uv run --group dbt1 python - <<'PY'
           import os
           from google.api_core.exceptions import Forbidden, NotFound
           from google.cloud import bigquery
@@ -70,29 +82,29 @@ jobs:
         working-directory: integration_tests/demo_bigquery
         run: |
           set -e
-          uv run dbt deps
-          uv run dbt run-operation reset_demo_dqm
-          uv run dbt seed
+          "$DBT_DQM_DBT_EXECUTABLE" deps
+          "$DBT_DQM_DBT_EXECUTABLE" run-operation reset_demo_dqm
+          "$DBT_DQM_DBT_EXECUTABLE" seed
           for scenario in initial passed recurrence; do
-            uv run dbt run --select demo_records --vars "{demo_scenario: $scenario}"
-            uv run dbt-dqm run --vars "{demo_scenario: $scenario}"
-            uv run dbt test --select assert_scenario_outcomes --vars "{demo_scenario: $scenario, dqm_enabled: true}"
+            "$DBT_DQM_DBT_EXECUTABLE" run --select demo_records --vars "{demo_scenario: $scenario}"
+            uv run --group dbt1 dbt-dqm run --vars "{demo_scenario: $scenario}"
+            "$DBT_DQM_DBT_EXECUTABLE" test --select assert_scenario_outcomes --vars "{demo_scenario: $scenario, dqm_enabled: true}"
           done
       - name: Credentialed acceptance suite (parallel, disposable datasets)
         shell: bash
         run: |
           mkdir -p acceptance-results
           set -o pipefail
-          uv run pytest -q -rA -n 6 --dist load integration_tests/acceptance/test_bigquery.py \
+          uv run --group dbt1 pytest -q -rA -n 6 --dist load integration_tests/acceptance/test_bigquery.py \
             --junitxml=acceptance-results/bigquery.xml 2>&1 | tee acceptance-results/bigquery.log
       - name: Sweep stale acceptance datasets
         if: always()
-        run: uv run python integration_tests/acceptance/bigquery_datasets.py --project "$DBT_DQM_BIGQUERY_PROJECT" --older-than-hours 6
+        run: uv run --group dbt1 python integration_tests/acceptance/bigquery_datasets.py --project "$DBT_DQM_BIGQUERY_PROJECT" --older-than-hours 6
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: scheduled-bigquery-results
+          name: scheduled-bigquery-${{ matrix.engine }}-results
           path: acceptance-results/
           if-no-files-found: ignore
       - name: Report failure in an issue
@@ -104,8 +116,8 @@ jobs:
           gh label create scheduled-bigquery --color B60205 --description "Scheduled BigQuery verification" 2>/dev/null || true
           existing="$(gh issue list --label scheduled-bigquery --state open --json number --jq '.[0].number')"
           if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body "Scheduled BigQuery verification failed again: $RUN_URL"
+            gh issue comment "$existing" --body "Scheduled BigQuery ${{ matrix.engine }} verification failed again: $RUN_URL"
           else
             gh issue create --label scheduled-bigquery --title "Scheduled BigQuery verification failed" \
-              --body "The weekly credentialed BigQuery run failed on \`main\`: $RUN_URL"
+              --body "The credentialed BigQuery run failed on \`main\`: $RUN_URL"
           fi

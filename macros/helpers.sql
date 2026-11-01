@@ -31,6 +31,16 @@
   {{ return(node.resource_type == 'test' and 'dbt_dqm' in (node.config.meta or {})) }}
 {%- endmacro %}
 
+{# dbt v2 does not expose its macros through dynamically indexed context['dbt']. #}
+{% macro column_type(kind) %}
+  {% if kind == 'string' %}{{ return(dbt.type_string()) }}
+  {% elif kind == 'timestamp' %}{{ return(dbt.type_timestamp()) }}
+  {% elif kind == 'int' %}{{ return(dbt.type_int()) }}
+  {% elif kind == 'bigint' %}{{ return(dbt.type_bigint()) }}
+  {% elif kind == 'float' %}{{ return(dbt.type_float()) }}
+  {% else %}{{ exceptions.raise_compiler_error('Unsupported DQM column type: ' ~ kind) }}{% endif %}
+{% endmacro %}
+
 {# Owners are one text field; retain all nonblank metadata entries in list order. #}
 {% macro owner_text(value, key='owner') %}
   {% if value is none %}{{ return(none) }}{% endif %}
@@ -108,7 +118,7 @@
 {% endmacro %}
 
 {% macro resolved_relations() %}
-  {% do log('DQM_RELATIONS=' ~ tojson(dbt_dqm.relation_contract()),info=false) %}
+  {% do log('DQM_RELATIONS=' ~ tojson(dbt_dqm.relation_contract()),info=true) %}
 {% endmacro %}
 
 {% macro installation_lock_key() %}

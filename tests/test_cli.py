@@ -92,3 +92,26 @@ def test_workspace_purge_cli_parses():
         ["workspace", "purge", "--project-dir", "/tmp/project", "--target", "prod"]
     )
     assert args.workspace_command == "purge"
+
+
+def test_engine_override_is_available_for_all_commands():
+    for command in (["run"], ["app"], ["workspace", "info"], ["workspace", "purge"]):
+        args = parser().parse_args([*command, "--dbt-executable", "/path with spaces/dbt"])
+        assert args.dbt_executable == "/path with spaces/dbt"
+
+
+def test_app_passes_explicit_engine_to_streamlit(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import pytest
+
+    from dbt_dqm_app import cli
+
+    process = MagicMock()
+    process.return_value.returncode = 0
+    monkeypatch.setattr(cli.subprocess, "run", process)
+    monkeypatch.setattr(cli.sys, "argv", ["dbt-dqm", "app", "--dbt-executable", "/engine/dbt"])
+    monkeypatch.setenv("DBT_DQM_DBT_EXECUTABLE", "/older/dbt")
+    with pytest.raises(SystemExit):
+        cli.main()
+    assert process.call_args.kwargs["env"]["DBT_DQM_DBT_EXECUTABLE"] == "/engine/dbt"

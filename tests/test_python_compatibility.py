@@ -24,7 +24,7 @@ def _assert_python_range(value):
 
 def _assert_compatibility_floors(requirements):
     by_name = {r.name: r.specifier for r in map(Requirement, requirements)}
-    for name, old, supported in [("mashumaro", "3.14", "3.17"), ("streamlit", "1.51", "1.52")]:
+    for name, old, supported in [("streamlit", "1.51", "1.52")]:
         assert old not in by_name[name]
         assert supported in by_name[name]
 

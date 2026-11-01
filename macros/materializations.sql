@@ -76,7 +76,7 @@
     {% set names = columns|map(attribute='name')|map('lower')|list %}
     {% for column, kind in dbt_dqm.table_schemas()[model.name] if column|lower not in names %}
       {% call statement() %}
-        {{ dbt_dqm.ensure_column(relation, column, context['dbt']['type_' ~ kind]()) }}
+        {{ dbt_dqm.ensure_column(relation, column, dbt_dqm.column_type(kind)) }}
       {% endcall %}
     {% endfor %}
     {% do apply_grants(relation, config.get('grants'), should_revoke(existing, false)) %}

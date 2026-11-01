@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.2 — Unreleased candidate
+
+- Add a dbt 2.0.9 BigQuery path through a shared CLI/artifact interface, retaining dbt Core
+  1.11–1.12 on BigQuery and Postgres. Credentialed BigQuery validation is a release gate;
+  offline checks alone do not establish full v2 compatibility.
+- Select a separately installed engine with `--dbt-executable` or `DBT_DQM_DBT_EXECUTABLE`.
+  App extras now install warehouse clients without installing dbt or its Python adapters.
+- Select bounded test capture inside the package materialization, preserve fresh invocation
+  evidence, and remove app configuration dependencies on dbt's Python internals.
+- Preserve the warehouse schema, issue identities, annotations, and workspace identity.
+
+
 ## 0.2.1 - 2026-10-19
 
 - Fix BigQuery initialization in datasets with default `und:ci` collation. Create tracking, app,
