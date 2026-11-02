@@ -14,7 +14,7 @@ def main():
 
     commit = os.environ["GITHUB_SHA"]
     repository = os.environ["GITHUB_REPOSITORY"]
-    runs = gh("run", "list", "--repo", repository, "--workflow", "bigquery-scheduled.yml",
+    runs = gh("run", "list", "--repo", repository, "--workflow", "bigquery-lifecycle.yml",
               "--commit", commit, "--status", "success", "--limit", "100",
               "--json", "databaseId,headSha")
     required = {"lifecycle (dbt1)", "lifecycle (dbt2)"}

@@ -128,7 +128,7 @@ path rather than an explicit credentials-file override for WIF. dbt-dqm does not
 identity pools, providers, service accounts, IAM bindings, or credential files. Use an
 environment you trust. The release's offline WIF smoke test
 checks library behavior with simulated responses, not live IAM; live release QA uses
-existing local credentials. [Scheduled BigQuery verification](scheduled-bigquery.md)
+existing local credentials. [On-demand BigQuery verification](bigquery-lifecycle.md)
 remains inactive until configured.
 
 ## Upgrading

@@ -37,7 +37,7 @@ assessment and intentionally keeps its original findings.
   byte budgets on BigQuery.
 - Expand the tested Python/dbt compatibility matrix only from observed demand.
 - Enable the scheduled credentialed BigQuery workflow: it is keyless and ready, and needs the
-  one-time cloud setup in [scheduled BigQuery verification](scheduled-bigquery.md).
+  one-time cloud setup in [on-demand BigQuery verification](bigquery-lifecycle.md).
 - Validate dbt 1.12 and pandas 3 as separate compatibility upgrades (#11).
 - Identify what puts the app's sync peak at about 560–580 MiB in many runs (independent of the
   PyArrow memory pool; see [scale](scale.md)).
