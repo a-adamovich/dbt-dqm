@@ -20,6 +20,8 @@ def test_release_gate_requires_both_live_engines_on_exact_revision(monkeypatch, 
     monkeypatch.setenv("GITHUB_SHA", "candidate")
     monkeypatch.setenv("GITHUB_REPOSITORY", "example/package")
     def run(command, **kwargs):
+        if command[1] == "run":
+            assert command[command.index("--workflow") + 1] == "bigquery-lifecycle.yml"
         value = ([{"databaseId": 42, "headSha": revision}] if command[1] == "run" else
                  {"jobs": [{"name": f"lifecycle ({engine})", "conclusion": conclusion}
                            for engine, conclusion in zip(("dbt1", "dbt2"), conclusions, strict=True)]})

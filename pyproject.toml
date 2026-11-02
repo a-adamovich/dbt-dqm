@@ -71,6 +71,7 @@ packages = ["src/dbt_dqm_app"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = ["core: required real-warehouse issue-integrity checks for pull requests"]
 
 [tool.ruff]
 line-length = 100
