@@ -125,7 +125,7 @@ def test_wif_authentication_failure_has_no_fallback(wif, loader, failed_endpoint
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX script fixture; native ADC propagation has portability coverage")
-def test_wif_adc_environment_reaches_dbt_subprocesses(wif, tmp_path, monkeypatch):
+def test_wif_adc_environment_reaches_dbt_subprocesses(wif, tmp_path, monkeypatch, fake_dbt_process):
     config, adc = wif
     binary = tmp_path / "bin"
     binary.mkdir()
@@ -137,11 +137,16 @@ def test_wif_adc_environment_reaches_dbt_subprocesses(wif, tmp_path, monkeypatch
         f"with open({str(log)!r}, 'a') as output:\n"
         "    output.write(json.dumps({'command': sys.argv[1], "
         "'adc': os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}) + '\\n')\n"
+        "if sys.argv[1] == 'parse':\n"
+        "    from pathlib import Path\n"
+        "    target = Path(sys.argv[sys.argv.index('--target-path') + 1])\n"
+        "    target.mkdir(parents=True, exist_ok=True)\n"
+        "    (target / 'manifest.json').write_text(json.dumps({'metadata': {'invocation_id': 'test'}, 'nodes': {}, 'sources': {}}))\n"
     )
     executable.chmod(0o700)
     monkeypatch.setattr(sys, "executable", str(binary / "python"))
     from dbt_dqm_app import warehouse
-    monkeypatch.setattr(warehouse, "_dbt_version", lambda executable: "test version")
+    monkeypatch.setattr(warehouse.DbtCLI, "validate", lambda *args: None)
     monkeypatch.setattr(warehouse, "check_required_relations", lambda config: None)
     validate_dbt(config)
     assert [json.loads(line) for line in log.read_text().splitlines()] == [

@@ -1,4 +1,4 @@
-"""Explicit DQM orchestration. dbt objects stay inside one isolated worker process."""
+"""Explicit DQM orchestration through dbt's CLI and serialized artifacts."""
 from __future__ import annotations
 
 import argparse
@@ -16,6 +16,7 @@ import yaml
 
 from .adapters import require_adapter
 from .config import load_config
+from .dbt_cli import DbtCLI
 
 
 def launch(arguments: argparse.Namespace) -> int:
@@ -75,8 +76,6 @@ def test_result_key(result):
 
 class Workflow:
     def __init__(self, request, factory=None):
-        from dbt.cli.main import dbtRunner
-
         self.request = dict(request)
         variables = yaml.safe_load(request.get("vars") or "{}")
         if not isinstance(variables, dict):
@@ -84,6 +83,7 @@ class Workflow:
         if "dqm_enabled" in variables and variables["dqm_enabled"] is not True:
             raise ValueError("dbt-dqm run requires dqm_enabled=true; omit that override")
         variables["dqm_enabled"] = True
+        variables["_dbt_dqm_workflow"] = True
         self.variables = variables
         self.base = ["--vars", yaml.safe_dump(variables)]
         for key in ("project_dir", "profiles_dir", "target"):
@@ -108,8 +108,10 @@ class Workflow:
         self.reconciliation_id = None
         self.owner_summary = None
         self.summary_status = "not_requested"
-        self.factory = factory or dbtRunner
-        self.runner = self.factory(callbacks=[self.event])
+        self.engine_info = {}
+        self.runner = (factory(callbacks=[self.event]) if factory else DbtCLI(
+            executable=request.get("dbt_executable"), callbacks=[self.event],
+            verbose=bool(request.get("verbose"))))
         self.timings = {}
         self.sql_calls = {}
         self.query_jobs = {}
@@ -158,8 +160,10 @@ class Workflow:
                                  key.replace("_", "-"))
         else:
             flags += ["--no-defer", "--no-favor-state"]
-        if command in ("test", "run"):
+        if command in ("test", "run") and not getattr(self.runner, "is_v2", False):
             flags.append("--cache-selected-only")
+        if isinstance(self.runner, DbtCLI):
+            return flags
         if not self.request.get("verbose"):
             flags += ["--log-level", "none"]
         else:
@@ -214,7 +218,8 @@ class Workflow:
         try:
             config = load_config(self.request.get("project_dir"), self.request.get("profiles_dir"),
                                  self.request.get("target"), cli_vars=self.variables,
-                                 target_path=self.request.get("target_path"))
+                                 target_path=self.request.get("target_path"),
+                                 dbt_executable=self.request.get("dbt_executable"))
             self.base += ["--target-path", str(config.target_path)]
             for key, value in (("state", self.request.get("state", None)
                                if self.request.get("state") is not None else os.environ.get("DBT_STATE")),
@@ -232,7 +237,7 @@ class Workflow:
         finally:
             elapsed = time.monotonic() - started
             if config is not None:
-                metrics = {"phase_seconds": self.timings, "sql_calls": self.sql_calls,
+                metrics = {**self.engine_info, "phase_seconds": self.timings, "sql_calls": self.sql_calls,
                            "query_jobs": self.query_jobs, "total_seconds": elapsed,
                            "completion_status": "cancelled" if self.cancelled else
                            {0: "success", 1: "test_failures", 2: "error"}[code],
@@ -275,8 +280,11 @@ class Workflow:
 
     def _execute(self, config) -> int:
         require_adapter(config.adapter_type)
+        if isinstance(self.runner, DbtCLI):
+            self.runner.validate(config.adapter_type)
+            self.engine_info = {"dbt_version": str(self.runner.version),
+                                "dbt_executable": self.runner.executable}
         manifest = self.checked(["parse"])
-        self.runner = self.factory(manifest=manifest, callbacks=[self.event])
         self.checked(["run-operation", "dbt_dqm.workflow_settings"])
         if self.settings.get('relations'):
             from .relations import bind
@@ -307,7 +315,6 @@ class Workflow:
             errors.extend(f"{label}: {problem}" for problem in validate_test(node, default))
             if node.config.limit is None:
                 print(f"WARNING: {label}: native limit missing; using {default}", flush=True)
-                node.config.limit = default
             metadata = node.config.meta.get("dbt_dqm")
             for key in ("capture_mode", "context_columns"):
                 if isinstance(metadata, dict) and key in metadata:
@@ -324,11 +331,23 @@ class Workflow:
             print("WARNING: full event values have no dbt_dqm_event_retention_days configured", flush=True)
         selectors = ["fqn:" + ".".join(node.fqn) for node in nodes]
         if nodes:
-            self.checked(["compile", "--no-introspect", "--select", *selectors])
+            if isinstance(self.runner, DbtCLI):
+                from .runtime_project import test_project
+
+                # Validate that the isolated root override can be constructed before a
+                # full refresh or any tracking-table initialization is allowed to run.
+                with test_project(config.project_dir, self.variables,
+                                  packages_install_path=os.environ.get("DBT_PACKAGES_INSTALL_PATH")):
+                    pass
+            compiled = self.checked(["compile", "--no-introspect", "--select", *selectors])
+            compiled_nodes = getattr(compiled, "nodes", manifest.nodes)
+            queries = {node.unique_id: getattr(compiled_nodes[node.unique_id], "compiled_code", "")
+                       for node in nodes}
+            if isinstance(self.runner, DbtCLI) and any(not query for query in queries.values()):
+                raise RuntimeError("dbt did not produce compiled SQL for every selected DQM test")
             self.checked(["run-operation", "dbt_dqm.validate_outputs", "--args",
-                          json.dumps({"test_ids": [node.unique_id for node in nodes]})])
-            for node in nodes:
-                node.config.materialized = "dqm_test"
+                          json.dumps({"test_ids": [node.unique_id for node in nodes],
+                                      "compiled_queries": queries})])
         if self.request.get("full_refresh"):
             from .refresh import confirm_refresh, full_refresh
 
@@ -356,6 +375,11 @@ class Workflow:
                 raise RuntimeError(f"DQM test execution failed: {self.failure_reason(tests)}")
             results = [r for r in tests.result.results if r.node.unique_id in ids
                        and "dbt_dqm" in (r.node.config.meta or {})]
+            missing = {node.unique_id for node in nodes} - {r.node.unique_id for r in results}
+            if missing:
+                capture_failed = True
+                print("DQM tests produced no result: " + ", ".join(sorted(missing)),
+                      file=sys.stderr, flush=True)
             self.report_test_results(results)
             # Write directly from this result object while its invocation context is current.
             # This also avoids stale native artifacts when DBT_WRITE_JSON is disabled.

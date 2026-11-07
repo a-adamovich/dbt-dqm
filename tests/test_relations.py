@@ -37,7 +37,8 @@ def test_namespaces_have_separate_storage_and_locks(tmp_path):
         _relation_parts(first, "dqm_unknown")
 
 
-def test_unprefixed_installation_preserves_old_cache_and_lock(tmp_path):
+def test_unprefixed_installation_preserves_old_cache_and_lock(tmp_path, monkeypatch):
+    monkeypatch.setattr("dbt_dqm_app.config.user_data_path", lambda *args: tmp_path / "app-data")
     original = replace(config(tmp_path), dataset="shared")
     resolved = bind(original, contract(""))
     original.workspace_path.parent.mkdir(parents=True, exist_ok=True)

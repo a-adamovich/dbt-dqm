@@ -2,16 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import os
+from ast import literal_eval
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
-from dbt.cli.resolvers import default_profiles_dir, default_project_dir
-from dbt.clients.jinja import get_rendered
-from dbt.config.profile import Profile
-from dbt.config.renderer import ProfileRenderer
-from dbt.context.base import generate_base_context
-from dbt_common.context import set_invocation_context
+from jinja2 import StrictUndefined
+from jinja2.nativetypes import NativeCodeGenerator
+from jinja2.sandbox import SandboxedEnvironment
 from platformdirs import user_data_path
 
 from .errors import AppError
@@ -61,6 +59,7 @@ class AppConfig:
     vars_yaml: str = "{}"
     relations: tuple[tuple[str, str | None, str, str], ...] = ()
     test_granularity: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    dbt_executable: str | None = None
 
     def __post_init__(self) -> None:
         validate_limits(self.max_cache_issues, self.max_cache_mib)
@@ -94,13 +93,15 @@ def workspace_path_for(project_dir: Path, profile_name: str, target: str, namesp
 
 
 def resolve_project_dir(value: str | Path | None = None) -> Path:
+    default = next((p for p in (Path.cwd(), *Path.cwd().parents)
+                    if (p / "dbt_project.yml").exists()), Path.cwd())
     return _path(value if value is not None else os.environ.get("DBT_PROJECT_DIR")
-                 or default_project_dir())
+                 or default)
 
 
 def resolve_profiles_dir(value: str | Path | None = None) -> Path:
     return _path(value if value is not None else os.environ.get("DBT_PROFILES_DIR")
-                 or default_profiles_dir())
+                 or (Path.cwd() if (Path.cwd() / "profiles.yml").exists() else Path.home() / ".dbt"))
 
 
 def _path(value: str | Path) -> Path:
@@ -132,38 +133,100 @@ def _selected_profile(profiles_dir: Path, profile_name: str, target: str | None,
     profiles = _read_yaml(profiles_dir / "profiles.yml")
     if profile_name not in profiles:
         raise AppError("The selected dbt profile was not found in profiles.yml.")
-    set_invocation_context(os.environ)
     try:
-        return Profile.render_profile(profiles[profile_name], profile_name,
-                                      target if target is not None else os.environ.get("DBT_TARGET") or None,
-                                      ProfileRenderer(cli_vars or {}))
-    except Exception as error:  # noqa: BLE001 - normalize dbt rendering failures for the UI.
+        profile = profiles[profile_name]
+        selected = (target if target is not None else os.environ.get("DBT_TARGET") or
+                    _plain(profile.get("target", "default"), cli_vars))
+        output = profile["outputs"][selected]
+        if not isinstance(output, dict):
+            raise TypeError("The selected profile output must be a mapping")
+        return selected, _render(output, cli_vars)
+    except Exception:  # noqa: BLE001 - do not include rendered credentials in errors.
         raise AppError("Could not resolve the dbt profile or target. Check profiles.yml and "
-                       "its environment variables.", str(error)) from None
+                       "its environment variables.") from None
 
 
 def resolve_workspace_path(project_dir: str | Path | None = None, target: str | None = None,
-                           profiles_dir: str | Path | None = None, *, cli_vars=None) -> Path:
+                           profiles_dir: str | Path | None = None, *, cli_vars=None,
+                           dbt_executable=None) -> Path:
     project_dir = resolve_project_dir(project_dir)
     if (project_dir / 'packages.yml').exists() or (project_dir / 'dependencies.yml').exists():
         from .relations import resolve_config
-        return resolve_config(load_config(project_dir, profiles_dir, target, cli_vars=cli_vars)).workspace_path
-    profile_name = _profile_name(_read_yaml(project_dir / "dbt_project.yml"))
+        return resolve_config(load_config(project_dir, profiles_dir, target, cli_vars=cli_vars,
+                                          dbt_executable=dbt_executable)).workspace_path
+    profile_name = _profile_name(_read_yaml(project_dir / "dbt_project.yml"), cli_vars)
     target = target if target is not None else os.environ.get("DBT_TARGET") or None
     if target is None:
         target, _ = _selected_profile(resolve_profiles_dir(profiles_dir), profile_name, None)
     return workspace_path_for(project_dir, profile_name, target)
 
 
+_MISSING = object()
+
+
+class _ProfileEnvironment(SandboxedEnvironment):
+    code_generator_class = NativeCodeGenerator
+
+
+def _render(value, cli_vars=None):
+    if isinstance(value, dict):
+        return {key: _render(item, cli_vars) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_render(item, cli_vars) for item in value]
+    if not isinstance(value, str):
+        return value
+
+    def env_var(name, default=_MISSING):
+        if name in os.environ:
+            return os.environ[name]
+        if default is not _MISSING:
+            return default
+        raise ValueError(f"Required environment variable is missing: {name}")
+
+    def var(name, default=_MISSING):
+        if name in (cli_vars or {}):
+            return cli_vars[name]
+        if default is not _MISSING:
+            return default
+        raise ValueError(f"Required variable is missing: {name}")
+
+    # Render only once: strings returned by env_var may themselves contain Jinja or '$'.
+    def native(item):
+        try:
+            return literal_eval(str(item))
+        except (ValueError, SyntaxError):
+            return item
+
+    def number(item):
+        result = native(item)
+        if isinstance(result, bool) or not isinstance(result, (int, float)):
+            raise TypeError("Profile value is not a number")
+        return result
+
+    def boolean(item):
+        result = native(item)
+        if not isinstance(result, bool):
+            raise TypeError("Profile value is not a boolean")
+        return result
+
+    environment = _ProfileEnvironment(undefined=StrictUndefined)
+    environment.filters.update(as_native=native, as_text=str, as_number=number, as_bool=boolean)
+    # NativeTemplate.render() literal-evaluates even ordinary strings such as passwords.
+    # Generate the native nodes instead: only explicit as_* filters convert string values.
+    parts = list(environment.from_string(value).generate(env_var=env_var, var=var))
+    rendered = parts[0] if len(parts) == 1 else "".join(map(str, parts))
+    if isinstance(rendered, StrictUndefined):
+        raise TypeError("Undefined profile value")
+    return rendered
+
+
 def _plain(value: object, cli_vars=None) -> str:
-    set_invocation_context(os.environ)
-    rendered = get_rendered(str(value), generate_base_context(cli_vars or {}), native=True)
-    return str(rendered)
+    return str(_render(value, cli_vars))
 
 
 def load_config(project_dir: str | Path | None = None, profiles_dir: str | Path | None = None,
                 target: str | None = None, *, cli_vars=None,
-                target_path: str | Path | None = None) -> AppConfig:
+                target_path: str | Path | None = None, dbt_executable=None) -> AppConfig:
     working_dir = Path.cwd()
     if cli_vars is None:
         cli_vars = yaml.safe_load(os.environ.get('DBT_DQM_VARS', '{}')) or {}
@@ -236,4 +299,5 @@ def load_config(project_dir: str | Path | None = None, profiles_dir: str | Path 
         max_cache_mib=int(os.environ.get("DBT_DQM_MAX_CACHE_MIB", str(MAX_CACHE_MIB))),
         max_search_gib=float(os.environ.get("DBT_DQM_MAX_SEARCH_GIB", "1")),
         browse_mode=os.environ.get("DBT_DQM_BROWSE", "auto"),
+        dbt_executable=dbt_executable or os.environ.get("DBT_DQM_DBT_EXECUTABLE"),
     )

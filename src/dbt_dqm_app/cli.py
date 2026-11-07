@@ -19,6 +19,7 @@ def parser() -> argparse.ArgumentParser:
                               help="Run the separate DQM test, capture and review workflow")
     for flag in ("project-dir", "profiles-dir", "target"):
         run.add_argument(f"--{flag}")
+    run.add_argument("--dbt-executable", help="dbt executable (DBT_DQM_DBT_EXECUTABLE)")
     run.add_argument("--select", nargs="+")
     run.add_argument("--exclude", nargs="+")
     run.add_argument("--vars", default="{}")
@@ -41,6 +42,7 @@ def parser() -> argparse.ArgumentParser:
     app.add_argument("--project-dir", default=None)
     app.add_argument("--profiles-dir", default=None)
     app.add_argument("--target", default=None)
+    app.add_argument("--dbt-executable", help="dbt executable (DBT_DQM_DBT_EXECUTABLE)")
     app.add_argument("--target-path", help="Artifacts directory used by run (DBT_TARGET_PATH)")
     app.add_argument("--port", type=int, default=8501)
     app.add_argument("--max-cache-issues", type=int, default=MAX_CACHE_ISSUES,
@@ -76,6 +78,7 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("--project-dir")
         command.add_argument("--target")
         command.add_argument("--profiles-dir")
+        command.add_argument("--dbt-executable", help="dbt executable (DBT_DQM_DBT_EXECUTABLE)")
     return root
 
 
@@ -87,7 +90,8 @@ def main() -> None:
         raise SystemExit(launch(args))
     if args.command == "workspace":
         workspace_path = resolve_workspace_path(args.project_dir, args.target, args.profiles_dir,
-                                                cli_vars=yaml.safe_load(args.vars))
+                                                cli_vars=yaml.safe_load(args.vars),
+                                                dbt_executable=args.dbt_executable)
         related_paths = [
             workspace_path,
             Path(f"{workspace_path}-wal"),
@@ -120,6 +124,8 @@ def main() -> None:
         if args.lock_timeout <= 0:
             raise SystemExit("--lock-timeout must be a positive integer")
         environment = os.environ.copy()
+        if args.dbt_executable is not None:
+            environment["DBT_DQM_DBT_EXECUTABLE"] = args.dbt_executable
         if args.target_path is not None:
             environment["DBT_TARGET_PATH"] = args.target_path
         environment.update(

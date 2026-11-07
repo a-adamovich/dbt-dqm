@@ -19,6 +19,8 @@ import pytest
 import yaml
 from google.cloud import bigquery
 
+from dbt_dqm_app.dbt_cli import resolve_dbt_executable
+
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT = os.environ.get("DBT_DQM_BIGQUERY_TEST_PROJECT")
 pytestmark = pytest.mark.skipif(not PROJECT, reason="Credentialed BigQuery release gate")
@@ -36,10 +38,15 @@ def test_default_maintenance_shortcuts_keep_retention_fence_and_health(demo):
     assert "Compiled node" not in result.stdout and "Running with dbt" not in result.stdout
     metrics = json.loads((demo.path / "target/dqm_workflow_metrics.json").read_text())
     actions = {row["step"]: row["action"] for row in metrics["maintenance_steps"]}
-    assert actions == {"raw_pruning": "executed", "event_retention": "no_eligible_work",
-                       "staging_expiry": "no_eligible_work", "stage_drops": "no_eligible_work",
-                       "run_pruning": "no_eligible_work", "log_pruning": "no_eligible_work"}
-    assert len(set(metrics["query_jobs"]["maintain_dqm"])) == 3
+    if metrics["dbt_version"].startswith("2."):
+        # dbt 2 does not expose dispatched macro metadata, so overrides cannot be
+        # ruled out and every step must run instead of using eligibility shortcuts.
+        assert set(actions.values()) == {"executed"}
+    else:
+        assert actions == {"raw_pruning": "executed", "event_retention": "no_eligible_work",
+                           "staging_expiry": "no_eligible_work", "stage_drops": "no_eligible_work",
+                           "run_pruning": "no_eligible_work", "log_pruning": "no_eligible_work"}
+        assert len(set(metrics["query_jobs"]["maintain_dqm"])) == 3
     control = demo.sql("select generation,raw_pruned_before from @dataset.dqm_reconciliation_control`")[0]
     assert control["generation"] > 0 and control["raw_pruned_before"] is not None
     assert demo.sql("select count(*) as n from @dataset.dqm_maintenance_health` where state!='ok'")[0]["n"] == 0
@@ -54,7 +61,7 @@ class Demo:
 
     def dbt(self, *args, variables=None, success=True, target="target"):
         command = [
-            str(Path(sys.executable).with_name("dbt")),
+            resolve_dbt_executable(),
             *args,
             "--project-dir",
             str(self.path),
@@ -68,7 +75,9 @@ class Demo:
         command += ["--vars", json.dumps({"dqm_enabled": True, **(variables or {})})]
         # A reconcile is two BigQuery scripts of ~40 statements; each script took 85-126 s in
         # the 2026-10-07 runs, so one dbt command can approach 300 s without anything hanging.
-        result = subprocess.run(command, capture_output=True, text=True, timeout=600, check=False)
+        # dbt v2's BigQuery seed driver opens seed files relative to the process cwd.
+        result = subprocess.run(command, capture_output=True, text=True, timeout=600, check=False,
+                                cwd=self.path)
         if args[0] in ("test", "build", "run"):
             from explicit_capture import collect
 

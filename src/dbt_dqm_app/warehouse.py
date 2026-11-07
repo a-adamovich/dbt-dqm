@@ -4,10 +4,7 @@ import getpass
 import hashlib
 import json
 import logging
-import os
-import shutil
 import subprocess
-import sys
 import uuid
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
@@ -21,6 +18,10 @@ import yaml
 from . import browse
 from .adapters import LazyModule, require_adapter
 from .config import AppConfig
+from .dbt_cli import (
+    DbtCLI,
+    resolve_dbt_executable,  # noqa: F401 - existing Python callers
+)
 from .errors import AppError, SearchTooCostly, SnapshotUnavailable, WarehouseBusy, classify
 from .limits import CacheLimitExceeded, check_cache_size, issue_json
 from .relations import lock_key
@@ -80,63 +81,36 @@ def _override_credentials(path: str, mtime_ns: int, size: int):
 logger = logging.getLogger(__name__)
 
 
-def resolve_dbt_executable() -> str:
-    directory = Path(sys.executable).parent.resolve()
-    executable = shutil.which("dbt", path=str(directory))
-    # Python 3.11's Windows which() inserts cwd before even an explicit path.
-    if sys.platform == "win32" and (
-        executable is None or Path(executable).resolve().parent != directory
-    ):
-        executable = next((found for suffix in (".exe", ".cmd", ".bat", ".com")
-                           if (found := shutil.which(str(directory / ("dbt" + suffix))))), None)
-    executable = executable or shutil.which("dbt")
-    if executable is None:
-        raise AppError("dbt could not be found. Install the selected dbt-dqm adapter extra "
-                       "in this Python environment.")
-    return str(Path(executable).resolve())
-
-
-@lru_cache(maxsize=8)
-def _dbt_version(executable: str) -> str:
-    result = subprocess.run([executable, "--version"], check=True, capture_output=True, text=True,
-                            encoding="utf-8", errors="replace",
-                            env={**os.environ, "DBT_VERSION_CHECK": "false"})
-    version = f"{result.stdout or ''}\n{result.stderr or ''}".strip()
-    if not logger.handlers:
-        logger.addHandler(logging.StreamHandler())
-        logger.setLevel(logging.INFO)
-        logger.propagate = False
-    logger.info("dbt executable: %s\ndbt --version:\n%s", executable, version)
-    return version
-
-
 def validate_dbt(config: AppConfig) -> None:
-    """Use the active environment's dbt and preserve the caller's default resolution."""
+    """Validate using the same selected engine as the workflow and naming resolver."""
     require_adapter(config.adapter_type)
+    environment = {}
     if config.credentials_file is not None:
         override_credentials(config.credentials_file)
-    dbt_executable = resolve_dbt_executable()
+        environment["GOOGLE_APPLICATION_CREDENTIALS"] = str(config.credentials_file.resolve())
+    runner = DbtCLI(executable=config.dbt_executable, cwd=config.working_dir,
+                    environment=environment)
+    runner.validate(config.adapter_type)
     base = list(config.dbt_cli_args) if config.dbt_cli_args is not None else [
         "--project-dir", str(config.project_dir), "--profiles-dir", str(config.profiles_dir),
         "--target", config.target,
     ]
-    environment = os.environ.copy()
-    if config.credentials_file is not None:
-        environment["GOOGLE_APPLICATION_CREDENTIALS"] = str(config.credentials_file.resolve())
+    # Force an absolute artifact directory, independent of the launch subdirectory.
+    if "--target-path" not in base:
+        base += ["--target-path", str(config.target_path or config.project_dir / "target")]
     variables = yaml.safe_load(config.vars_yaml) or {}
-    if variables:
-        base += ["--vars", config.vars_yaml]
-    version = ""
-    try:
-        version = _dbt_version(dbt_executable)
-        for operation in ("debug", "parse"):
-            subprocess.run([dbt_executable, operation, *base, *(["--vars", yaml.safe_dump({**variables, "dqm_enabled": True})] if operation == "parse" else [])], check=True, capture_output=True,
-                           text=True, encoding="utf-8", errors="replace", env=environment,
-                           cwd=config.working_dir)
-    except subprocess.CalledProcessError as error:
-        failure = classify(error)
-        failure.details += f"\ndbt --version:\n{version}"
-        raise failure from None
+    for operation in ("debug", "parse"):
+        flags = list(base)
+        if operation == "debug" and "--target-path" in flags:
+            index = flags.index("--target-path")
+            del flags[index:index + 2]
+        result = runner.invoke([operation, *flags], vars={**variables, **(
+            {"dqm_enabled": True} if operation == "parse" else {})})
+        if not result.success:
+            error = subprocess.CalledProcessError(
+                result.returncode, [runner.executable, operation, *flags],
+                output=str(result.exception or "dbt validation failed"), stderr="")
+            raise classify(error) from None
     check_required_relations(config)
 
 

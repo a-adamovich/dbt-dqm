@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.2 — Unreleased candidate
+
+- Add a dbt 2.0.9 BigQuery path through a shared CLI/artifact interface, retaining dbt Core
+  1.11–1.12 on BigQuery and Postgres. Credentialed BigQuery validation is a release gate;
+  offline checks alone do not establish full v2 compatibility.
+- Select a separately installed engine with `--dbt-executable` or `DBT_DQM_DBT_EXECUTABLE`.
+  App extras now install warehouse clients without installing dbt or its Python adapters.
+- Select bounded test capture inside the package materialization, preserve fresh invocation
+  evidence, and remove app configuration dependencies on dbt's Python internals.
+- Preserve the warehouse schema, issue identities, annotations, and workspace identity.
+- Require a focused real-Postgres core tier on PRs, including generic/singular test lifecycle
+  coverage. Move the complete compatibility matrices and candidate QA to manual full validation
+  with fail-closed job and test-count checks. Credentialed release approval remains required.
+
+
 ## 0.2.1 - 2026-10-19
 
 - Fix BigQuery initialization in datasets with default `und:ci` collation. Create tracking, app,
@@ -141,7 +156,7 @@ app and dbt package are installed separately; 0.1 users need a fresh DQM schema.
 - Supports pandas 3 (`pandas>=2.2,<4`; the lockfile uses 3.0.6). pandas 3 stores missing strings as NaN, which made never-edited issue cards show "User updated: nan"; card and filter helpers now treat None, NaN, NaT and `pd.NA` alike as missing. The app keeps object-backed strings, because pandas 3's Arrow-backed default added about 70 MiB of peak memory at the 50,000-issue boundary (`docs/scale.md`).
 - The app no longer reports an unsupported dbt version or invalid `dbt_project.yml` as a missing profile: the profile hint matched dbt's own "profiles.yml file [OK found and valid]" line. dbt output is matched without its colour codes.
 - Supports dbt-core 1.12 (the lockfile now uses dbt-core 1.12.5 and dbt-bigquery 1.12.1; dbt-postgres stays on 1.11, which supports dbt-core 1.12). `require-dbt-version` widens to `>=1.11.0, <1.13.0`. All protocol SQL and compiled package nodes render identically under 1.11.15 and 1.12.5 on both adapters. dbt-core 1.12 brings new transitive dependencies (metricflow, sqlglot, rapidfuzz, opentelemetry-api, python-dotenv, tabulate, dbt-core-experimental-parser).
-- The scheduled BigQuery workflow is keyless (Workload Identity Federation, no stored key), runs only from `main` when enabled, checks that its identity can't read the shared QA dataset, runs the parallel acceptance suite, and reports failures in an issue. One-time setup: `docs/scheduled-bigquery.md`.
+- The scheduled BigQuery workflow is keyless (Workload Identity Federation, no stored key), runs only from `main` when enabled, checks that its identity can't read the shared QA dataset, runs the parallel acceptance suite, and reports failures in an issue. One-time setup: `docs/bigquery-lifecycle.md`.
 - BigQuery maintenance uses fewer jobs per invocation: the trigger marker is read by the first step's job, and one protected job logs every outcome after the steps (from 1 + 2n jobs to n + 1). Each step still runs as its own job, separate from the logging.
 - The credentialed BigQuery acceptance suite runs in parallel (`pytest -n 6`, about 25 minutes instead of 2 h 19 m). Every disposable dataset is labelled with its run, and leftovers from killed workers or stopped runs are swept automatically (`integration_tests/acceptance/bigquery_datasets.py`).
 

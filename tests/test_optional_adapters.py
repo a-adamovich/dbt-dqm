@@ -1,6 +1,7 @@
 """Optional imports must not obscure failures in installed warehouse libraries."""
 
 import sys
+from importlib.metadata import PackageNotFoundError
 from types import ModuleType
 
 import pytest
@@ -17,6 +18,16 @@ def test_lazy_module_loads_only_when_used(monkeypatch):
     assert not calls
     assert lazy.Client is module.Client
     assert calls == ["driver"]
+
+
+def test_postgres_client_can_be_installed_from_source(monkeypatch):
+    def package_version(name):
+        if name == "psycopg2":
+            return "2.9.10"
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr(adapters, "version", package_version)
+    adapters.require_adapter("postgres")
 
 
 @pytest.mark.parametrize("missing", ["google", "google.cloud", "google.cloud.bigquery"])

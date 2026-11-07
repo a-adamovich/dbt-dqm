@@ -85,6 +85,10 @@ def run_browser(project, browse, port):
                         time.sleep(1)
                     else:
                         raise AssertionError("Applied note did not reach the warehouse")
+                    # The warehouse write can finish before the background sync and UI rerun.
+                    # Wait for both before opening an expander that the rerun would close.
+                    expect(page.get_by_text("Pending changes: 0")).to_be_visible(timeout=120_000)
+                    expect(page.get_by_role("button", name="Sync", exact=True)).to_be_enabled(timeout=120_000)
 
                 page.get_by_text("Export saved issues").click()
                 page.get_by_role("button", name="Prepare CSV").click()

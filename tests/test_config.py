@@ -102,6 +102,29 @@ consumer_profile:
     assert load_config(project, profiles, "dev").password == "spelled-out"
 
 
+def test_profile_preserves_number_like_passwords_and_explicit_native_filters(tmp_path, monkeypatch):
+    project, profiles = _project(tmp_path)
+    monkeypatch.setenv("DBT_ENV_SECRET_PASSWORD", "123456")
+    monkeypatch.setenv("DQM_PORT", "5433")
+    (profiles / "profiles.yml").write_text("""
+consumer_profile:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      user: reviewer
+      password: "{{ env_var('DBT_ENV_SECRET_PASSWORD') }}"
+      port: "{{ env_var('DQM_PORT') | as_number }}"
+      dbname: analytics
+      schema: quality
+    unused:
+      password: "{{ env_var('ABSENT_OTHER_TARGET') }}"
+""")
+    config = load_config(project, profiles)
+    assert config.password == "123456" and config.port == 5433
+
+
 def test_naming_vars_retain_yaml_dates_and_lists(tmp_path):
     from datetime import date
 

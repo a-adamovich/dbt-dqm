@@ -33,11 +33,15 @@ def collect(command, result, target, *, maintenance=True):
             import yaml
 
             variables = yaml.safe_load(options[options.index("--vars") + 1]) if "--vars" in options else {}
+            if "--vars" in invocation:
+                index = invocation.index("--vars")
+                del invocation[index:index + 2]
             invocation += ["--vars", json.dumps({**variables, "dqm_enabled": True,
                           "_dbt_dqm_maintenance_invocation_id": data["metadata"]["invocation_id"]})]
         if args is not None:
             invocation += ["--args", json.dumps(args)]
-        phase = subprocess.run(invocation, capture_output=True, text=True, timeout=600, check=False)
+        phase = subprocess.run(invocation, capture_output=True, text=True, timeout=600, check=False,
+                               cwd=options[options.index("--project-dir") + 1])
         result.stdout += phase.stdout
         result.stderr += phase.stderr
         if phase.returncode:

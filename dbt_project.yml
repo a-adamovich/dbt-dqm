@@ -1,17 +1,15 @@
 name: dbt_dqm
-version: 0.2.1
+version: 0.2.2
 config-version: 2
-require-dbt-version: [">=1.11.0", "<1.13.0"]
+require-dbt-version: [">=1.11.0", "<3.0.0"]
 
 model-paths: ["models"]
 macro-paths: ["macros"]
 clean-targets: ["target", "dbt_packages", "logs"]
 
-on-run-start:
-  - "{{ dbt_dqm.empty_preflight() }}"
-
 models:
   dbt_dqm:
+    +pre-hook: "{{ dbt_dqm.empty_preflight() }}"
     +post-hook: "{{ dbt_dqm.public_view_grants() }}"
     dqm_reconcile:
       +pre-hook:
