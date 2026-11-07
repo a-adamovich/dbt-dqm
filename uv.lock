@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11, <3.15"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -473,6 +473,7 @@ dependencies = [
 bigquery = [
     { name = "google-cloud-bigquery" },
     { name = "oauthlib" },
+    { name = "pyasn1" },
 ]
 postgres = [
     { name = "psycopg2-binary" },
@@ -496,13 +497,14 @@ requires-dist = [
     { name = "certifi", specifier = ">=2026.10.19" },
     { name = "google-cloud-bigquery", marker = "extra == 'bigquery'", specifier = ">=3.25,<4" },
     { name = "jinja2", specifier = ">=3.1.6,<4" },
-    { name = "oauthlib", marker = "extra == 'bigquery'", specifier = ">=4.0.0,<5" },
+    { name = "oauthlib", marker = "extra == 'bigquery'", specifier = ">=4.0.1,<5" },
     { name = "packaging", specifier = ">=24,<27" },
     { name = "pandas", specifier = ">=2.2,<4" },
     { name = "pillow", specifier = ">=13.0.0,<14" },
     { name = "platformdirs", specifier = ">=4,<5" },
     { name = "psycopg2-binary", marker = "extra == 'postgres'", specifier = ">=2.9.10,<3" },
     { name = "pyarrow", specifier = ">=25.0.1,<26" },
+    { name = "pyasn1", marker = "extra == 'bigquery'", specifier = ">=0.6.5,<0.7" },
     { name = "pyyaml", specifier = ">=6,<7" },
     { name = "sqlparse", specifier = ">=0.6.0,<0.7" },
     { name = "streamlit", specifier = ">=1.52,<2" },

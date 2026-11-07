@@ -93,7 +93,7 @@ jobs:
       if: always()
       run: uv run --group dbt1 python scripts/ci_validation.py record --junit acceptance-results/junit.xml --output
         acceptance-results/evidence.json --job "postgres-full (${{ matrix.python }}, ${{ matrix.postgres }})" --python
-        "${{ matrix.python }}" --postgres "${{ matrix.postgres }}" --engine 1.12.5
+        "${{ matrix.python }}" --postgres "${{ matrix.postgres }}" --engine 1.12.6
       env:
         DBT_DQM_TEST_DSN: host=localhost port=5432 dbname=dbt_dqm_ci user=postgres password=dbtdqm
     - name: Upload acceptance evidence and logs
@@ -128,7 +128,7 @@ jobs:
       run: |
         uv sync --locked --all-groups --all-extras
         uv venv /tmp/dbt-dqm-v111-engine --python 3.11
-        uv pip install --python /tmp/dbt-dqm-v111-engine/bin/python dbt-core==1.11.0 dbt-postgres==1.11.0 dbt-bigquery==1.11.0
+        uv pip install --python /tmp/dbt-dqm-v111-engine/bin/python dbt-core==1.11.0 dbt-postgres==1.11.0 dbt-bigquery==1.11.0 'oauthlib>=4.0.1,<5' 'pyasn1>=0.6.5,<0.7'
     - name: Enable identity hashing
       run: psql -h localhost -U postgres -d dbt_dqm_ci -c "create extension if not exists pgcrypto;"
       env:
@@ -147,6 +147,7 @@ jobs:
       run: uv run --group dbt1 python scripts/ci_validation.py record --junit acceptance-results/junit.xml --output
         acceptance-results/evidence.json --job "dbt-lower-bound" --python "3.11" --postgres "16" --engine 1.11.0
       env:
+        DBT_DQM_ENGINE_PYTHON: /tmp/dbt-dqm-v111-engine/bin/python
         DBT_DQM_TEST_DSN: host=localhost port=5432 dbname=dbt_dqm_ci user=postgres password=dbtdqm
     - name: Upload acceptance evidence and logs
       if: always()

@@ -21,7 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 REVIEWED = {
     "sqlparse": ("0.5.5", "0.6.0"),
     "urllib3": ("2.7.0", "2.8.0"),
-    "oauthlib": ("3.3.1", "4.0.0"),
+    "oauthlib": ("4.0.0", "4.0.1"),
+    "pyasn1": ("0.6.4", "0.6.5"),
     "pyarrow": ("23.0.0", "23.0.1"),
 }
 
@@ -45,7 +46,7 @@ def _assert_floors(requirements, extras):
     by_name = {r.name: r for r in requirements if r.marker is None or any(
         r.marker.evaluate({"extra": extra}) for extra in (extras or [""]))}
     for name, (vulnerable, patched) in REVIEWED.items():
-        if name == "oauthlib" and "bigquery" not in extras:
+        if name in ("oauthlib", "pyasn1") and "bigquery" not in extras:
             assert name not in by_name
             continue
         assert name in by_name, f"{name} has no security floor"

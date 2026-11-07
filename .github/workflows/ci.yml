@@ -94,14 +94,14 @@ jobs:
       run: |
         wheel="$(pwd)/$(ls dist/*.whl)"
         uv venv /tmp/dbt-dqm-old-deps --python ${{ matrix.python }}
-        uv pip install --python /tmp/dbt-dqm-old-deps/bin/python sqlparse==0.5.5 urllib3==2.7.0 oauthlib==3.3.1
+        uv pip install --python /tmp/dbt-dqm-old-deps/bin/python sqlparse==0.5.5 urllib3==2.7.0 oauthlib==4.0.0 pyasn1==0.6.4
         cd /tmp
         uv pip install --python /tmp/dbt-dqm-old-deps/bin/python "${wheel}[bigquery,postgres]"
         uv pip check --python /tmp/dbt-dqm-old-deps/bin/python
         /tmp/dbt-dqm-old-deps/bin/python - <<'PY'
         from importlib.metadata import version
         from packaging.version import Version
-        floors = {"sqlparse": "0.6.0", "urllib3": "2.8.0", "oauthlib": "4.0.0"}
+        floors = {"sqlparse": "0.6.0", "urllib3": "2.8.0", "oauthlib": "4.0.1", "pyasn1": "0.6.5"}
         installed = {name: version(name) for name in floors}
         print(installed)
         assert all(Version(installed[n]) >= Version(v) for n, v in floors.items()), installed
@@ -229,7 +229,7 @@ jobs:
     - name: Require complete warehouse evidence
       if: always()
       run: uv run --group dbt1 python scripts/ci_validation.py record --junit acceptance-results/junit.xml --output
-        acceptance-results/evidence.json --job "postgres-core" --python "3.14" --postgres "16" --engine 1.12.5 --core
+        acceptance-results/evidence.json --job "postgres-core" --python "3.14" --postgres "16" --engine 1.12.6 --core
       env:
         DBT_DQM_TEST_DSN: host=localhost port=5432 dbname=dbt_dqm_ci user=postgres password=dbtdqm
     - name: Upload acceptance evidence and logs
