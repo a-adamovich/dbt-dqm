@@ -144,10 +144,10 @@ def verify_jobs(pages, needs, records, *, sha, tree, run_id, run_attempt, reposi
                 or counts.get('collected') != counts.get('passed')
                 or any(counts.get(key) != 0 for key in ('failed', 'errors', 'skipped'))):
             raise ValueError(f'Incomplete warehouse evidence: {name}')
-        tree = value.get('tree', '')
-        if len(tree) != 40 or any(c not in '0123456789abcdef' for c in tree):
+        report_tree = value.get('tree', '')
+        if len(report_tree) != 40 or any(c not in '0123456789abcdef' for c in report_tree):
             raise ValueError(f'Missing source tree: {name}')
-        trees.add(tree)
+        trees.add(report_tree)
     if trees != {tree}:
         raise ValueError('Warehouse jobs did not all test the candidate source tree')
 
