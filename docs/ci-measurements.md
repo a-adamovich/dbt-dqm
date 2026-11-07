@@ -15,9 +15,9 @@ cancelled; `main` runs are not. There are twelve jobs including the final `requi
 | Units, lint, consistency, app startup | Python 3.11–3.14 |
 | Wheel variants, metadata, security floors | Python 3.11 and 3.14 |
 | Portability and wheel variants | Windows/Python 3.11; macOS/Python 3.14 |
-| Real dbt 2.0.9 parse/compile | Python 3.14, no warehouse credentials |
-| BigQuery compile | Core 1.12.5, Python 3.14, no warehouse access |
-| Postgres core | Core 1.12.5, Postgres 16, Python 3.14, four workers |
+| Real dbt 2.0.11 and 2.0.9 parse/compile | Python 3.14, no warehouse credentials |
+| BigQuery compile | Core 1.12.6, Python 3.14, no warehouse access |
+| Postgres core | Core 1.12.6, Postgres 16, Python 3.14, four workers |
 
 The core tier has exactly eight cases: lifecycle/history, collection reporting, native limits
 and disabled commands, changed-evidence rejection, late/skipped evidence, rollback/empty mode,

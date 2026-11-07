@@ -18,7 +18,7 @@ for DQM, captures their results, and updates the issue history.
 Start with an existing dbt project, a configured profile, and a supported warehouse adapter.
 dbt-dqm has **two installations**: the dbt package supplies warehouse models and macros; the
 Python package supplies the `dbt-dqm` command and local review app. Use matching `0.2.2`
-versions. This checkout is a release candidate; credentialed BigQuery verification on dbt 2.0.9
+versions. This checkout is a release candidate; credentialed BigQuery verification on dbt 2.0.11
 is still required before publication. The examples below install this checkout.
 
 1. Add the dbt package to your project's `packages.yml`, then install it:
@@ -40,15 +40,15 @@ is still required before publication. The examples below install this checkout.
 
    ```bash
    # BigQuery with dbt v2
-   python -m pip install 'dbt==2.0.9'
+   python -m pip install 'dbt==2.0.11'
    python -m pip install -e '.[bigquery]'
    # Postgres with dbt v1
-   python -m pip install 'dbt-core==1.12.5' 'dbt-postgres==1.11.0'
+   python -m pip install 'dbt-core==1.12.6' 'dbt-postgres==1.11.0'
    python -m pip install -e '.[postgres]'
    ```
 
    The Python command supports Python 3.11–3.14. dbt Core 1.11–1.12 supports both
-   BigQuery and Postgres; the new dbt 2.0.9 path targets BigQuery. The extras install
+   BigQuery and Postgres; the new dbt 2.0.11 path targets BigQuery. The extras install
    app warehouse clients and do not install dbt. Choose another engine with
    `--dbt-executable /path/to/dbt` or `DBT_DQM_DBT_EXECUTABLE`. See
    [installation and compatibility](docs/operations.md#installation-and-compatibility)

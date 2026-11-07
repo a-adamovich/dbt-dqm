@@ -17,6 +17,8 @@ from dbt_dqm_app.errors import AppError
 def engine(monkeypatch, tmp_path):
     monkeypatch.setattr(dbt_cli, "resolve_dbt_executable", lambda value=None: "/selected/dbt")
     monkeypatch.setattr(dbt_cli, "engine_version", lambda path: Version("2.0.9"))
+    monkeypatch.setattr(dbt_cli, "command_flags", lambda *args: frozenset({
+        "--no-manage-state", "--state-mode"}))
     cli = dbt_cli.DbtCLI()
     return cli, tmp_path / "artifacts"
 
@@ -104,6 +106,7 @@ def test_v2_forces_fresh_execution_and_json_without_changing_parent_environment(
     command, options = calls[0]
     assert command[0] == "/selected/dbt"
     assert "--no-manage-state" in command and "--write-json" in command
+    assert command[command.index("--state-mode") + 1] == "noop"
     assert command.count("--vars") == 1
     assert yaml.safe_load(command[command.index("--vars") + 1]) == {"a": "override"}
     assert options["env"]["DBT_WRITE_JSON"] == "true"
@@ -142,7 +145,8 @@ def test_test_projection_keeps_artifact_state_and_log_paths_at_consumer(engine, 
     ("1.11.0", "postgres", True), ("1.12.5", "bigquery", True),
     ("2.0.9", "bigquery", True), ("2.0.9", "postgres", False),
     ("1.10.0", "bigquery", False), ("2.0.8", "bigquery", False),
-    ("2.1.0a1", "bigquery", False), ("3.0.0", "bigquery", False),
+    ("2.1.0a1", "bigquery", False), ("1.12.6rc1", "bigquery", False),
+    ("2.0.11", "bigquery", True), ("2.1.0", "bigquery", True), ("3.0.0", "bigquery", False),
 ])
 def test_supported_engines_and_warehouses(engine, monkeypatch, version, adapter, valid):
     cli, _ = engine
@@ -187,3 +191,50 @@ def test_profile_errors_do_not_disclose_rendered_credentials(tmp_path, monkeypat
     with pytest.raises(AppError) as caught:
         load_config(tmp_path, tmp_path)
     assert "private-value" not in str(caught.value) + caught.value.details
+
+
+@pytest.mark.parametrize("flag", ["--run-cache-mode", "--state-mode"])
+def test_capabilities_select_state_flag_and_override_reuse(engine, monkeypatch, flag):
+    cli, target = engine
+    monkeypatch.setattr(dbt_cli, "command_flags", lambda *args: {"--no-manage-state", flag})
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        write_artifacts(target)
+        return subprocess.CompletedProcess(command, 0, "", "")
+    monkeypatch.setattr(dbt_cli.subprocess, "run", run)
+    result = cli.invoke(["test", "--target-path", str(target), "--run-cache-mode=read-write",
+                         "--state-mode", "read-write"])
+    assert result.success
+    assert calls[0][-2:] == [flag, "noop"]
+    assert "read-write" not in calls[0]
+    assert not any("=read-write" in item for item in calls[0])
+
+
+@pytest.mark.parametrize("flags", [set(), {"--no-manage-state"}])
+def test_missing_capabilities_reject_execution_before_artifact_changes(engine, monkeypatch, flags):
+    cli, target = engine
+    write_artifacts(target, invocation="existing")
+    monkeypatch.setattr(dbt_cli, "command_flags", lambda *args: flags)
+    with pytest.raises(AppError, match="cannot disable"):
+        cli.invoke(["test", "--target-path", str(target)])
+    assert json.loads((target / "run_results.json").read_text())["metadata"]["invocation_id"] == "existing"
+
+
+def test_capability_probe_is_cached_and_errors_are_explicit(monkeypatch):
+    dbt_cli.command_flags.cache_clear()
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, "--state-mode <MODE> --no-manage-state", "")
+    monkeypatch.setattr(dbt_cli.subprocess, "run", run)
+    try:
+        assert dbt_cli.command_flags("/probe/dbt", "test") == {"--state-mode", "--no-manage-state"}
+        dbt_cli.command_flags("/probe/dbt", "test")
+        assert len(calls) == 1
+        monkeypatch.setattr(dbt_cli.subprocess, "run", lambda *a, **k:
+                            subprocess.CompletedProcess(a, 2, "", "failed"))
+        with pytest.raises(AppError, match="capabilities"):
+            dbt_cli.command_flags("/broken/dbt", "test")
+    finally:
+        dbt_cli.command_flags.cache_clear()

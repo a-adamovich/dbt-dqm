@@ -43,7 +43,7 @@ jobs:
         run: |
           if [ "${{ matrix.engine }}" = dbt2 ]; then
             uv venv /tmp/dbt-dqm-v2-engine --python 3.14
-            uv pip install --python /tmp/dbt-dqm-v2-engine/bin/python dbt==2.0.9
+            uv pip install --python /tmp/dbt-dqm-v2-engine/bin/python dbt==2.0.11
             echo "DBT_DQM_DBT_EXECUTABLE=/tmp/dbt-dqm-v2-engine/bin/dbt" >> "$GITHUB_ENV"
           else
             echo "DBT_DQM_DBT_EXECUTABLE=$GITHUB_WORKSPACE/.venv/bin/dbt" >> "$GITHUB_ENV"

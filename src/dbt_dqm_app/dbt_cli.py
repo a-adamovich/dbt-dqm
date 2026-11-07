@@ -58,7 +58,7 @@ def resolve_dbt_executable(explicit=None) -> str:
                                if (found := shutil.which(str(directory / ("dbt" + suffix))))), None)
         executable = executable or shutil.which("dbt")
         if executable is None:
-            raise AppError("dbt could not be found. Install dbt==2.0.9 for BigQuery, or "
+            raise AppError("dbt could not be found. Install dbt==2.0.11 for BigQuery, or "
                            "dbt-core 1.11–1.12 and its warehouse adapter. Select another "
                            "installation with --dbt-executable.")
     return str(Path(executable).resolve())
@@ -83,6 +83,22 @@ def engine_version(executable: str) -> Version:
         raise AppError("Could not determine the selected dbt version.", output.strip()) from None
     logger.info("dbt executable: %s\ndbt version: %s", executable, version)
     return version
+
+
+@lru_cache(maxsize=32)
+def command_flags(executable: str, command: str) -> frozenset[str]:
+    """Probe the selected binary; state flags are not available on every command."""
+    try:
+        process = subprocess.run(
+            [executable, command, "--help"], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", check=False,
+            env={**os.environ, "DBT_VERSION_CHECK": "false", "DBT_DISABLE_VERSION_CHECK": "true"},
+        )
+    except OSError as error:
+        raise AppError("Could not inspect the selected dbt command capabilities.") from error
+    if process.returncode:
+        raise AppError("Could not inspect the selected dbt command capabilities.")
+    return frozenset(re.findall(r"(?<![\w-])--[a-z][a-z0-9-]*", process.stdout or ""))
 
 
 class RunArtifact:
@@ -123,7 +139,8 @@ class DbtCLI:
 
     def validate(self, adapter):
         version = self.version
-        if not ((version.major == 1 and version.minor in (11, 12)) or
+        if version.is_prerelease or version.is_devrelease or not (
+                (version.major == 1 and version.minor in (11, 12)) or
                 (version.major == 2 and version >= Version("2.0.9") and not version.is_prerelease)):
             raise AppError("Supported engines are dbt Core 1.11–1.12 and dbt v2 >=2.0.9,<3.0.0.")
         if self.is_v2 and adapter != "bigquery":
@@ -165,7 +182,23 @@ class DbtCLI:
         # reaches the terminal unless --verbose was requested.
         arguments += ["--log-format", "json", "--log-level", "debug", "--write-json"]
         if self.is_v2:
+            flags = command_flags(self.executable, command)
+            if "--no-manage-state" not in flags:
+                raise AppError("The selected dbt cannot disable service-backed state.")
             arguments += ["--no-manage-state"]
+            if command in ("test", "run", "build", "seed"):
+                state_flag = next((flag for flag in ("--state-mode", "--run-cache-mode")
+                                   if flag in flags), None)
+                if state_flag is None:
+                    raise AppError("The selected dbt cannot disable execution reuse.")
+                # An inherited/user flag must not re-enable cached evidence.
+                for flag in ("--state-mode", "--run-cache-mode"):
+                    for index in range(len(arguments) - 1, -1, -1):
+                        if arguments[index] == flag:
+                            del arguments[index:index + 2]
+                        elif arguments[index].startswith(flag + "="):
+                            del arguments[index]
+                arguments += [state_flag, "noop"]
         environment = {**os.environ, **self.environment, "DBT_WRITE_JSON": "true", "DBT_QUIET": "false",
                        **({"DBT_ENGINE_BATCH_TESTS": "false"} if self.is_v2 else {})}
         target = Path(arguments[arguments.index("--target-path") + 1]

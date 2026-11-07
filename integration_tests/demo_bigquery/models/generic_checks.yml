@@ -1,0 +1,10 @@
+version: 2
+
+models:
+  - name: generic_check_records
+    data_tests:
+      - dqm_generic_invalid:
+          arguments:
+            column_name: status
+          config:
+            enabled: "{{ var('demo_generic_checks', false) }}"

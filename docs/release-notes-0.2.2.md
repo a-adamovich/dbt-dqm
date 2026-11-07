@@ -1,6 +1,6 @@
 # dbt-dqm 0.2.2 candidate
 
-This candidate adds a dbt 2.0.9 execution path for BigQuery while retaining dbt Core
+This candidate adds a dbt 2.0.11 execution path for BigQuery while retaining dbt Core
 1.11–1.12 on BigQuery and Postgres. **Credentialed BigQuery validation on both engine
 generations is required before publication or a full v2 compatibility claim.** See the
 [verification record](dbt-2-compatibility.md).
@@ -20,3 +20,11 @@ refresh; existing issues, identity hashes, annotations, and workspace identities
 Python app support remains 3.11–3.14. Native dbt v2 Postgres support is outside this release.
 
 For installation and upgrade instructions, see [operations](operations.md#installation-and-compatibility).
+
+The DQM subprocess workflow disables service-backed state and execution reuse for fresh
+test evidence, and disables test batching. It probes the selected engine for the supported
+state flag; ordinary user-invoked dbt commands retain their native behavior.
+
+For 0.2.2, publication requires **maintainer-attested local BigQuery validation** on both
+engine generations, with redacted reports attached to the release. This does not certify
+live WIF infrastructure. The exception is restricted to this version.
