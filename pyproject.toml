@@ -39,7 +39,8 @@ dependencies = [
 [project.optional-dependencies]
 bigquery = [
   "google-cloud-bigquery>=3.25,<4",
-  "oauthlib>=4.0.0,<5",  # Security floor for pandas-gbq authentication
+  "pyasn1>=0.6.5,<0.7",  # Google Auth ASN.1 security floor; BigQuery only
+  "oauthlib>=4.0.1,<5",  # Security floor for pandas-gbq authentication
 ]
 postgres = ["psycopg2-binary>=2.9.10,<3"]
 
@@ -54,7 +55,7 @@ dbt-dqm = "dbt_dqm_app.cli:main"
 
 [dependency-groups]
 # Engines are development tools, never runtime dependencies of the app.
-dbt1 = ["dbt-core==1.12.5", "dbt-bigquery==1.12.1", "dbt-postgres==1.11.0", "mashumaro>=3.17,<3.18"]
+dbt1 = ["dbt-core==1.12.6", "dbt-bigquery==1.12.1", "dbt-postgres==1.11.0", "mashumaro>=3.17,<3.18"]
 dev = [
     "pytest>=8,<10",
     "pytest-xdist>=3.8,<4",

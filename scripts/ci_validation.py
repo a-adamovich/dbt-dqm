@@ -31,7 +31,7 @@ PLATFORMS = ('windows-latest', 'macos-latest')
 def warehouse_matrix():
     result = {
         f'postgres-full ({python}, {postgres})': {
-            'python': python, 'postgres': postgres, 'engine': '1.12.5', 'minimum': 41,
+            'python': python, 'postgres': postgres, 'engine': '1.12.6', 'minimum': 41,
         }
         for python in PYTHONS for postgres in POSTGRES
     }
@@ -161,7 +161,7 @@ def main():
     emit.add_argument('--job', required=True)
     emit.add_argument('--python', required=True)
     emit.add_argument('--postgres', required=True)
-    emit.add_argument('--engine', default='1.12.5')
+    emit.add_argument('--engine', default='1.12.6')
     emit.add_argument('--core', action='store_true')
     verify = sub.add_parser('verify')
     verify.add_argument('--jobs', type=Path, required=True)

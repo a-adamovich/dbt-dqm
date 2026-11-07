@@ -34,7 +34,7 @@ def main():
         assert not installed(f"dbt-{adapter}")
         assert installed(driver) == (adapter in selected)
     assert not installed("dbt-core") and not installed("dbt")
-    for name in ("oauthlib",):
+    for name in ("oauthlib", "pyasn1"):
         assert installed(name) == ("bigquery" in selected), name
     import dbt_dqm_app.streamlit_app  # noqa: F401
 

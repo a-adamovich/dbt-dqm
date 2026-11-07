@@ -195,3 +195,16 @@ def test_fast_ci_and_manual_validation_preserve_the_agreed_matrices():
     for name in ('postgres-core',):
         runs = '\n'.join(step.get('run', '') for step in fast[name]['steps'])
         assert '-m core -n 4' in runs and 'for scenario' not in runs
+
+
+def test_current_engine_expectations_match_the_development_pin():
+    import tomllib
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    pin = next(item.split("==")[1] for item in project["dependency-groups"]["dbt1"]
+               if item.startswith("dbt-core=="))
+    assert {entry["engine"] for name, entry in validation.warehouse_matrix().items()
+            if name != "dbt-lower-bound"} == {pin}
+    assert f"--engine {pin} --core" in (ROOT / ".github/workflows/ci.yml").read_text()
+    lower = workflow("full-validation.yml")["jobs"]["dbt-lower-bound"]
+    step = next(s for s in lower["steps"] if s.get("name") == "Require complete warehouse evidence")
+    assert step["env"]["DBT_DQM_ENGINE_PYTHON"] == "/tmp/dbt-dqm-v111-engine/bin/python"
