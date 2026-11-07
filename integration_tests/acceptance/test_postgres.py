@@ -186,6 +186,7 @@ values ('tamper-row', 'tamper@example.com', 'tampered');
         instance.sql(f'drop schema if exists "{schema}_dbt_test__audit" cascade')
 
 
+@pytest.mark.core
 def test_lifecycle_annotations_history_and_health(demo):
     demo.capture()
     demo.dbt("build", "--select", "package:dbt_dqm")
@@ -248,6 +249,7 @@ def test_lifecycle_annotations_history_and_health(demo):
     )
 
 
+@pytest.mark.core
 def test_batched_replay_rollback_and_empty(demo):
     for scenario in ("initial", "passed", "recurrence"):
         demo.capture(scenario)
@@ -278,6 +280,7 @@ def test_batched_replay_rollback_and_empty(demo):
         assert demo.sql("select count(*) n from @schema.dqm_test_health")[0]["n"] > 0
 
 
+@pytest.mark.core
 def test_reconciliation_serializes_and_reviewer_edit_survives(demo):
     demo.capture()
     demo.dbt("build", "--select", "package:dbt_dqm")
@@ -322,6 +325,7 @@ def test_reconciliation_serializes_and_reviewer_edit_survives(demo):
     )
 
 
+@pytest.mark.core
 def test_late_skip_cleanup_and_future_migration(demo):
     demo.capture()
     demo.dbt("build", "--select", "package:dbt_dqm")
@@ -543,6 +547,7 @@ def _latest_execution(demo, test_name):
     )[0]
 
 
+@pytest.mark.core
 def test_capture_rejects_failure_tables_changed_before_capture(demo):
     customer = "demo_customer_email_invalid"
 
@@ -1521,6 +1526,7 @@ def dedicated(demo, *options, variables=None, code=0, confirm=True):
     return result
 
 
+@pytest.mark.core
 def test_dedicated_native_limits_complete_pass_and_stale_edits(demo):
     from dbt_dqm_app.config import load_config
     from dbt_dqm_app.errors import AppError
@@ -1722,10 +1728,18 @@ def test_two_developer_namespaces_are_isolated(demo):
     check_namespace_isolation(demo, dedicated)
 
 
+@pytest.mark.core
 def test_run_changes_sorted_results_and_collection_limits(demo):
     from reporting_checks import check_run_reporting
 
     check_run_reporting(demo, dedicated)
+
+
+@pytest.mark.core
+def test_generic_and_singular_lifecycle(demo):
+    from generic_checks import check_generic_lifecycle
+
+    check_generic_lifecycle(demo, dedicated)
 
 
 def test_dedicated_run_preserves_an_existing_root_test_materialization(demo):

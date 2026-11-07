@@ -1,12 +1,17 @@
-"""The scheduled BigQuery workflow stays keyless, pinned and confined to main (plan 1b)."""
+"""The BigQuery workflow stays manual, keyless, pinned and confined to main."""
 
 from pathlib import Path
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-TEXT = (ROOT / ".github/workflows/bigquery-scheduled.yml").read_text()
+TEXT = (ROOT / ".github/workflows/bigquery-lifecycle.yml").read_text()
 WORKFLOW = yaml.safe_load(TEXT)
+
+
+def test_workflow_is_started_manually_only():
+    # PyYAML interprets the YAML 1.1 key "on" as True.
+    assert WORKFLOW.get("on", WORKFLOW.get(True)) == {"workflow_dispatch": None}
 
 
 def test_keyless_authentication_through_a_pinned_action():
