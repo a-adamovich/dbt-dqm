@@ -54,7 +54,7 @@ dbt-dqm = "dbt_dqm_app.cli:main"
 
 [dependency-groups]
 # Engines are development tools, never runtime dependencies of the app.
-dbt1 = ["dbt-core==1.12.5", "dbt-bigquery==1.12.1", "dbt-postgres==1.11.0", "mashumaro>=3.17,<3.18"]
+dbt1 = ["dbt-core==1.12.6", "dbt-bigquery==1.12.1", "dbt-postgres==1.11.0", "mashumaro>=3.17,<3.18"]
 dev = [
     "pytest>=8,<10",
     "pytest-xdist>=3.8,<4",
