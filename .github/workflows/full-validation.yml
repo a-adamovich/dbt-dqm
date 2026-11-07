@@ -32,7 +32,7 @@ jobs:
       with:
         ref: ${{ github.sha }}
     - name: Install uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
       with:
         python-version: ${{ matrix.python }}
     - name: Install dependencies
@@ -121,7 +121,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         ref: ${{ github.sha }}
-    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
       with:
         python-version: '3.11'
     - name: Install app and isolated dbt Core 1.11.0
@@ -176,7 +176,7 @@ jobs:
       with:
         ref: ${{ github.sha }}
     - name: Install uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
       with:
         python-version: ${{ matrix.python }}
     - name: Install dependencies
@@ -254,7 +254,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         ref: ${{ github.sha }}
-    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
       with:
         python-version: ${{ matrix.python }}
     - name: Install adapters and development dependencies
@@ -295,7 +295,7 @@ jobs:
       with:
         ref: ${{ github.sha }}
     - name: Install uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
       with:
         python-version: ${{ matrix.python }}
     - name: Install dependencies
@@ -357,7 +357,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         ref: ${{ github.sha }}
-    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
       with:
         python-version: '3.14'
     - name: Download warehouse evidence
