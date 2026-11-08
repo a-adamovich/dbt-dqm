@@ -208,3 +208,11 @@ def test_current_engine_expectations_match_the_development_pin():
     lower = workflow("full-validation.yml")["jobs"]["dbt-lower-bound"]
     step = next(s for s in lower["steps"] if s.get("name") == "Require complete warehouse evidence")
     assert step["env"]["DBT_DQM_ENGINE_PYTHON"] == "/tmp/dbt-dqm-v111-engine/bin/python"
+
+
+def test_uniform_but_wrong_source_trees_cannot_replace_expected_tree():
+    pages, needs, records = valid_inputs()
+    for value in records:
+        value["tree"] = "b" * 40
+    with pytest.raises(ValueError, match="candidate source tree"):
+        verify(pages, needs, records)
