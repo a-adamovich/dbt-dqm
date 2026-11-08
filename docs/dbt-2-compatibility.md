@@ -1,4 +1,11 @@
-# dbt 2.0.9 compatibility verification
+# dbt v2 compatibility verification
+
+The current candidate targets **dbt 2.0.11**, retaining v2 support from 2.0.9 and Core
+1.11–1.12. Real 2.0.9 and 2.0.11 offline regression checks are required. Full live
+2.0.11/Core 1.12.6 verification remains pending; historical results below do not certify
+the current candidate.
+
+## Historical 2.0.9 verification
 
 The 0.2.2 candidate uses an installed dbt executable and serialized artifacts instead of
 in-memory manifest mutation. The package version constraint permits v2 for testing; it does
@@ -24,11 +31,11 @@ Local equivalent, using a disposable BigQuery project and existing ADC:
 
 ```bash
 export DBT_DQM_BIGQUERY_TEST_PROJECT=your-test-project
-export DBT_DQM_DBT_EXECUTABLE=/path/to/dbt-2.0.9/bin/dbt
+export DBT_DQM_DBT_EXECUTABLE=/path/to/dbt-2.0.11/bin/dbt
 uv run --group dbt1 --extra bigquery pytest -q -n 6 --dist load integration_tests/acceptance/test_bigquery.py
 ```
 
-Repeat with dbt Core 1.12.5. The acceptance harness and the product command honor the same
+Repeat with dbt Core 1.12.6. The acceptance harness and the product command honor the same
 executable override. No credentials should be committed to this repository.
 
 ## Offline and local checks
@@ -37,7 +44,7 @@ executable override. No credentials should be committed to this repository.
 uv sync --locked --all-groups --all-extras
 uv run --group dbt1 ruff check .
 uv run --group dbt1 pytest -q
-DBT_DQM_V2_EXECUTABLE=/path/to/dbt-2.0.9/bin/dbt uv run --group dbt1 pytest -q tests/test_dbt_v2.py
+DBT_DQM_V2_EXECUTABLE=/path/to/dbt-2.0.11/bin/dbt uv run --group dbt1 pytest -q tests/test_dbt_v2.py
 ```
 
 The v2 smoke tests exercise the actual executable without importing its Python internals.

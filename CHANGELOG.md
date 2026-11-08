@@ -2,7 +2,7 @@
 
 ## 0.2.2 — Unreleased candidate
 
-- Add a dbt 2.0.9 BigQuery path through a shared CLI/artifact interface, retaining dbt Core
+- Add a dbt 2.0.11 BigQuery path through a shared CLI/artifact interface, retaining dbt Core
   1.11–1.12 on BigQuery and Postgres. Credentialed BigQuery validation is a release gate;
   offline checks alone do not establish full v2 compatibility.
 - Select a separately installed engine with `--dbt-executable` or `DBT_DQM_DBT_EXECUTABLE`.

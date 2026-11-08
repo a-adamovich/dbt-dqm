@@ -7,7 +7,7 @@ dbt package are separate installations and must use matching 0.2.2 versions for 
 ## Installation and compatibility
 
 The 0.2.2 candidate supports the dbt Core 1.11–1.12 workflow on BigQuery and
-Postgres 14/16, and adds a dbt 2.0.9 BigQuery path. Full v2 compatibility remains gated
+Postgres 14/16, and adds a dbt 2.0.11 BigQuery path. Full v2 compatibility remains gated
 on the credentialed BigQuery acceptance suite; see the [verification record](dbt-2-compatibility.md).
 Python app support remains 3.11–3.14. The last published stable release is
 [0.2.1](https://pypi.org/project/dbt-dqm/0.2.1/).
@@ -28,15 +28,15 @@ warehouse clients, without installing dbt or its Python adapters:
 
 ```bash
 # BigQuery, dbt v2 (candidate; credentialed release gate required)
-python -m pip install 'dbt==2.0.9'
+python -m pip install 'dbt==2.0.11'
 python -m pip install -e '.[bigquery]'
 
 # BigQuery, dbt v1
-python -m pip install 'dbt-core==1.12.5' 'dbt-bigquery==1.12.1'
+python -m pip install 'dbt-core==1.12.6' 'dbt-bigquery==1.12.1'
 python -m pip install -e '.[bigquery]'
 
 # Postgres, dbt v1
-python -m pip install 'dbt-core==1.12.5' 'dbt-postgres==1.11.0'
+python -m pip install 'dbt-core==1.12.6' 'dbt-postgres==1.11.0'
 python -m pip install -e '.[postgres]'
 ```
 
@@ -65,7 +65,7 @@ On Windows PowerShell, for example:
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install 'dbt==2.0.9'
+python -m pip install 'dbt==2.0.11'
 python -m pip install -e '.[bigquery]'
 ```
 

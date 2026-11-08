@@ -1426,3 +1426,9 @@ def test_bigquery_collated_tracking_refuses_writes_and_explicit_refresh_recovers
     assert not demo.sql("select column_name from @dataset.INFORMATION_SCHEMA.COLUMNS` "
                         "where starts_with(table_name,'dqm_') and collation_name='und:ci'")
     assert demo.client.get_dataset(f'{PROJECT}.{demo.dataset}').to_api_repr()['defaultCollation'] == 'und:ci'
+
+
+def test_generic_and_singular_lifecycle(demo):
+    from generic_checks import check_generic_lifecycle
+
+    check_generic_lifecycle(demo, dedicated)

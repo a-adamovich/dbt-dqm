@@ -1,4 +1,4 @@
-"""Real 2.0.9 smoke tests; CI supplies an isolated, user-installed engine executable."""
+"""Real v2 smoke tests; CI supplies an isolated, user-installed engine executable."""
 
 import json
 import os
@@ -9,13 +9,13 @@ import pytest
 import yaml
 
 from dbt_dqm_app.config import load_config
-from dbt_dqm_app.dbt_cli import DbtCLI
+from dbt_dqm_app.dbt_cli import DbtCLI, command_flags
 from dbt_dqm_app.relations import resolve_config
 from dbt_dqm_app.runtime_project import test_project as projected_project
 
 ROOT = Path(__file__).resolve().parents[1]
 EXECUTABLE = os.environ.get("DBT_DQM_V2_EXECUTABLE")
-pytestmark = pytest.mark.skipif(not EXECUTABLE, reason="Set DBT_DQM_V2_EXECUTABLE to dbt 2.0.9")
+pytestmark = pytest.mark.skipif(not EXECUTABLE, reason="Set DBT_DQM_V2_EXECUTABLE to an isolated dbt v2 engine")
 
 
 @pytest.fixture
@@ -49,7 +49,10 @@ def project(tmp_path):
 def test_v2_parse_select_and_compile_without_python_adapters(project):
     runner = DbtCLI(executable=EXECUTABLE)
     runner.validate("bigquery")
-    assert str(runner.version) == "2.0.9"
+    assert str(runner.version) == os.environ.get("DBT_DQM_V2_EXPECTED_VERSION", "2.0.11")
+    flags = command_flags(runner.executable, "test")
+    assert "--no-manage-state" in flags
+    assert flags & {"--state-mode", "--run-cache-mode"}
     flags = ["--project-dir", str(project), "--profiles-dir", str(project),
              "--target-path", str(project / "target"), "--log-path", str(project / "logs"),
              "--vars", "{dqm_enabled: true, _dbt_dqm_workflow: true}"]
