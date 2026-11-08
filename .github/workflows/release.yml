@@ -3,6 +3,28 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      verify_only:
+        description: "Verify only; never publish or request PyPI approval"
+        type: boolean
+        default: true
+      local_bigquery_attested:
+        description: "Maintainer attests the attached local BigQuery/permissions reports for 0.2.2"
+        type: boolean
+        default: false
+      evidence_digest:
+        description: "SHA256 of local-validation-0.2.2.json attached to the draft release"
+        type: string
+      tested_sha:
+        description: "Immutable tested candidate SHA (its tree must equal this checkout)"
+        type: string
+      ci_run:
+        description: "Successful CI run ID; publication requires CI on the merged/tagged commit"
+        type: string
+      full_run:
+        description: "Successful full-validation run ID on the recorded tested SHA"
+        type: string
 
 permissions:
   contents: write
@@ -11,12 +33,80 @@ permissions:
   actions: read
 
 jobs:
+  preflight:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          python-version: "3.14"
+      - name: Exercise verification logic with synthetic unit fixtures only
+        run: |
+          uv sync --locked --all-groups --all-extras
+          uv run --no-sync pytest -q tests/test_local_release_evidence.py tests/test_dbt_release_gate.py tests/test_release_workflow.py
+      - name: Check requester metadata access with the read-only token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/$GITHUB_REPOSITORY/collaborators/$GITHUB_ACTOR/permission" --jq '.permission'
+      - name: Check manual-publication inputs before any release access
+        env:
+          VERIFY_ONLY: ${{ inputs.verify_only }}
+          ATTESTED: ${{ inputs.local_bigquery_attested }}
+          EVIDENCE_DIGEST: ${{ inputs.evidence_digest }}
+          TESTED_SHA: ${{ inputs.tested_sha }}
+          CI_RUN: ${{ inputs.ci_run }}
+          FULL_RUN: ${{ inputs.full_run }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          if os.environ['VERIFY_ONLY'] != 'true':
+              assert os.environ['GITHUB_REF'] == 'refs/tags/v0.2.2', 'Manual publication is restricted to v0.2.2'
+              assert os.environ['ATTESTED'] == 'true', 'Explicit maintainer attestation is required'
+              assert re.fullmatch('[0-9a-f]{64}', os.environ['EVIDENCE_DIGEST']), 'Evidence digest is required'
+          if os.environ['EVIDENCE_DIGEST']:
+              assert re.fullmatch('[0-9a-f]{40}', os.environ['TESTED_SHA']), 'Immutable tested SHA is required'
+              assert os.environ['CI_RUN'].isdigit() and os.environ['FULL_RUN'].isdigit(), 'Both run IDs are required'
+          else:
+              print('Synthetic verification checks only; live release evidence has not been verified.')
+          PY
+      - name: Verify attached evidence without publication
+        if: inputs.evidence_digest != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_DIGEST: ${{ inputs.evidence_digest }}
+          TESTED_SHA: ${{ inputs.tested_sha }}
+          CI_RUN: ${{ inputs.ci_run }}
+          FULL_RUN: ${{ inputs.full_run }}
+          VERIFY_ONLY: ${{ inputs.verify_only }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/local-evidence"
+          gh release download v0.2.2 --repo "$GITHUB_REPOSITORY" --pattern local-validation-0.2.2.json --dir "$RUNNER_TEMP/local-evidence"
+          flags=(--verify-only)
+          if [[ "$VERIFY_ONLY" != true ]]; then flags=(--attest); fi
+          python3 scripts/check_bigquery_release_gate.py --version 0.2.2 \
+            --evidence "$RUNNER_TEMP/local-evidence/local-validation-0.2.2.json" \
+            --digest "$EVIDENCE_DIGEST" --tested-sha "$TESTED_SHA" \
+            --ci-run "$CI_RUN" --full-run "$FULL_RUN" "${flags[@]}"
   release:
+    needs: preflight
+    # v0.2.2 tag pushes skip before approval or side effects. Other versions retain the live gate.
+    if: >-
+      always() &&
+      ((github.event_name == 'push' && github.ref != 'refs/tags/v0.2.2') ||
+       (github.event_name == 'workflow_dispatch' && !inputs.verify_only && needs.preflight.result == 'success'))
     runs-on: ubuntu-latest
     environment: pypi
     services:
       postgres:
-        image: postgres:16
+        # Preserve the legacy release lifecycle for other versions; the 0.2.2 exception
+        # already verifies the full Postgres matrix and does not repeat warehouse tests.
+        image: ${{ github.event_name == 'push' && 'postgres:16' || '' }}
         env:
           POSTGRES_PASSWORD: dbtdqm
           POSTGRES_DB: dbt_dqm_release
@@ -29,6 +119,8 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
       - name: Check the tag matches the package versions
         shell: bash
         run: |
@@ -50,9 +142,24 @@ jobs:
         with:
           python-version: "3.14"
       - name: Require credentialed BigQuery verification for both engines
+        if: github.event_name == 'push'
         run: python3 scripts/check_bigquery_release_gate.py
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: Recheck local evidence after human PyPI approval
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_DIGEST: ${{ inputs.evidence_digest }}
+          TESTED_SHA: ${{ inputs.tested_sha }}
+          CI_RUN: ${{ inputs.ci_run }}
+          FULL_RUN: ${{ inputs.full_run }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/local-evidence"
+          gh release download v0.2.2 --repo "$GITHUB_REPOSITORY" --pattern local-validation-0.2.2.json --dir "$RUNNER_TEMP/local-evidence"
+          python3 scripts/check_bigquery_release_gate.py --version 0.2.2 --attest \
+            --evidence "$RUNNER_TEMP/local-evidence/local-validation-0.2.2.json" \
+            --digest "$EVIDENCE_DIGEST" --tested-sha "$TESTED_SHA" --ci-run "$CI_RUN" --full-run "$FULL_RUN"
       - name: Verify, build, and inspect distributions
         run: |
           uv sync --locked --all-groups --all-extras
@@ -60,7 +167,16 @@ jobs:
           uv run --group dbt1 pytest -q
           uv build --no-create-gitignore
           uvx --from twine twine check dist/*
-      - name: Configure release-gate Postgres
+      - name: Brief installed-wheel verification without a dbt engine
+        run: |
+          uv venv "$RUNNER_TEMP/release-wheel" --python 3.14
+          uv pip install --python "$RUNNER_TEMP/release-wheel/bin/python" "$(pwd)/$(ls dist/*.whl)"
+          uv pip check --python "$RUNNER_TEMP/release-wheel/bin/python"
+          "$RUNNER_TEMP/release-wheel/bin/python" scripts/check_optional_install.py base
+      - name: Configure legacy release-gate Postgres
+        if: github.event_name == 'push'
+        env:
+          PGPASSWORD: dbtdqm
         run: |
           psql -h localhost -U postgres -d dbt_dqm_release -c "create extension if not exists pgcrypto;"
           mkdir -p ~/.dbt
@@ -78,9 +194,8 @@ jobs:
                 schema: dbt_dqm_demo
                 threads: 4
           PROFILES
-        env:
-          PGPASSWORD: dbtdqm
-      - name: Full Postgres release lifecycle
+      - name: Legacy Postgres release lifecycle
+        if: github.event_name == 'push'
         working-directory: integration_tests/demo_postgres
         run: |
           uv run --group dbt1 dbt deps
@@ -148,7 +263,9 @@ jobs:
           elif [[ "$GITHUB_REF_NAME" == "v0.2.0" ]]; then
             gh release create "${GITHUB_REF_NAME}" dist/* --notes-file docs/release-notes-0.2.0.md --verify-tag
           elif [[ "$GITHUB_REF_NAME" == "v0.2.2" ]]; then
-            gh release create "${GITHUB_REF_NAME}" dist/* --notes-file docs/release-notes-0.2.2.md --verify-tag
+            gh release view "${GITHUB_REF_NAME}" --json isDraft --jq '.isDraft' | grep -qx true
+            gh release upload "${GITHUB_REF_NAME}" dist/*
+            gh release edit "${GITHUB_REF_NAME}" --draft=false --latest --notes-file docs/release-notes-0.2.2.md
           elif [[ "$GITHUB_REF_NAME" == "v0.2.1" ]]; then
             gh release create "${GITHUB_REF_NAME}" dist/* --notes-file docs/release-notes-0.2.1.md --verify-tag
           else

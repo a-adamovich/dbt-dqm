@@ -42,7 +42,9 @@ unexpected skips, duplicate reports, or fewer than 41 passing warehouse cases fa
 Reports are retained for 30 days; this is retention, not permission to reuse them for release.
 
 Stage 1 certifies **Postgres and platforms only**. A passing result does not replace the
-credentialed BigQuery release gate. PyPI approval and provenance verification remain in place.
+BigQuery release gate. Version 0.2.2 has a separately approved, temporary maintainer attestation
+for local BigQuery results; it still requires every full-validation job. This is not the general
+evidence-reuse or WIF rollout. PyPI approval and provenance verification remain in place.
 The maintainer must configure `required` as a required status and require up-to-date PRs;
 adding a workflow alone does not enforce branch protection.
 
@@ -59,6 +61,14 @@ evidence. Record suite, engine, worker count, elapsed time, result, and source r
 | Required Postgres core, local Python 3.11 | Core 1.12.5 / Postgres 16 | 4 | 184.53 s | Exactly 8 passed, no skips; Stage 1 worktree |
 | Real dbt 2 offline smoke, local Python 3.11 | dbt 2.0.9 / no warehouse access | 1 | 6.82 s | Exactly 11 passed, no skips; Stage 1 worktree |
 
-BigQuery billing measurements will be added in Stage 2. Do not infer cost from fixture size or
-label elapsed time as billed usage. Cloud metrics will separate labelled queries from unlabelled
-app queries and exclude parent `SCRIPT` rows to avoid double-counting.
+The 0.2.2 local receipt helper measures billed bytes and slot milliseconds after each approved
+suite, excluding parent `SCRIPT` rows. It separates labelled queries (including children) from
+unlabelled queries referencing the test datasets; shared-QA activity may include other users.
+Missing metadata permissions are reported as unavailable, never as zero usage. No GCP roles or
+quotas are changed. Do not infer cost from fixture size or elapsed time.
+
+Acceptance fixture clients and dbt profiles request a per-query limit of 1 GiB by default,
+configurable with `DBT_DQM_BIGQUERY_MAX_BYTES_BILLED`. Real 2.0.9 and 2.0.11 offline checks
+accept the profile/label configuration. Runtime propagation must be checked during live validation.
+App search retains its own configured limit; other app queries and the restricted-permissions
+fixture are not covered by this test cap. This is not a total-suite spending ceiling.

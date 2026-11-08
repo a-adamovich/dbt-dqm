@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.2 — Unreleased candidate
+## 0.2.2
 
 - Add a dbt 2.0.11 BigQuery path through a shared CLI/artifact interface, retaining dbt Core
   1.11–1.12 on BigQuery and Postgres. Credentialed BigQuery validation is a release gate;
@@ -13,6 +13,11 @@
 - Require a focused real-Postgres core tier on PRs, including generic/singular test lifecycle
   coverage. Move the complete compatibility matrices and candidate QA to manual full validation
   with fail-closed job and test-count checks. Credentialed release approval remains required.
+- Validate the current Core pin at 1.12.6 and retain Core 1.11–1.12 support. Scope patched
+  OAuthLib and pyasn1 installation floors to the BigQuery extra.
+- For 0.2.2 only, require maintainer-attested local BigQuery results plus complete GitHub
+  validation before manual publication. Redact public reports and retain failed attempts.
+  Automatic tag publication is disabled for this version; protected PyPI approval remains.
 
 
 ## 0.2.1 - 2026-10-19

@@ -34,10 +34,13 @@ def project(tmp_path):
     (consumer / "dbt_packages").mkdir()
     (consumer / "dbt_packages/dbt_dqm").symlink_to(package, target_is_directory=True)
     (consumer / "packages.yml").write_text(yaml.safe_dump({"packages": [{"local": str(package)}]}))
-    (consumer / "dbt_project.yml").write_text("name: compat\nprofile: compat\nconfig-version: 2\n")
+    (consumer / "dbt_project.yml").write_text(yaml.safe_dump({
+        "name": "compat", "profile": "compat", "config-version": 2,
+        "query-comment": {"comment": '{"dbt_dqm_validation": "offline"}', "job-label": True}}))
     (consumer / "profiles.yml").write_text(yaml.safe_dump({"compat": {"target": "dev", "outputs": {
         "dev": {"type": "bigquery", "method": "oauth", "project": "dbt-dqm-compile-only",
-                "dataset": "compat", "location": "US", "threads": 1}}}}))
+                "dataset": "compat", "location": "US", "threads": 1,
+                "maximum_bytes_billed": 1024 ** 3}}}}))
     (consumer / "tests").mkdir()
     (consumer / "tests/marked.sql").write_text("""{{ config(enabled=var('dqm_enabled', false),
         store_failures=true, meta={'dbt_dqm': {'granularity': ['id']}}) }}

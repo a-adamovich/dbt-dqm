@@ -125,7 +125,12 @@ def demo(tmp_path, acceptance_run_id, request):
 
     dataset = PREFIX + uuid.uuid4().hex[:12]
     location = os.environ.get("DBT_DQM_BIGQUERY_TEST_LOCATION", "US")
-    client = bigquery.Client(project=PROJECT, location=location)
+    maximum = int(os.environ.get("DBT_DQM_BIGQUERY_MAX_BYTES_BILLED", str(1024 ** 3)))
+    assert maximum > 0, "The acceptance query byte limit must be positive"
+    validation_id = os.environ.get("DBT_DQM_VALIDATION_RUN_ID", acceptance_run_id)
+    client = bigquery.Client(project=PROJECT, location=location,
+        default_query_job_config=bigquery.QueryJobConfig(maximum_bytes_billed=maximum,
+            labels={"dbt_dqm_run": acceptance_run_id, "dbt_dqm_validation": validation_id}))
     value = bigquery.Dataset(f"{PROJECT}.{dataset}")
     value.location = location
     # Lets the session-end sweep remove it if this test's own cleanup never runs.
@@ -140,6 +145,14 @@ def demo(tmp_path, acceptance_run_id, request):
         path,
         ignore=shutil.ignore_patterns("target", "logs", "dbt_packages"),
     )
+    project_file = path / "dbt_project.yml"
+    document = yaml.safe_load(project_file.read_text())
+    document.setdefault("vars", {})["acceptance_run_id"] = acceptance_run_id
+    document["vars"]["validation_id"] = validation_id
+    document["query-comment"] = {
+        "comment": '{"dbt_dqm_run": "{{ var(\'acceptance_run_id\') }}", '
+                   '"dbt_dqm_validation": "{{ var(\'validation_id\') }}"}', "job-label": True}
+    project_file.write_text(yaml.safe_dump(document))
     (path / "dbt_packages").mkdir()
     (path / "dbt_packages/dbt_dqm").symlink_to(ROOT, target_is_directory=True)
     profiles = tmp_path / "profiles"
@@ -157,6 +170,7 @@ def demo(tmp_path, acceptance_run_id, request):
                             "dataset": dataset,
                             "location": location,
                             "threads": 4,
+                            "maximum_bytes_billed": maximum,
                         }
                     },
                 }
