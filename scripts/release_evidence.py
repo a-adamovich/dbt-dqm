@@ -1,0 +1,159 @@
+"""Shared standard-library checks for release validation evidence."""
+
+import ast
+import hashlib
+import io
+import json
+import re
+import subprocess
+import tempfile
+import xml.etree.ElementTree as ET
+import zipfile
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import ci_validation
+
+ROOT = Path(__file__).resolve().parents[1]
+MAX_BUNDLE_BYTES = 32 * 1024 * 1024
+
+
+def gh(*arguments):
+    result = subprocess.run(["gh", *arguments], check=True, capture_output=True, text=True)
+    return json.loads(result.stdout)
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def command(*args):
+    return subprocess.run(args, cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def source_names(filename):
+    """Derive checked-in cases without importing warehouse clients or executing tests."""
+    source = ast.parse((ROOT / "integration_tests/acceptance" / filename).read_text())
+    names = set()
+    for node in source.body:
+        if not isinstance(node, ast.FunctionDef) or not node.name.startswith("test_"):
+            continue
+        suffixes = [""]
+        for decorator in node.decorator_list:
+            if isinstance(decorator, ast.Call) and ast.unparse(decorator.func) == "pytest.mark.parametrize":
+                values = ast.literal_eval(decorator.args[1])
+                suffixes = [f"[{value}]" for value in values]
+        names.update(node.name + suffix for suffix in suffixes)
+    return names
+
+
+def commit_tree(repository, sha):
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise ValueError("Expected an immutable commit SHA")
+    value = gh("api", f"repos/{repository}/commits/{sha}")
+    if value["sha"] != sha:
+        raise ValueError("Unexpected commit response")
+    return value["commit"]["tree"]["sha"]
+
+
+def required_ci_jobs():
+    return {f"lint-and-test ({version})" for version in ci_validation.PYTHONS} | {
+        "package-smoke (3.11)", "package-smoke (3.14)", "bigquery-compile", "dbt-v2",
+        "portability (windows-latest, 3.11)", "portability (macos-latest, 3.14)",
+        "postgres-core", "required",
+    }
+
+
+def verify_run(repository, run_id, *, workflow, expected_jobs, tree, now=None):
+    if not str(run_id).isdigit():
+        raise ValueError("Expected a workflow run ID")
+    now = now or datetime.now(UTC)
+    prefix = f"repos/{repository}/actions"
+    run = gh("api", f"{prefix}/runs/{run_id}")
+    reference = gh("api", f"{prefix}/workflows/{workflow}")
+    if (run.get("repository", {}).get("full_name") != repository
+            or run.get("workflow_id") != reference["id"]
+            or run.get("path", "").split("@")[0] != ".github/workflows/" + workflow
+            or run.get("status") != "completed" or run.get("conclusion") != "success"
+            or run.get("event") not in ({"workflow_dispatch"} if workflow == "full-validation.yml"
+                                       else {"pull_request", "push"})
+            or commit_tree(repository, run["head_sha"]) != tree):
+        raise ValueError("Wrong, incomplete or unsuccessful validation run")
+    started = datetime.fromisoformat(run["run_started_at"])
+    if not now - timedelta(days=14) <= started <= now:
+        raise ValueError("Stale validation run")
+    attempt = run["run_attempt"]
+    pages = gh("api", "--paginate", "--slurp",
+               f"{prefix}/runs/{run_id}/attempts/{attempt}/jobs?per_page=100")
+    jobs = [job for page in pages for job in page["jobs"]]
+    for name in expected_jobs:
+        matching = [job for job in jobs if job.get("name") == name]
+        if len(matching) != 1 or matching[0].get("conclusion") != "success":
+            raise ValueError(f"Missing or unsuccessful required job: {name}")
+    return run, pages
+
+
+def artifact_files(repository, run, name):
+    pages = gh("api", "--paginate", "--slurp",
+               f"repos/{repository}/actions/runs/{run['id']}/artifacts?per_page=100")
+    artifacts = [item for page in pages for item in page["artifacts"] if item["name"] == name]
+    if len(artifacts) != 1:
+        raise ValueError(f"Missing or duplicate validation artifact: {name}")
+    artifact = artifacts[0]
+    binding = artifact.get("workflow_run", {})
+    if (artifact.get("expired") or binding.get("id") != run["id"]
+            or binding.get("head_sha") != run["head_sha"]
+            or not 0 < artifact["size_in_bytes"] <= MAX_BUNDLE_BYTES):
+        raise ValueError("Expired or mismatched validation artifact")
+    raw = subprocess.run(["gh", "api",
+        f"repos/{repository}/actions/artifacts/{artifact['id']}/zip"], check=True,
+        capture_output=True).stdout
+    if len(raw) > MAX_BUNDLE_BYTES or "sha256:" + digest(raw) != artifact.get("digest"):
+        raise ValueError("Incorrect validation artifact digest")
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        members = archive.infolist()
+        if (sum(item.file_size for item in members) > MAX_BUNDLE_BYTES
+                or len({item.filename for item in members}) != len(members)):
+            raise ValueError("Invalid validation archive")
+        return {item.filename: archive.read(item).decode() for item in members
+                if not item.is_dir() and Path(item.filename).name in ("evidence.json", "junit.xml")}
+
+
+def warehouse_report(repository, run, name, tree, *, core=False):
+    files = artifact_files(repository, run, name)
+    records = [json.loads(value) for path, value in files.items() if Path(path).name == "evidence.json"]
+    reports = [value for path, value in files.items() if Path(path).name == "junit.xml"]
+    if len(records) != 1 or len(reports) != 1:
+        raise ValueError("Missing warehouse record or JUnit report")
+    record = records[0]
+    if (record.get("schema_version") != 1 or record.get("scope") != "postgres-and-platform"
+            or record.get("repository") != repository or record.get("worktree_dirty") is not False
+            or record.get("run_id") != str(run["id"])
+            or record.get("run_attempt") != str(run["run_attempt"])
+            or record.get("tree") != tree or commit_tree(repository, record["sha"]) != tree):
+        raise ValueError("Stale or mismatched warehouse checkout evidence")
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "junit.xml"
+        path.write_text(reports[0])
+        counts = ci_validation.junit_counts(path, core=core, minimum=8 if core else 41)
+    if counts != record.get("counts"):
+        raise ValueError("Warehouse counts disagree with JUnit")
+    if not core:
+        cases = list(ET.fromstring(reports[0]).iter("testcase"))
+        names = [case.attrib["name"] for case in cases]
+        if (len(names) != len(set(names)) or set(names) != source_names("test_postgres.py")
+                or any(case.attrib.get("classname", "").split(".")[-1] != "test_postgres" for case in cases)):
+            raise ValueError("Incorrect full Postgres test selection")
+    installed, matrix = record.get("installed", {}), record.get("matrix", {})
+    if (installed.get("dbt-core") != matrix.get("engine")
+            or installed.get("dbt-postgres") != "1.11.0"
+            or not installed.get("python", "").startswith(matrix.get("python", "missing") + ".")
+            or installed.get("postgres", "").split(".")[0] != matrix.get("postgres")
+            or not re.fullmatch(r"[0-9a-f]{64}", record.get("dependency_digest", ""))):
+        raise ValueError("Installed warehouse versions disagree with the matrix")
+    if core and (record.get("job") != "postgres-core" or record.get("suite") != "postgres-core"
+                 or record.get("matrix") != {"python": "3.14", "postgres": "16", "engine": "1.12.6"}):
+        raise ValueError("Incorrect Postgres core matrix entry")
+    return record
+
+

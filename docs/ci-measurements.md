@@ -42,10 +42,7 @@ unexpected skips, duplicate reports, or fewer than 41 passing warehouse cases fa
 Reports are retained for 30 days; this is retention, not permission to reuse them for release.
 
 Stage 1 certifies **Postgres and platforms only**. A passing result does not replace the
-BigQuery release gate. Version 0.2.2 has a separately approved, temporary maintainer attestation
-for local BigQuery results; it still requires every full-validation job. This is not the general
-evidence-reuse or WIF rollout. PyPI approval and provenance verification remain in place.
-The maintainer must configure `required` as a required status and require up-to-date PRs;
+BigQuery release gate. The retired local-attestation exception is not available for future releases. The maintainer must configure `required` as a required status and require up-to-date PRs;
 adding a workflow alone does not enforce branch protection.
 
 ## Measurement record

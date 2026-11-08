@@ -3,11 +3,23 @@
 import json
 import runpy
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/check_bigquery_release_gate.py"
+
+
+def test_gate_imports_without_third_party_packages():
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c",
+         ("import runpy,sys; sys.path.insert(0, sys.argv[1]); "
+          "runpy.run_path(sys.argv[2], run_name='gate_import_check')"),
+         str(SCRIPT.parent), str(SCRIPT)],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize("revision,conclusions,passes", [
@@ -28,7 +40,7 @@ def test_release_gate_requires_both_live_engines_on_exact_revision(monkeypatch, 
                            for engine, conclusion in zip(("dbt1", "dbt2"), conclusions, strict=True)]})
         return subprocess.CompletedProcess(command, 0, json.dumps(value), "")
     monkeypatch.setattr(subprocess, "run", run)
-    main = runpy.run_path(str(SCRIPT))["main"]
+    main = runpy.run_path(str(SCRIPT))["legacy_gate"]
     if passes:
         main()
     else:

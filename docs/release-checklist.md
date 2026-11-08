@@ -1,7 +1,6 @@
 # Release checklist
 
-For 0.2.3, follow the scoped recovery procedure below; it supersedes the original
-0.2.2 procedure in the historical checklist table. Do not repeat warehouse suites for this recovery.
+The normal release gate is an interim check. Complete the stronger evidence contract and credentialed verification before the next release.
 
 This is the single current list of what must pass before a release tag is pushed. Dated records of
 earlier verification are kept as history (see [Historical records](#historical-records)); they
@@ -18,20 +17,18 @@ documentation, invalidates that candidate's evidence. Store generated receipts o
 | --- | --- | --- |
 | 1 | Fast CI passes on the candidate | The `required` check covers units on Python 3.11–3.14, packaging/security floors, representative native portability, real dbt 2 parse/compile, offline BigQuery compile and eight real Postgres core cases |
 | 2 | Manual full Postgres/platform validation passes | Run `Full validation` on the candidate. Its `validated` check requires the complete Postgres 14/16 and Python 3.11–3.14 matrix, Core 1.11.0, full packaging/portability/compile matrices and candidate QA; warehouse counts and exact-run evidence must pass |
-| 3 | Credentialed BigQuery acceptance, **one full run per engine** on the candidate | For 0.2.2, use existing local credentials after the cost checkpoint: 33 cases on dbt 2.0.11/four workers, then 33 on Core 1.12.6/two workers. Require zero skips/failures/errors and exact selections. Use disposable datasets; retain all attempts and diagnoses. This is maintainer-attested local evidence, not live WIF verification |
+| 3 | Credentialed BigQuery acceptance, **one full run per engine** on the candidate | Require 33 cases for each supported engine, zero skips/failures/errors, and exact selections. Complete the planned evidence contract and credentialed workflow before the next release. |
 | 4 | Restricted runner/reviewer permissions gate, run serially after 3 | `DBT_DQM_BIGQUERY_RUNNER_CREDENTIALS=… DBT_DQM_BIGQUERY_REVIEWER_CREDENTIALS=… uv run --group dbt1 --extra bigquery pytest integration_tests/acceptance/test_bigquery_permissions.py` against the shared QA dataset |
 | 5 | Browser QA of the review app, when the app or its dependencies changed | Sync, edit and Apply, the "busy" message under a held lock, the Health tab including Maintenance; in warehouse mode (`--browse warehouse`) paging, filters, search (including a refusal), an edit applied from a later page, and the offline view |
 | 6 | Cache-boundary memory, when runtime code or dependencies changed | `integration_tests/scale/cache_boundary.py` at 50,000 issues; record it in [scale](scale.md) |
 | 7 | Versions agree | `pyproject.toml` and `dbt_project.yml` versions are equal, and the tag is `v<version>`. A Python pre-release is spelled in SemVer for dbt (`0.2.0a1` → `0.2.0-a1`); no other spelling is accepted. `release.yml` refuses a mismatch before installing or building anything. |
 | 8 | No open Dependabot alerts | Or each remaining alert has a written applicability note **and** the maintainer's explicit acceptance |
 | 9 | PyPI trusted publisher confirmed | Project `dbt-dqm`, owner `a-adamovich`, repository `dbt-dqm`, workflow `release.yml`, environment `pypi` ([#12](https://github.com/a-adamovich/dbt-dqm/issues/12)) |
-| 10 | Release approval pause observed | A v0.2.2 tag push skips publication. Explicit manual attestation first verifies evidence with read-only access, then the publishing job waits on `pypi`. After approval it rechecks evidence, builds, verifies and publishes. Other tags retain the credentialed GitHub gate |
+| 10 | Release approval pause observed | The publishing job waits on `pypi`; future releases require credentialed verification and maintainer approval. |
 
 Tagging and publishing remain the maintainer's decision after every gate passes.
 
-The `validated` result covers Postgres and platforms only. For 0.2.2 it must be combined with
-the temporary local BigQuery attestation below. Automated cloud PR smoke and broader evidence
-reuse remain unavailable. See [CI tiers and measurements](ci-measurements.md).
+The `validated` result covers Postgres and platforms only. Automated cloud PR smoke and broader evidence reuse remain unavailable. See [CI tiers and measurements](ci-measurements.md).
 
 ### 0.2.0a1 authentication and publication criteria
 
@@ -213,44 +210,3 @@ Dated verification and review records, preserved as written:
 - [Permissions and release safeguards verification](qa-release-safeguards.md) (2026-10-09)
 - [0.2 implementation and verification](implementation-0.2.md) (2026-10-07)
 - [Project review](project-review.md) (2026-08-09)
-
-## 0.2.3 recovery of the unpublished 0.2.2 candidate
-
-The maintainer explicitly approved scoped reuse instead of repeating long warehouse suites.
-The immutable v0.2.2 tag and draft remain historical records; neither is a published PyPI version.
-
-1. Use the fixed candidate, tree, full-validation run and original bundle digest recorded in
-   `scripts/release_recovery.py`. Preserve the original reports and failed-attempt diagnoses.
-2. Compare rename-disabled source differences against the finite approved paths. Package and
-   lockfile changes must be version-only; resolved dependencies, warehouse fixtures, acceptance
-   assertions and application runtime must match. Compare built wheel payloads as well.
-3. Run fresh PR CI, complete units, Ruff, actionlint, builds, installed-wheel variants and audits.
-   The accepted sqlparse exception remains limited to the isolated Core 1.11 compatibility engine.
-4. Run Release in verification-only mode on the reviewed recovery head with the original digest,
-   historical tested SHA/full run and current candidate CI ID. Set evidence_tag=v0.2.2 so its
-   actual workflow token proves draft listing and numeric asset download before a new tag exists.
-   The isolated fetch job requires contents:write for draft visibility, makes only API reads,
-   and receives no publishing identity. The evidence verifier retains read-only permissions.
-5. Review and merge the recovery PR. Require merged-main CI and the same reviewed recovery tree.
-   Present the pre-tag checkpoint and obtain explicit authorization for immutable v0.2.3.
-6. Prepare a v0.2.3 draft with the original `local-validation-0.2.2.json`, historical failed
-   reports, reviewed recovery record and release notes. Never relabel old warehouse results.
-7. Obtain the maintainer's release-specific attestation and dispatch on v0.2.3 with verify_only=false,
-   local_bigquery_attested=true and evidence_tag=v0.2.3. Both recovery-version tag pushes skip
-   publication. The gate checks original evidence (maximum age 14 days) plus fresh current CI.
-8. The human maintainer approves Review deployments → pypi. The publisher downloads and verifies
-   evidence again, builds and compares wheels, verifies provenance and uses trusted publishing.
-   Finalize the existing draft, preserving reviewed notes. Verify public artifacts/installations.
-9. Open the recovery-exception removal issue after shipping. Future releases retain the
-   credentialed GitHub gate. Any difference outside the reviewed scope blocks reuse; do not
-   broaden it or start new cloud acceptance without authorization.
-
-Keep private originals local and public evidence redacted. Metadata queries were forbidden with
-existing credentials; same-account job API measurements exclude SCRIPT parents and separate
-unlabelled activity but have missing statistics and are not whole-project cost totals.
-dbt 2.0.11 did not honor the tested maximum_bytes_billed profile setting; no hard suite budget
-is claimed. No GCP credentials, IAM, quotas or shared-QA setup change for this recovery.
-
-On failure, inspect workflow and PyPI state. Keep tags fixed. Retry transient failures only with
-unchanged source/artifacts; source changes after tagging need another version. Obtain explicit
-authorization before yanking defective published artifacts.
