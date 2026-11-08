@@ -150,8 +150,10 @@ def demo(tmp_path, acceptance_run_id, request):
     document.setdefault("vars", {})["acceptance_run_id"] = acceptance_run_id
     document["vars"]["validation_id"] = validation_id
     document["query-comment"] = {
-        "comment": '{"dbt_dqm_run": "{{ var(\'acceptance_run_id\') }}", '
-                   '"dbt_dqm_validation": "{{ var(\'validation_id\') }}"}', "job-label": True}
+        "comment": json.dumps({"dbt_dqm_run": acceptance_run_id,
+                               "dbt_dqm_validation": validation_id}),
+        "job-label": True,
+    }
     project_file.write_text(yaml.safe_dump(document))
     (path / "dbt_packages").mkdir()
     (path / "dbt_packages/dbt_dqm").symlink_to(ROOT, target_is_directory=True)
