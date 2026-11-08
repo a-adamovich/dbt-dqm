@@ -24,13 +24,7 @@ not replace the credentialed release gate below.
 For the unpublished **0.2.2** candidate, the maintainer approved complete local BigQuery acceptance on dbt 2.0.11
 and Core 1.12.6 using existing credentials, followed by the serial restricted runner/reviewer
 check. The 33-case selections, reports, failures/reruns and identical source tree are recorded.
-Publication requires explicit maintainer attestation and the protected PyPI approval. This does
-not certify live WIF. Every GitHub full-validation job and current CI remain required.
-
-See the [step-by-step release checklist](release-checklist.md#023-recovery-of-the-unpublished-022-candidate)
-for checkpoints, receipt commands, verification-only mode and tag/release behavior. The original exception rejected every other version. The approved 0.2.3 recovery below
-supersedes it only for publication recovery and is tracked for removal after shipping. The on-demand
-WIF workflow stays inactive; no GCP setup is required for this exception.
+The 0.2.3 release used maintainer-attested BigQuery evidence. Future releases require the credentialed gate and its planned evidence improvements.
 
 ## Offline and local checks
 

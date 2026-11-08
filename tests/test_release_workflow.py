@@ -12,6 +12,18 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_normal_release_requires_credentialed_gate_before_publication():
+    workflow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())
+    job = workflow['jobs']['release']
+    assert job['environment'] == 'pypi'
+    names = [step.get('name') for step in job['steps']]
+    assert names.index('Require credentialed BigQuery verification for both engines') < names.index(
+        'Publish to PyPI through trusted publishing'
+    )
+    gate = job['steps'][names.index('Require credentialed BigQuery verification for both engines')]
+    assert 'scripts/check_bigquery_release_gate.py' in gate['run']
+
+
 @pytest.fixture
 def verify(tmp_path):
     workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
@@ -249,8 +261,7 @@ def test_only_pre_release_tags_create_a_github_pre_release(tmp_path):
     assert later_stable[later_stable.index("--notes-file") + 1] == "docs/release-notes-0.2.1.md"
     candidate = _create_release(tmp_path, "v0.2.3")
     assert "--prerelease" not in candidate
-    assert "edit" in candidate and "--draft=false" in candidate
-    assert "--notes-file" not in candidate
+    assert "--generate-notes" in candidate
     assert "--generate-notes" in _create_release(tmp_path, "v0.2.4")
 
 
@@ -264,32 +275,3 @@ def test_alpha_version_is_accepted_by_python_and_dbt():
     assert VersionSpecifier.from_version_string("0.2.0-a1").prerelease == "a1"
     # Parsing a version alone is insufficient: dbt validates package project schemas too.
     Project.validate(yaml.safe_load((ROOT / "dbt_project.yml").read_text()))
-
-
-@pytest.mark.parametrize("event,ref,verify,preflight,publishes", [
-    ("push", "refs/tags/v0.2.2", False, "skipped", False),
-    ("push", "refs/tags/v0.2.3", False, "skipped", False),
-    ("push", "refs/tags/v0.2.4", False, "skipped", True),
-    ("workflow_dispatch", "refs/heads/candidate", True, "success", False),
-    ("workflow_dispatch", "refs/tags/v0.2.2", False, "failure", False),
-    ("workflow_dispatch", "refs/tags/v0.2.3", False, "success", True),
-])
-def test_release_job_is_unreachable_without_the_required_trigger(event, ref, verify, preflight, publishes):
-    flow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
-    job = flow["jobs"]["release"]
-    assert job["needs"] == "preflight"
-    expression = job["if"]
-    for key, value in {"always()": True, "github.event_name": event, "github.ref": ref,
-                       "inputs.verify_only": verify, "needs.preflight.result": preflight}.items():
-        expression = expression.replace(key, repr(value))
-    expression = expression.replace("&&", " and ").replace("||", " or ").replace("!", "not ")
-    # Preserve != while translating GitHub's unary not.
-    expression = expression.replace("not =", "!=")
-    assert bool(eval(expression, {"__builtins__": {}})) is publishes
-    check = flow["jobs"]["preflight"]
-    assert "environment" not in check
-    assert check["permissions"] == {"contents": "read", "actions": "read"}
-    assert all("uv publish" not in step.get("run", "") for step in check["steps"])
-    inputs = flow.get("on", flow.get(True))["workflow_dispatch"]["inputs"]
-    assert inputs["verify_only"]["default"] is True
-    assert inputs["local_bigquery_attested"]["default"] is False
