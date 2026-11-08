@@ -196,12 +196,19 @@ def test_bundle_digest_is_required(modules, tmp_path):
 @pytest.fixture
 def complete_gate(modules, monkeypatch, tmp_path):
     local, gate = modules
+    monkeypatch.setattr(gate.recovery, "verify_source", lambda: {"synthetic": True})
+    monkeypatch.setattr(gate.recovery, "TESTED_SHA", SHA)
+    monkeypatch.setattr(gate.recovery, "FULL_RUN", "7")
+    monkeypatch.setattr(gate.recovery, "BASE_CI", "6")
+    monkeypatch.setattr(gate.recovery, "BASE_TREE", TREE)
+    monkeypatch.setattr(gate.recovery, "BUNDLE_DIGEST", LOCK)
+    monkeypatch.setattr(gate.recovery, "git", lambda *a: b"baseline lock")
     actual = "d" * 40  # A squash merge changes the SHA, while preserving the complete tree.
     monkeypatch.setenv("GITHUB_REPOSITORY", local.REPOSITORY)
     monkeypatch.setenv("GITHUB_SHA", actual)
     monkeypatch.setenv("GITHUB_ACTOR", "maintainer")
     monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_dispatch")
-    monkeypatch.setenv("GITHUB_REF", "refs/tags/v0.2.2")
+    monkeypatch.setenv("GITHUB_REF", "refs/tags/v0.2.3")
     monkeypatch.setattr(local, "command", lambda *args: "" if "status" in args else
                         TREE if args[-1] == "HEAD^{tree}" else actual)
     monkeypatch.setattr(local, "validate_bundle", lambda *a, **k: evidence(local))
@@ -242,7 +249,7 @@ def complete_gate(modules, monkeypatch, tmp_path):
                      if f"py{value['python']}-pg{value['postgres']}" in name)
         return records[entry]
     monkeypatch.setattr(gate, "warehouse_report", warehouse)
-    argv = ["--version", "0.2.2", "--evidence", str(tmp_path / "synthetic-fixture.json"),
+    argv = ["--version", "0.2.3", "--evidence", str(tmp_path / "synthetic-fixture.json"),
             "--digest", LOCK, "--tested-sha", SHA, "--ci-run", "6", "--full-run", "7"]
     return gate, argv, ci, full, records, looked_up, calls
 
@@ -262,7 +269,7 @@ def test_publication_verification_enforces_temporary_scope(complete_gate, monkey
     if change != "attestation":
         argv.append("--attest")
     if change == "version":
-        argv[1] = "0.2.3"
+        argv[1] = "0.2.4"
     elif change == "ref":
         monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
     elif change in ("actor", "main_tree"):

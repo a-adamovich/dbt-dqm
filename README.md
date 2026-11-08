@@ -17,7 +17,7 @@ for DQM, captures their results, and updates the issue history.
 
 Start with an existing dbt project, a configured profile, and a supported warehouse adapter.
 dbt-dqm has **two installations**: the dbt package supplies warehouse models and macros; the
-Python package supplies the `dbt-dqm` command and local review app. Use matching `0.2.2`
+Python package supplies the `dbt-dqm` command and local review app. Use matching `0.2.3`
 versions. Publication requires credentialed BigQuery verification on dbt 2.0.11 and Core
 1.12.6; the release includes maintainer-attested reports. The examples below install a local
 checkout, which is also useful when developing or validating a release.
@@ -33,7 +33,7 @@ checkout, which is also useful when developing or validating a release.
    dbt deps
    ```
 
-   After publication, use Git revision `v0.2.2` or the verified Hub listing.
+   After publication, use Git revision `v0.2.3` or the verified Hub listing.
    [Hub registration](https://github.com/dbt-labs/hubcap/pull/464) is pending.
 
 2. From this checkout, install your dbt engine separately, then install the command and
@@ -117,7 +117,7 @@ for its controls and limits.
   maintenance, resets, upgrades, and troubleshooting.
 - [Try the demo projects](docs/operations.md#demo-projects) or inspect the
   [warehouse contract](docs/warehouse-interfaces.md) and [scale measurements](docs/scale.md).
-- [0.2.2 candidate notes](docs/release-notes-0.2.2.md) and [compatibility verification](docs/dbt-2-compatibility.md).
+- [0.2.3 candidate notes](docs/release-notes-0.2.3.md) and [compatibility verification](docs/dbt-2-compatibility.md).
 - [Stable 0.2.1 release notes](docs/release-notes-0.2.1.md) and
   [verification record](docs/release-0.2.1.md).
 

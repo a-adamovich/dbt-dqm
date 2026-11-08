@@ -65,3 +65,19 @@ instructions take precedence. Preserve existing assertions and acceptance cases.
 - Only 0.2.2 may use the exception. Open a removal issue immediately after release. Other versions
   retain the credentialed GitHub gate. Keep tags fixed; source corrections after tagging use a
   new version, and yanking a defective published release requires explicit authorization.
+
+## Approved 0.2.3 publication recovery
+
+This supersedes identical-tree-only reuse solely for the unpublished 0.2.2 to 0.2.3 recovery.
+The maintainer approved reuse of the original reports, never rewriting their version, SHA,
+tree, times or outcomes. Use the fixed historical candidate and digest in release_recovery.py.
+Only its finite reviewed release-control, gate-test, documentation and version-metadata paths
+may change. Application runtime, macros, warehouse models/fixtures, acceptance assertions,
+full-validation definitions and resolved dependencies must remain identical. Compare wheel
+payloads allowing version metadata only. Require fresh PR/main CI and security/install checks.
+Prove actual draft retrieval and real evidence verification with the workflow token before tagging.
+Draft retrieval needs a push-capable token and must remain isolated from the read-only verifier;
+only the protected publisher receives publishing identity. No new cloud acceptance is authorized
+by this recovery. Preserve v0.2.2 and its draft. Keep review, pre-tag, attestation and human PyPI
+checkpoints. Open an exception-removal issue immediately after 0.2.3 ships; later releases retain
+the credentialed gate unless separately authorized. Never move a tag or bypass a failed check.

@@ -1,4 +1,4 @@
-"""Verify release evidence; local maintainer attestation is permitted only for 0.2.2."""
+"""Verify release evidence; local maintainer attestation recovery is permitted only for 0.2.3."""
 
 import argparse
 import io
@@ -16,6 +16,7 @@ from pathlib import Path
 
 import ci_validation
 import local_release_evidence as local
+import release_recovery as recovery
 
 
 def gh(*arguments):
@@ -155,8 +156,8 @@ def warehouse_report(repository, run, name, tree, *, core=False):
 
 def local_gate(args):
     repository = os.environ["GITHUB_REPOSITORY"]
-    if repository != local.REPOSITORY or args.version != local.VERSION:
-        raise ValueError("The local attestation exception is restricted to dbt-dqm 0.2.2")
+    if repository != local.REPOSITORY or args.version != recovery.RELEASE_VERSION:
+        raise ValueError("The local attestation exception is restricted to dbt-dqm 0.2.3")
     if tomllib.loads((local.ROOT / "pyproject.toml").read_text())["project"]["version"] != args.version:
         raise ValueError("The package version does not match the attestation")
     actual = os.environ["GITHUB_SHA"]
@@ -164,13 +165,17 @@ def local_gate(args):
     if (local.command("git", "rev-parse", "HEAD") != actual
             or local.command("git", "rev-parse", "HEAD^{tree}") != tree
             or local.command("git", "status", "--porcelain", "--untracked-files=no")
-            or commit_tree(repository, args.tested_sha) != tree):
+            or commit_tree(repository, recovery.BASE_SHA) != recovery.BASE_TREE):
         raise ValueError("The checkout and tested candidate must have identical trees")
+    record = recovery.verify_source()
+    if (args.tested_sha != recovery.TESTED_SHA or args.full_run != recovery.FULL_RUN
+            or args.digest != recovery.BUNDLE_DIGEST):
+        raise ValueError("Recovery must use the approved historical evidence")
     if not args.verify_only:
         if (os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
-                or os.environ.get("GITHUB_REF") != "refs/tags/v0.2.2"
+                or os.environ.get("GITHUB_REF") != "refs/tags/v0.2.3"
                 or not args.attest):
-            raise ValueError("Publication requires explicit manual attestation on v0.2.2")
+            raise ValueError("Publication requires explicit manual attestation on v0.2.3")
         actor = os.environ["GITHUB_ACTOR"]
         permission = gh("api", f"repos/{repository}/collaborators/{actor}/permission")
         if permission.get("permission") != "admin":
@@ -178,29 +183,35 @@ def local_gate(args):
         main = gh("api", f"repos/{repository}/commits/main")
         if main["commit"]["tree"]["sha"] != tree:
             raise ValueError("Main changed after validation")
-    value = local.validate_bundle(args.evidence, args.digest, tree=tree,
-                                 lock_digest=local.digest((local.ROOT / "uv.lock").read_bytes()))
+    value = local.validate_bundle(args.evidence, args.digest, tree=recovery.BASE_TREE,
+        lock_digest=local.digest(recovery.git("show", recovery.BASE_SHA + ":uv.lock")))
     for sha in {run["sha"] for run in value["runs"]}:
-        if commit_tree(repository, sha) != tree:
+        if commit_tree(repository, sha) != recovery.BASE_TREE:
             raise ValueError("A local report names a different source tree")
     ci, _ = verify_run(repository, args.ci_run, workflow="ci.yml",
                        expected_jobs=required_ci_jobs(), tree=tree)
     if not args.verify_only and (ci["event"] != "push" or ci["head_sha"] != actual):
         raise ValueError("Publication requires current CI on the merged/tagged commit")
     warehouse_report(repository, ci, "warehouse-core-acceptance", tree, core=True)
+    baseline_ci, _ = verify_run(repository, recovery.BASE_CI, workflow="ci.yml",
+        expected_jobs=required_ci_jobs(), tree=recovery.BASE_TREE)
+    warehouse_report(repository, baseline_ci, "warehouse-core-acceptance", recovery.BASE_TREE, core=True)
     full, pages = verify_run(repository, args.full_run, workflow="full-validation.yml",
-                             expected_jobs=ci_validation.full_jobs() | {"validated"}, tree=tree)
+                             expected_jobs=ci_validation.full_jobs() | {"validated"}, tree=recovery.BASE_TREE)
     if full["head_sha"] != args.tested_sha:
         raise ValueError("Full validation must identify the recorded tested SHA")
     records = []
     for name, entry in ci_validation.warehouse_matrix().items():
         artifact = ("warehouse-postgres-lower-bound-acceptance" if name == "dbt-lower-bound" else
                     f"warehouse-postgres-py{entry['python']}-pg{entry['postgres']}-acceptance")
-        records.append(warehouse_report(repository, full, artifact, tree))
+        records.append(warehouse_report(repository, full, artifact, recovery.BASE_TREE))
     ci_validation.verify_jobs(pages, {"verified_api_jobs": {"result": "success"}}, records,
-        sha=full["head_sha"], tree=tree, run_id=str(full["id"]), run_attempt=str(full["run_attempt"]),
+        sha=full["head_sha"], tree=recovery.BASE_TREE, run_id=str(full["id"]), run_attempt=str(full["run_attempt"]),
         repository=repository)
-    print(f"Verified identical tree {tree}; local BigQuery results are maintainer-attested.")
+    if args.recovery_record:
+        args.recovery_record.write_text(json.dumps(record, indent=2) + "\n")
+    print(json.dumps(record, sort_keys=True))
+    print(f"Verified scoped recovery to tree {tree}; local BigQuery results are maintainer-attested.")
     if args.verify_only:
         print("Verification only: no publishing, release mutation or approval requested.")
 
@@ -217,6 +228,7 @@ def main(argv=()):
     parser.add_argument("--full-run", required=True)
     parser.add_argument("--verify-only", action="store_true")
     parser.add_argument("--attest", action="store_true")
+    parser.add_argument("--recovery-record", type=Path)
     try:
         local_gate(parser.parse_args(argv))
     except (ValueError, KeyError, OSError, ET.ParseError, zipfile.BadZipFile, subprocess.SubprocessError) as error:
