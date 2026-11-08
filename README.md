@@ -18,8 +18,9 @@ for DQM, captures their results, and updates the issue history.
 Start with an existing dbt project, a configured profile, and a supported warehouse adapter.
 dbt-dqm has **two installations**: the dbt package supplies warehouse models and macros; the
 Python package supplies the `dbt-dqm` command and local review app. Use matching `0.2.2`
-versions. This checkout is a release candidate; credentialed BigQuery verification on dbt 2.0.11
-is still required before publication. The examples below install this checkout.
+versions. Publication requires credentialed BigQuery verification on dbt 2.0.11 and Core
+1.12.6; the release includes maintainer-attested reports. The examples below install a local
+checkout, which is also useful when developing or validating a release.
 
 1. Add the dbt package to your project's `packages.yml`, then install it:
 

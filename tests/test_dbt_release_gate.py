@@ -17,6 +17,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "scripts/check_bigquery_release_g
     ("older", ("success", "success"), False),
 ])
 def test_release_gate_requires_both_live_engines_on_exact_revision(monkeypatch, revision, conclusions, passes):
+    monkeypatch.syspath_prepend(str(SCRIPT.parent))
     monkeypatch.setenv("GITHUB_SHA", "candidate")
     monkeypatch.setenv("GITHUB_REPOSITORY", "example/package")
     def run(command, **kwargs):

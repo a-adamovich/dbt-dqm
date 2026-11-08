@@ -4,9 +4,10 @@ This is the single current list of what must pass before a release tag is pushed
 earlier verification are kept as history (see [Historical records](#historical-records)); they
 don't replace this list.
 
-Record every result against one **candidate commit**: the exact production commit being released.
-A later commit that only adds these results to the docs must name the candidate, and passes
-ordinary CI itself; the warehouse suites below ran on the candidate, not on that docs commit.
+Record every result against one **candidate SHA and complete source tree**. For 0.2.2, finish
+all tracked text before validation. A merge may change the SHA while preserving the identical
+tree; record both identities and verify equality through GitHub. Any tree change, including
+documentation, invalidates that candidate's evidence. Store generated receipts outside the repo.
 
 ## Gates
 
@@ -14,21 +15,20 @@ ordinary CI itself; the warehouse suites below ran on the candidate, not on that
 | --- | --- | --- |
 | 1 | Fast CI passes on the candidate | The `required` check covers units on Python 3.11–3.14, packaging/security floors, representative native portability, real dbt 2 parse/compile, offline BigQuery compile and eight real Postgres core cases |
 | 2 | Manual full Postgres/platform validation passes | Run `Full validation` on the candidate. Its `validated` check requires the complete Postgres 14/16 and Python 3.11–3.14 matrix, Core 1.11.0, full packaging/portability/compile matrices and candidate QA; warehouse counts and exact-run evidence must pass |
-| 3 | Credentialed BigQuery acceptance, **one full run per engine** on the candidate | Run the live BigQuery workflow on Core 1.12.5 and dbt 2.0.9. Every collected case must pass without credential-related skips. Use disposable labelled datasets; record actual counts, workers and duration. Recent full runs took 57–102 minutes with different concurrency, so no fixed runtime is promised |
+| 3 | Credentialed BigQuery acceptance, **one full run per engine** on the candidate | For 0.2.2, use existing local credentials after the cost checkpoint: 33 cases on dbt 2.0.11/four workers, then 33 on Core 1.12.6/two workers. Require zero skips/failures/errors and exact selections. Use disposable datasets; retain all attempts and diagnoses. This is maintainer-attested local evidence, not live WIF verification |
 | 4 | Restricted runner/reviewer permissions gate, run serially after 3 | `DBT_DQM_BIGQUERY_RUNNER_CREDENTIALS=… DBT_DQM_BIGQUERY_REVIEWER_CREDENTIALS=… uv run --group dbt1 --extra bigquery pytest integration_tests/acceptance/test_bigquery_permissions.py` against the shared QA dataset |
 | 5 | Browser QA of the review app, when the app or its dependencies changed | Sync, edit and Apply, the "busy" message under a held lock, the Health tab including Maintenance; in warehouse mode (`--browse warehouse`) paging, filters, search (including a refusal), an edit applied from a later page, and the offline view |
 | 6 | Cache-boundary memory, when runtime code or dependencies changed | `integration_tests/scale/cache_boundary.py` at 50,000 issues; record it in [scale](scale.md) |
 | 7 | Versions agree | `pyproject.toml` and `dbt_project.yml` versions are equal, and the tag is `v<version>`. A Python pre-release is spelled in SemVer for dbt (`0.2.0a1` → `0.2.0-a1`); no other spelling is accepted. `release.yml` refuses a mismatch before installing or building anything. |
 | 8 | No open Dependabot alerts | Or each remaining alert has a written applicability note **and** the maintainer's explicit acceptance |
 | 9 | PyPI trusted publisher confirmed | Project `dbt-dqm`, owner `a-adamovich`, repository `dbt-dqm`, workflow `release.yml`, environment `pypi` ([#12](https://github.com/a-adamovich/dbt-dqm/issues/12)) |
-| 10 | Release approval pause observed | Pushing the tag queues `release.yml`; its job waits for a reviewer on the `pypi` environment **before any step runs**. Approve only after gates 1–9; after approval the job checks the tag, verifies, builds, attests, verifies provenance and publishes in one run, so a failure in any step stops publication |
+| 10 | Release approval pause observed | A v0.2.2 tag push skips publication. Explicit manual attestation first verifies evidence with read-only access, then the publishing job waits on `pypi`. After approval it rechecks evidence, builds, verifies and publishes. Other tags retain the credentialed GitHub gate |
 
 Tagging and publishing remain the maintainer's decision after every gate passes.
 
-Stage 1's `validated` result covers Postgres and platforms only. It cannot replace gate 3 or
-satisfy the existing credentialed release guard. Later stages will add approved cloud PR smoke,
-complete full-validation evidence, and conservative result reuse; they must not be assumed
-available before implementation. See [CI tiers and measurements](ci-measurements.md).
+The `validated` result covers Postgres and platforms only. For 0.2.2 it must be combined with
+the temporary local BigQuery attestation below. Automated cloud PR smoke and broader evidence
+reuse remain unavailable. See [CI tiers and measurements](ci-measurements.md).
 
 ### 0.2.0a1 authentication and publication criteria
 
@@ -213,8 +213,59 @@ Dated verification and review records, preserved as written:
 
 ## 0.2.2 dbt compatibility gate
 
-Before tagging 0.2.2, run the keyless BigQuery lifecycle workflow from `main` on the exact
-candidate commit. Require successful `dbt1` and `dbt2` matrix jobs, including the full live
-acceptance suite. The release workflow verifies this automatically; skipped jobs, earlier
-commits, and offline compilation cannot satisfy the gate. See the
-[compatibility verification record](dbt-2-compatibility.md).
+The maintainer approved a temporary local-evidence exception because CI WIF is not configured.
+No GCP setup or key creation is required. It expires after this version; create a removal issue
+immediately after shipping. Future tags retain the credentialed GitHub requirement.
+
+1. Review and approve the concrete gate PR before merging it. Exercise verification-only mode
+   with synthetic unit fixtures before freezing; that run does not certify live acceptance.
+2. Finalize the release-preparation head, all docs included. Record `git rev-parse HEAD` and
+   `git rev-parse 'HEAD^{tree}'`. Monitor main; stop and report any intervening change.
+3. Run `Full validation` once on this head. Every required job, `validated`, and all nine
+   warehouse records must pass. Keep the run ID and exact attempt. CI must pass too.
+4. Present the BigQuery checkpoint: candidate identities, commands, worker counts, duration/cost
+   estimate, byte-limit coverage, and a redacted report sample. Wait for authorization.
+5. Run the three suites serially with Python 3.14 and existing credential environment variables.
+   The receipt helper chooses the fixed test module and workers, refuses a dirty tree, and keeps
+   failed attempts. Example, **after authorization**, from the candidate checkout:
+
+   ```bash
+   /path/to/app-python3.14 scripts/local_release_evidence.py run \
+     --suite bigquery-dbt2 --engine /path/to/dbt-2.0.11/bin/dbt --directory /private/evidence
+   /path/to/app-python3.14 scripts/local_release_evidence.py run \
+     --suite bigquery-dbt1 --engine /path/to/core-1.12.6/bin/dbt --directory /private/evidence
+   /path/to/app-python3.14 scripts/local_release_evidence.py run \
+     --suite bigquery-permissions --engine /path/to/core-1.12.6/bin/dbt --directory /private/evidence
+   ```
+
+   For a failed run, record its diagnosis in its private `receipt.json` before retrying. Do not
+   delete the attempt. Keep the runner/reviewer test serial and never reset shared QA.
+6. Bundle public copies with `python scripts/local_release_evidence.py bundle --directory
+   /private/evidence --output /private/local-validation-0.2.2.json`. Review the redaction. The
+   helper prints the public bundle's SHA256; keep private originals private.
+7. Verify real evidence locally before tagging, with authenticated read-only GitHub access:
+
+   ```bash
+   GITHUB_REPOSITORY=a-adamovich/dbt-dqm GITHUB_SHA=CHECKOUT_SHA \
+     python scripts/check_bigquery_release_gate.py --verify-only --version 0.2.2 \
+     --tested-sha TESTED_SHA --ci-run CI_RUN_ID --full-run FULL_RUN_ID \
+     --evidence /private/local-validation-0.2.2.json --digest BUNDLE_SHA256
+   ```
+
+8. Merge only with an identical tree; verify the new main CI and tree. Present all evidence and
+   obtain explicit tag authorization. Push immutable `v0.2.2`; its automatic publishing job skips.
+9. Prepare a draft GitHub release on the existing tag and attach `local-validation-0.2.2.json`.
+   Manually dispatch **Release** on that tag with `verify_only=false`, explicit
+   `local_bigquery_attested=true`, the bundle digest, tested SHA, merged-commit CI run ID, and
+   original full-validation run ID. The gate accepts different SHAs only with identical trees.
+10. Review and approve `pypi`. Evidence is rechecked afterward. Verify public PyPI artifacts and
+    installations; finalize the existing draft release without creating a conflicting release.
+
+The local evidence and GitHub runs must be no more than 14 days old. The gate verifies every
+required job, actual checkout trees, same-attempt warehouse records, installed versions, counts,
+and artifact/bundle digests. It cannot independently prove local execution: the maintainer's
+attestation and publication approval explicitly accept that responsibility.
+
+Transient publication failures require diagnosis and an inspection of PyPI state before rerun.
+Do not move the tag. Source corrections after tagging use a new version. If defective files reach
+PyPI, obtain authorization to yank 0.2.2 and publish a corrected 0.2.3; never replace uploaded files.

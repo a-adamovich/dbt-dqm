@@ -2,8 +2,8 @@
 
 The current candidate targets **dbt 2.0.11**, retaining v2 support from 2.0.9 and Core
 1.11–1.12. Real 2.0.9 and 2.0.11 offline regression checks are required. Full live
-2.0.11/Core 1.12.6 verification remains pending; historical results below do not certify
-the current candidate.
+2.0.11/Core 1.12.6 verification is required before publication. The published release
+provides its reports as attachments; historical results below cannot substitute for them.
 
 ## Historical 2.0.9 verification
 
@@ -21,22 +21,16 @@ not replace the credentialed release gate below.
 
 ## Release gate
 
-Run **BigQuery lifecycle** on demand from `main` on the exact candidate commit, with the
-existing WIF repository configuration enabled. Both `lifecycle (dbt1)` and `lifecycle (dbt2)`
-must complete successfully. They run lifecycle and acceptance checks in separate datasets and
-use isolated engine installations. A skipped job or an offline smoke test does not satisfy
-the gate. The release workflow checks this before publishing.
+For **0.2.2 only**, the maintainer approved complete local BigQuery acceptance on dbt 2.0.11
+and Core 1.12.6 using existing credentials, followed by the serial restricted runner/reviewer
+check. The 33-case selections, reports, failures/reruns and identical source tree are recorded.
+Publication requires explicit maintainer attestation and the protected PyPI approval. This does
+not certify live WIF. Every GitHub full-validation job and current CI remain required.
 
-Local equivalent, using a disposable BigQuery project and existing ADC:
-
-```bash
-export DBT_DQM_BIGQUERY_TEST_PROJECT=your-test-project
-export DBT_DQM_DBT_EXECUTABLE=/path/to/dbt-2.0.11/bin/dbt
-uv run --group dbt1 --extra bigquery pytest -q -n 6 --dist load integration_tests/acceptance/test_bigquery.py
-```
-
-Repeat with dbt Core 1.12.6. The acceptance harness and the product command honor the same
-executable override. No credentials should be committed to this repository.
+See the [step-by-step release checklist](release-checklist.md#022-dbt-compatibility-gate)
+for checkpoints, receipt commands, verification-only mode and tag/release behavior. The exception
+rejects every other version and is scheduled for removal immediately after release. The on-demand
+WIF workflow stays inactive; no GCP setup is required for this exception.
 
 ## Offline and local checks
 

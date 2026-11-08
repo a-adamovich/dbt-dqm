@@ -210,6 +210,7 @@ def _create_release(tmp_path, tag):
         "import json, os, sys\n"
         "from pathlib import Path\n"
         "Path(os.environ['RELEASE_LOG']).write_text(json.dumps(sys.argv[1:]))\n"
+        "if sys.argv[1:3] == ['release', 'view']: print(os.environ.get('DRAFT_RELEASE', 'true'))\n"
     )
     gh.chmod(0o755)
     script = tmp_path / "release.sh"
@@ -261,3 +262,31 @@ def test_alpha_version_is_accepted_by_python_and_dbt():
     assert VersionSpecifier.from_version_string("0.2.0-a1").prerelease == "a1"
     # Parsing a version alone is insufficient: dbt validates package project schemas too.
     Project.validate(yaml.safe_load((ROOT / "dbt_project.yml").read_text()))
+
+
+@pytest.mark.parametrize("event,ref,verify,preflight,publishes", [
+    ("push", "refs/tags/v0.2.2", False, "skipped", False),
+    ("push", "refs/tags/v0.2.3", False, "skipped", True),
+    ("workflow_dispatch", "refs/heads/candidate", True, "success", False),
+    ("workflow_dispatch", "refs/tags/v0.2.2", False, "failure", False),
+    ("workflow_dispatch", "refs/tags/v0.2.2", False, "success", True),
+])
+def test_release_job_is_unreachable_without_the_required_trigger(event, ref, verify, preflight, publishes):
+    flow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+    job = flow["jobs"]["release"]
+    assert job["needs"] == "preflight"
+    expression = job["if"]
+    for key, value in {"always()": True, "github.event_name": event, "github.ref": ref,
+                       "inputs.verify_only": verify, "needs.preflight.result": preflight}.items():
+        expression = expression.replace(key, repr(value))
+    expression = expression.replace("&&", " and ").replace("||", " or ").replace("!", "not ")
+    # Preserve != while translating GitHub's unary not.
+    expression = expression.replace("not =", "!=")
+    assert bool(eval(expression, {"__builtins__": {}})) is publishes
+    check = flow["jobs"]["preflight"]
+    assert "environment" not in check
+    assert check["permissions"] == {"contents": "read", "actions": "read"}
+    assert all("uv publish" not in step.get("run", "") for step in check["steps"])
+    inputs = flow.get("on", flow.get(True))["workflow_dispatch"]["inputs"]
+    assert inputs["verify_only"]["default"] is True
+    assert inputs["local_bigquery_attested"]["default"] is False

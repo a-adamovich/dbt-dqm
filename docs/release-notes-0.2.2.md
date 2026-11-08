@@ -1,6 +1,6 @@
-# dbt-dqm 0.2.2 candidate
+# dbt-dqm 0.2.2
 
-This candidate adds a dbt 2.0.11 execution path for BigQuery while retaining dbt Core
+This version adds a dbt 2.0.11 execution path for BigQuery while retaining dbt Core
 1.11–1.12 on BigQuery and Postgres. **Credentialed BigQuery validation on both engine
 generations is required before publication or a full v2 compatibility claim.** See the
 [verification record](dbt-2-compatibility.md).

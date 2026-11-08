@@ -44,3 +44,24 @@ instructions take precedence. Preserve existing assertions and acceptance cases.
   A measured, justified timeout or test-architecture change requires review.
 - Do not reset shared QA, introduce schedules, create service-account keys, or change project
   quotas as part of routine test execution.
+
+## Temporary 0.2.2 release policy
+
+- The maintainer authorized preparation of the dbt 2.0.11/dependency/validation changes and a
+  version-scoped local BigQuery attestation path. This is not authorization to merge the gate
+  PR, start credentialed BigQuery acceptance, push a tag, or approve a deployment. Present the
+  agreed concrete checkpoint for each of those actions. Agents never approve environments.
+- Complete and test the gate before freezing the candidate. Verification-only mode must never
+  publish or request approval; synthetic unit fixtures cannot substitute for live results.
+- Freeze all tracked files, including docs. Expensive evidence may cross a merge only when the
+  complete tested, merged and tagged trees match. Record every SHA, monitor main, and report any
+  intervening change. Do not silently rebase. Any tree change invalidates candidate evidence.
+- Require all full-validation jobs, their same-attempt warehouse reports, current CI, both
+  33-case BigQuery suites (2.0.11 / Core 1.12.6), and the serial restricted-permissions test.
+  Local warehouse results are maintainer-attested; GitHub metadata does not prove local execution.
+- Keep private originals outside the repository. Retain failed attempts and diagnoses. Public
+  copies redact secrets, local paths, project/dataset names and account emails; preserve test
+  identities, outcomes, versions and Git hashes. Show a sample at the cost/BigQuery checkpoint.
+- Only 0.2.2 may use the exception. Open a removal issue immediately after release. Other versions
+  retain the credentialed GitHub gate. Keep tags fixed; source corrections after tagging use a
+  new version, and yanking a defective published release requires explicit authorization.
