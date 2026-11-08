@@ -1,6 +1,15 @@
 # Changelog
 
-## 0.2.2
+## 0.2.3
+
+- Recover the unpublished 0.2.2 candidate with corrected numeric-ID draft-evidence retrieval.
+- Reuse its complete warehouse validation only after proving unchanged runtime, warehouse
+  fixtures, dependencies and acceptance assertions. Fresh CI, packaging, audit and release
+  verification are still required. The exception applies to 0.2.3 only.
+- dbt 2.0.11 runtime behavior is unchanged from the validated candidate.
+
+## 0.2.2 (tagged, not published)
+
 
 - Add a dbt 2.0.11 BigQuery path through a shared CLI/artifact interface, retaining dbt Core
   1.11–1.12 on BigQuery and Postgres. Credentialed BigQuery validation is a release gate;

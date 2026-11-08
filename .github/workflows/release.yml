@@ -10,9 +10,13 @@ on:
         type: boolean
         default: true
       local_bigquery_attested:
-        description: "Maintainer attests the attached local BigQuery/permissions reports for 0.2.2"
+        description: "Maintainer attests the attached local BigQuery/permissions reports for 0.2.3"
         type: boolean
         default: false
+      evidence_tag:
+        description: "Draft evidence source; v0.2.2 is allowed for verification-only recovery checks"
+        type: string
+        default: v0.2.3
       evidence_digest:
         description: "SHA256 of local-validation-0.2.2.json attached to the draft release"
         type: string
@@ -27,14 +31,50 @@ on:
         type: string
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
   actions: read
 
 jobs:
+  fetch-evidence:
+    if: github.event_name == 'workflow_dispatch' && inputs.evidence_digest != ''
+    runs-on: ubuntu-latest
+    # GitHub exposes drafts only to push-capable credentials. This job only reads
+    # release APIs; it has no OIDC, environment, cloud keys, or publishing steps.
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Validate requester and evidence source before draft access
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFY_ONLY: ${{ inputs.verify_only }}
+          ATTESTED: ${{ inputs.local_bigquery_attested }}
+          EVIDENCE_TAG: ${{ inputs.evidence_tag }}
+        run: |
+          test "$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$GITHUB_ACTOR/permission" --jq '.permission')" = admin
+          if [[ "$VERIFY_ONLY" != true ]]; then
+            test "$GITHUB_REF" = refs/tags/v0.2.3
+            test "$ATTESTED" = true
+            test "$EVIDENCE_TAG" = v0.2.3
+          fi
+      - name: Download draft evidence by numeric asset ID
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_TAG: ${{ inputs.evidence_tag }}
+          EVIDENCE_DIGEST: ${{ inputs.evidence_digest }}
+        run: python3 scripts/download_release_evidence.py --tag "$EVIDENCE_TAG" --digest "$EVIDENCE_DIGEST" --output "$RUNNER_TEMP/local-evidence/local-validation-0.2.2.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: verified-draft-evidence
+          path: ${{ runner.temp }}/local-evidence/local-validation-0.2.2.json
+          if-no-files-found: error
   preflight:
-    if: github.event_name == 'workflow_dispatch'
+    needs: fetch-evidence
+    if: always() && github.event_name == 'workflow_dispatch' && (inputs.evidence_digest == '' || needs.fetch-evidence.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -43,13 +83,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
         with:
           python-version: "3.14"
       - name: Exercise verification logic with synthetic unit fixtures only
         run: |
           uv sync --locked --all-groups --all-extras
-          uv run --no-sync pytest -q tests/test_local_release_evidence.py tests/test_dbt_release_gate.py tests/test_release_workflow.py
+          uv run --no-sync pytest -q tests/test_local_release_evidence.py tests/test_dbt_release_gate.py tests/test_release_workflow.py tests/test_release_recovery.py
       - name: Check requester metadata access with the read-only token
         env:
           GH_TOKEN: ${{ github.token }}
@@ -66,7 +107,7 @@ jobs:
           python3 - <<'PY'
           import os, re
           if os.environ['VERIFY_ONLY'] != 'true':
-              assert os.environ['GITHUB_REF'] == 'refs/tags/v0.2.2', 'Manual publication is restricted to v0.2.2'
+              assert os.environ['GITHUB_REF'] == 'refs/tags/v0.2.3', 'Manual publication is restricted to v0.2.3'
               assert os.environ['ATTESTED'] == 'true', 'Explicit maintainer attestation is required'
               assert re.fullmatch('[0-9a-f]{64}', os.environ['EVIDENCE_DIGEST']), 'Evidence digest is required'
           if os.environ['EVIDENCE_DIGEST']:
@@ -75,6 +116,11 @@ jobs:
           else:
               print('Synthetic verification checks only; live release evidence has not been verified.')
           PY
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        if: inputs.evidence_digest != ''
+        with:
+          name: verified-draft-evidence
+          path: ${{ runner.temp }}/local-evidence
       - name: Verify attached evidence without publication
         if: inputs.evidence_digest != ''
         env:
@@ -86,22 +132,32 @@ jobs:
           VERIFY_ONLY: ${{ inputs.verify_only }}
         run: |
           mkdir -p "$RUNNER_TEMP/local-evidence"
-          gh release download v0.2.2 --repo "$GITHUB_REPOSITORY" --pattern local-validation-0.2.2.json --dir "$RUNNER_TEMP/local-evidence"
           flags=(--verify-only)
           if [[ "$VERIFY_ONLY" != true ]]; then flags=(--attest); fi
-          python3 scripts/check_bigquery_release_gate.py --version 0.2.2 \
+          uv run --no-sync python scripts/check_bigquery_release_gate.py --version 0.2.3 \
             --evidence "$RUNNER_TEMP/local-evidence/local-validation-0.2.2.json" \
             --digest "$EVIDENCE_DIGEST" --tested-sha "$TESTED_SHA" \
-            --ci-run "$CI_RUN" --full-run "$FULL_RUN" "${flags[@]}"
+            --ci-run "$CI_RUN" --full-run "$FULL_RUN" --recovery-record "$RUNNER_TEMP/recovery-0.2.3.json" "${flags[@]}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: inputs.evidence_digest != ''
+        with:
+          name: recovery-verification-record
+          path: ${{ runner.temp }}/recovery-0.2.3.json
+          if-no-files-found: error
   release:
     needs: preflight
-    # v0.2.2 tag pushes skip before approval or side effects. Other versions retain the live gate.
+    # v0.2.2 and v0.2.3 tag pushes skip before approval or side effects. Other versions retain the live gate.
     if: >-
       always() &&
-      ((github.event_name == 'push' && github.ref != 'refs/tags/v0.2.2') ||
+      ((github.event_name == 'push' && github.ref != 'refs/tags/v0.2.2' && github.ref != 'refs/tags/v0.2.3') ||
        (github.event_name == 'workflow_dispatch' && !inputs.verify_only && needs.preflight.result == 'success'))
     runs-on: ubuntu-latest
     environment: pypi
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+      attestations: write
     services:
       postgres:
         # Preserve the legacy release lifecycle for other versions; the 0.2.2 exception
@@ -121,6 +177,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
       - name: Check the tag matches the package versions
         shell: bash
         run: |
@@ -143,9 +200,12 @@ jobs:
           python-version: "3.14"
       - name: Require credentialed BigQuery verification for both engines
         if: github.event_name == 'push'
-        run: python3 scripts/check_bigquery_release_gate.py
+        run: uv run --no-sync python scripts/check_bigquery_release_gate.py
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: Install verification dependencies
+        if: github.event_name == 'workflow_dispatch'
+        run: uv sync --locked --all-groups --all-extras
       - name: Recheck local evidence after human PyPI approval
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -156,10 +216,10 @@ jobs:
           FULL_RUN: ${{ inputs.full_run }}
         run: |
           mkdir -p "$RUNNER_TEMP/local-evidence"
-          gh release download v0.2.2 --repo "$GITHUB_REPOSITORY" --pattern local-validation-0.2.2.json --dir "$RUNNER_TEMP/local-evidence"
-          python3 scripts/check_bigquery_release_gate.py --version 0.2.2 --attest \
+          python3 scripts/download_release_evidence.py --tag v0.2.3 --digest "$EVIDENCE_DIGEST" --output "$RUNNER_TEMP/local-evidence/local-validation-0.2.2.json"
+          uv run --no-sync python scripts/check_bigquery_release_gate.py --version 0.2.3 --attest \
             --evidence "$RUNNER_TEMP/local-evidence/local-validation-0.2.2.json" \
-            --digest "$EVIDENCE_DIGEST" --tested-sha "$TESTED_SHA" --ci-run "$CI_RUN" --full-run "$FULL_RUN"
+            --digest "$EVIDENCE_DIGEST" --tested-sha "$TESTED_SHA" --ci-run "$CI_RUN" --full-run "$FULL_RUN" --recovery-record "$RUNNER_TEMP/recovery-0.2.3.json"
       - name: Verify, build, and inspect distributions
         run: |
           uv sync --locked --all-groups --all-extras
@@ -167,6 +227,19 @@ jobs:
           uv run --group dbt1 pytest -q
           uv build --no-create-gitignore
           uvx --from twine twine check dist/*
+      - name: Compare recovery wheel payload
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          mkdir -p "$RUNNER_TEMP/baseline-source"
+          git archive 67fd1c74436422070273abe40c0b5d3b1b950df9 | tar -x -C "$RUNNER_TEMP/baseline-source"
+          uv build --wheel --directory "$RUNNER_TEMP/baseline-source" --out-dir "$RUNNER_TEMP/baseline-wheel"
+          uv run --no-sync python - "$RUNNER_TEMP/baseline-wheel" <<'PYCODE'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          from release_recovery import verify_wheels
+          verify_wheels(next(Path(sys.argv[1]).glob('*.whl')), next(Path('dist').glob('*.whl')))
+          PYCODE
       - name: Brief installed-wheel verification without a dbt engine
         run: |
           uv venv "$RUNNER_TEMP/release-wheel" --python 3.14
@@ -262,10 +335,10 @@ jobs:
               --notes "Pre-release: interfaces may change. Install the Python app with pip install 'dbt-dqm[bigquery]==${version}' or 'dbt-dqm[postgres]==${version}' and install the dbt package separately from Git revision ${GITHUB_REF_NAME} (its dbt_project.yml spells the version ${dbt_version}). Version 0.2.0a8 preserves a4-a7 history when resolved names are unchanged. Alias naming now applies to state tables too: changed namespaces require a confirmed fresh start, leaving legacy shared history untouched. Pass matching naming vars to run, app and workspace. The optional --summary reports OPENED (NEW), RECURRING and ARCHIVED changes applied by the reconciliation alongside NEW (status) and ACTIVE workload by saved owner. Quiet test results sort by status and name, and completion reports collections reaching their native limit. Export columns follow review order and timestamp zones are labeled. Upgrades from earlier alphas still require the migration steps documented in README.md. Scheduled full refreshes now require --yes. The app supports cross-page bulk edits and filtered CSV/Excel exports of saved issues. DQM is disabled during ordinary commands. Use dbt-dqm run for full capture and bounded native test limits (default 100). Ownership uses dqm_owner with owner metadata fallback. See README.md and CHANGELOG.md at this tag for supported versions and operating limits."
           elif [[ "$GITHUB_REF_NAME" == "v0.2.0" ]]; then
             gh release create "${GITHUB_REF_NAME}" dist/* --notes-file docs/release-notes-0.2.0.md --verify-tag
-          elif [[ "$GITHUB_REF_NAME" == "v0.2.2" ]]; then
+          elif [[ "$GITHUB_REF_NAME" == "v0.2.3" ]]; then
             gh release view "${GITHUB_REF_NAME}" --json isDraft --jq '.isDraft' | grep -qx true
-            gh release upload "${GITHUB_REF_NAME}" dist/*
-            gh release edit "${GITHUB_REF_NAME}" --draft=false --latest --notes-file docs/release-notes-0.2.2.md
+            gh release upload "${GITHUB_REF_NAME}" dist/* "$RUNNER_TEMP/recovery-0.2.3.json"
+            gh release edit "${GITHUB_REF_NAME}" --draft=false --latest
           elif [[ "$GITHUB_REF_NAME" == "v0.2.1" ]]; then
             gh release create "${GITHUB_REF_NAME}" dist/* --notes-file docs/release-notes-0.2.1.md --verify-tag
           else

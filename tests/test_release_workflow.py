@@ -223,6 +223,7 @@ def _create_release(tmp_path, tag):
             "PATH": str(binaries) + os.pathsep + os.environ["PATH"],
             "GITHUB_REF_NAME": tag,
             "RELEASE_LOG": str(log),
+            "RUNNER_TEMP": str(tmp_path),
         },
         capture_output=True,
         text=True,
@@ -246,10 +247,11 @@ def test_only_pre_release_tags_create_a_github_pre_release(tmp_path):
     later_stable = _create_release(tmp_path, "v0.2.1")
     assert "--prerelease" not in later_stable
     assert later_stable[later_stable.index("--notes-file") + 1] == "docs/release-notes-0.2.1.md"
-    candidate = _create_release(tmp_path, "v0.2.2")
+    candidate = _create_release(tmp_path, "v0.2.3")
     assert "--prerelease" not in candidate
-    assert candidate[candidate.index("--notes-file") + 1] == "docs/release-notes-0.2.2.md"
-    assert "--generate-notes" in _create_release(tmp_path, "v0.2.3")
+    assert "edit" in candidate and "--draft=false" in candidate
+    assert "--notes-file" not in candidate
+    assert "--generate-notes" in _create_release(tmp_path, "v0.2.4")
 
 
 def test_alpha_version_is_accepted_by_python_and_dbt():
@@ -266,10 +268,11 @@ def test_alpha_version_is_accepted_by_python_and_dbt():
 
 @pytest.mark.parametrize("event,ref,verify,preflight,publishes", [
     ("push", "refs/tags/v0.2.2", False, "skipped", False),
-    ("push", "refs/tags/v0.2.3", False, "skipped", True),
+    ("push", "refs/tags/v0.2.3", False, "skipped", False),
+    ("push", "refs/tags/v0.2.4", False, "skipped", True),
     ("workflow_dispatch", "refs/heads/candidate", True, "success", False),
     ("workflow_dispatch", "refs/tags/v0.2.2", False, "failure", False),
-    ("workflow_dispatch", "refs/tags/v0.2.2", False, "success", True),
+    ("workflow_dispatch", "refs/tags/v0.2.3", False, "success", True),
 ])
 def test_release_job_is_unreachable_without_the_required_trigger(event, ref, verify, preflight, publishes):
     flow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())

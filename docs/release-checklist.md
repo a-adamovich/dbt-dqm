@@ -1,10 +1,13 @@
 # Release checklist
 
+For 0.2.3, follow the scoped recovery procedure below; it supersedes the original
+0.2.2 procedure in the historical checklist table. Do not repeat warehouse suites for this recovery.
+
 This is the single current list of what must pass before a release tag is pushed. Dated records of
 earlier verification are kept as history (see [Historical records](#historical-records)); they
 don't replace this list.
 
-Record every result against one **candidate SHA and complete source tree**. For 0.2.2, finish
+Record every result against one **candidate SHA and complete source tree**. For ordinary candidates, finish
 all tracked text before validation. A merge may change the SHA while preserving the identical
 tree; record both identities and verify equality through GitHub. Any tree change, including
 documentation, invalidates that candidate's evidence. Store generated receipts outside the repo.
@@ -211,61 +214,43 @@ Dated verification and review records, preserved as written:
 - [0.2 implementation and verification](implementation-0.2.md) (2026-10-07)
 - [Project review](project-review.md) (2026-08-09)
 
-## 0.2.2 dbt compatibility gate
+## 0.2.3 recovery of the unpublished 0.2.2 candidate
 
-The maintainer approved a temporary local-evidence exception because CI WIF is not configured.
-No GCP setup or key creation is required. It expires after this version; create a removal issue
-immediately after shipping. Future tags retain the credentialed GitHub requirement.
+The maintainer explicitly approved scoped reuse instead of repeating long warehouse suites.
+The immutable v0.2.2 tag and draft remain historical records; neither is a published PyPI version.
 
-1. Review and approve the concrete gate PR before merging it. Exercise verification-only mode
-   with synthetic unit fixtures before freezing; that run does not certify live acceptance.
-2. Finalize the release-preparation head, all docs included. Record `git rev-parse HEAD` and
-   `git rev-parse 'HEAD^{tree}'`. Monitor main; stop and report any intervening change.
-3. Run `Full validation` once on this head. Every required job, `validated`, and all nine
-   warehouse records must pass. Keep the run ID and exact attempt. CI must pass too.
-4. Present the BigQuery checkpoint: candidate identities, commands, worker counts, duration/cost
-   estimate, byte-limit coverage, and a redacted report sample. Wait for authorization.
-5. Run the three suites serially with Python 3.14 and existing credential environment variables.
-   The receipt helper chooses the fixed test module and workers, refuses a dirty tree, and keeps
-   failed attempts. Example, **after authorization**, from the candidate checkout:
+1. Use the fixed candidate, tree, full-validation run and original bundle digest recorded in
+   `scripts/release_recovery.py`. Preserve the original reports and failed-attempt diagnoses.
+2. Compare rename-disabled source differences against the finite approved paths. Package and
+   lockfile changes must be version-only; resolved dependencies, warehouse fixtures, acceptance
+   assertions and application runtime must match. Compare built wheel payloads as well.
+3. Run fresh PR CI, complete units, Ruff, actionlint, builds, installed-wheel variants and audits.
+   The accepted sqlparse exception remains limited to the isolated Core 1.11 compatibility engine.
+4. Run Release in verification-only mode on the reviewed recovery head with the original digest,
+   historical tested SHA/full run and current candidate CI ID. Set evidence_tag=v0.2.2 so its
+   actual workflow token proves draft listing and numeric asset download before a new tag exists.
+   The isolated fetch job requires contents:write for draft visibility, makes only API reads,
+   and receives no publishing identity. The evidence verifier retains read-only permissions.
+5. Review and merge the recovery PR. Require merged-main CI and the same reviewed recovery tree.
+   Present the pre-tag checkpoint and obtain explicit authorization for immutable v0.2.3.
+6. Prepare a v0.2.3 draft with the original `local-validation-0.2.2.json`, historical failed
+   reports, reviewed recovery record and release notes. Never relabel old warehouse results.
+7. Obtain the maintainer's release-specific attestation and dispatch on v0.2.3 with verify_only=false,
+   local_bigquery_attested=true and evidence_tag=v0.2.3. Both recovery-version tag pushes skip
+   publication. The gate checks original evidence (maximum age 14 days) plus fresh current CI.
+8. The human maintainer approves Review deployments → pypi. The publisher downloads and verifies
+   evidence again, builds and compares wheels, verifies provenance and uses trusted publishing.
+   Finalize the existing draft, preserving reviewed notes. Verify public artifacts/installations.
+9. Open the recovery-exception removal issue after shipping. Future releases retain the
+   credentialed GitHub gate. Any difference outside the reviewed scope blocks reuse; do not
+   broaden it or start new cloud acceptance without authorization.
 
-   ```bash
-   /path/to/app-python3.14 scripts/local_release_evidence.py run \
-     --suite bigquery-dbt2 --engine /path/to/dbt-2.0.11/bin/dbt --directory /private/evidence
-   /path/to/app-python3.14 scripts/local_release_evidence.py run \
-     --suite bigquery-dbt1 --engine /path/to/core-1.12.6/bin/dbt --directory /private/evidence
-   /path/to/app-python3.14 scripts/local_release_evidence.py run \
-     --suite bigquery-permissions --engine /path/to/core-1.12.6/bin/dbt --directory /private/evidence
-   ```
+Keep private originals local and public evidence redacted. Metadata queries were forbidden with
+existing credentials; same-account job API measurements exclude SCRIPT parents and separate
+unlabelled activity but have missing statistics and are not whole-project cost totals.
+dbt 2.0.11 did not honor the tested maximum_bytes_billed profile setting; no hard suite budget
+is claimed. No GCP credentials, IAM, quotas or shared-QA setup change for this recovery.
 
-   For a failed run, record its diagnosis in its private `receipt.json` before retrying. Do not
-   delete the attempt. Keep the runner/reviewer test serial and never reset shared QA.
-6. Bundle public copies with `python scripts/local_release_evidence.py bundle --directory
-   /private/evidence --output /private/local-validation-0.2.2.json`. Review the redaction. The
-   helper prints the public bundle's SHA256; keep private originals private.
-7. Verify real evidence locally before tagging, with authenticated read-only GitHub access:
-
-   ```bash
-   GITHUB_REPOSITORY=a-adamovich/dbt-dqm GITHUB_SHA=CHECKOUT_SHA \
-     python scripts/check_bigquery_release_gate.py --verify-only --version 0.2.2 \
-     --tested-sha TESTED_SHA --ci-run CI_RUN_ID --full-run FULL_RUN_ID \
-     --evidence /private/local-validation-0.2.2.json --digest BUNDLE_SHA256
-   ```
-
-8. Merge only with an identical tree; verify the new main CI and tree. Present all evidence and
-   obtain explicit tag authorization. Push immutable `v0.2.2`; its automatic publishing job skips.
-9. Prepare a draft GitHub release on the existing tag and attach `local-validation-0.2.2.json`.
-   Manually dispatch **Release** on that tag with `verify_only=false`, explicit
-   `local_bigquery_attested=true`, the bundle digest, tested SHA, merged-commit CI run ID, and
-   original full-validation run ID. The gate accepts different SHAs only with identical trees.
-10. Review and approve `pypi`. Evidence is rechecked afterward. Verify public PyPI artifacts and
-    installations; finalize the existing draft release without creating a conflicting release.
-
-The local evidence and GitHub runs must be no more than 14 days old. The gate verifies every
-required job, actual checkout trees, same-attempt warehouse records, installed versions, counts,
-and artifact/bundle digests. It cannot independently prove local execution: the maintainer's
-attestation and publication approval explicitly accept that responsibility.
-
-Transient publication failures require diagnosis and an inspection of PyPI state before rerun.
-Do not move the tag. Source corrections after tagging use a new version. If defective files reach
-PyPI, obtain authorization to yank 0.2.2 and publish a corrected 0.2.3; never replace uploaded files.
+On failure, inspect workflow and PyPI state. Keep tags fixed. Retry transient failures only with
+unchanged source/artifacts; source changes after tagging need another version. Obtain explicit
+authorization before yanking defective published artifacts.

@@ -21,15 +21,15 @@ not replace the credentialed release gate below.
 
 ## Release gate
 
-For **0.2.2 only**, the maintainer approved complete local BigQuery acceptance on dbt 2.0.11
+For the unpublished **0.2.2** candidate, the maintainer approved complete local BigQuery acceptance on dbt 2.0.11
 and Core 1.12.6 using existing credentials, followed by the serial restricted runner/reviewer
 check. The 33-case selections, reports, failures/reruns and identical source tree are recorded.
 Publication requires explicit maintainer attestation and the protected PyPI approval. This does
 not certify live WIF. Every GitHub full-validation job and current CI remain required.
 
-See the [step-by-step release checklist](release-checklist.md#022-dbt-compatibility-gate)
-for checkpoints, receipt commands, verification-only mode and tag/release behavior. The exception
-rejects every other version and is scheduled for removal immediately after release. The on-demand
+See the [step-by-step release checklist](release-checklist.md#023-recovery-of-the-unpublished-022-candidate)
+for checkpoints, receipt commands, verification-only mode and tag/release behavior. The original exception rejected every other version. The approved 0.2.3 recovery below
+supersedes it only for publication recovery and is tracked for removal after shipping. The on-demand
 WIF workflow stays inactive; no GCP setup is required for this exception.
 
 ## Offline and local checks
@@ -77,3 +77,15 @@ The real 2.0.9 engine also ran a bounded DQM test against a disposable local Duc
 temporary SQL adapter shims: three failing rows produced the configured two-row warning. This
 checks materialization delegation, but does not replace the credentialed BigQuery lifecycle and
 acceptance runs. The CI release gate remains mandatory for the exact candidate commit.
+
+## 0.2.3 publication recovery
+
+The 0.2.2 candidate passed 33 BigQuery cases on dbt 2.0.11, 33 on Core 1.12.6 and
+one serial runner/reviewer permissions case. Its full GitHub platform matrix also passed.
+Publication stopped before PyPI approval because draft evidence could not be retrieved by tag.
+
+Version 0.2.3 changes release controls and version metadata only. A maintainer-approved,
+one-release recovery compares source with tree `3e2d4837fa28007301709f41d03d39e8ffd9093d`,
+checks exact historical reports and GitHub metadata, and compares wheel runtime payloads.
+Reports retain their original 0.2.2 identities; a separate recovery record binds them to 0.2.3.
+No new WIF verification is claimed. This exception does not apply to later versions.
