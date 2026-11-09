@@ -80,7 +80,10 @@ models:
           columns, recorded at the invocation that last touched this occurrence. Used to detect a
           grain/identity-scheme change so it isn't mistaken for a genuine pass.
       - name: identity_scheme_signature
-        description: Versioned identity algorithm plus ordered grain, used for identity changes.
+        description: >
+          Engine-independent versioned identity algorithm plus ordered grain, using
+          dqm-id-v1|k<Unicode-code-point-length>:<column-name>| for each normalized key.
+          Migration 0008 converts historical JSON metadata; this is not the issue hash.
 
       - name: review_verdict
         description: Audited classification independent of workflow; new occurrences start unreviewed.

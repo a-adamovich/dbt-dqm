@@ -24,7 +24,8 @@
     {'id': '0004_app_staging_safety', 'description': 'Isolated app uploads with bounded lifetime', 'apply': 'app_staging_safety_apply', 'backfill': 'app_staging_safety_backfill', 'verify': 'app_staging_safety_verify'},
     {'id': '0005_maintenance_log', 'description': 'Outcome log for optional maintenance', 'apply': 'maintenance_log_apply', 'verify': 'maintenance_log_verify'},
     {'id': '0006_maintenance_attribution', 'description': 'Trigger attribution for maintenance outcomes', 'apply': 'maintenance_attribution_apply', 'verify': 'maintenance_attribution_verify'},
-    {'id': '0007_browse_keyset_index', 'description': 'Keyset index for warehouse browsing', 'apply': 'browse_keyset_index_apply', 'verify': 'browse_keyset_index_verify'}
+    {'id': '0007_browse_keyset_index', 'description': 'Keyset index for warehouse browsing', 'apply': 'browse_keyset_index_apply', 'verify': 'browse_keyset_index_verify'},
+    {'id': '0008_canonical_identity_signature', 'description': 'Engine-independent identity metadata', 'apply': 'canonical_identity_signature_apply', 'backfill': 'canonical_identity_signature_backfill', 'verify': 'canonical_identity_signature_verify'}
   ]) }}
 {% endmacro %}
 

@@ -29,7 +29,7 @@ def test_core_marker_keeps_exact_required_postgres_scenarios():
     assert len(marked) == 8
     full = {node.name for node in source.body if isinstance(node, ast.FunctionDef)
             and node.name.startswith('test_')}
-    assert len(full) >= 39  # event_payload_modes expands to three cases: at least 41 in full.
+    assert len(full) >= 39  # event_payload_modes expands to three cases: at least 42 in full.
 
 
 def write_junit(path, names, outcome=None):
@@ -86,7 +86,7 @@ def valid_inputs():
         'worktree_dirty': False,
         'repository': 'owner/repo', 'run_id': '7', 'run_attempt': '2',
         'matrix': {key: entry[key] for key in ('python', 'postgres', 'engine')},
-        'counts': {'collected': 41, 'passed': 41, 'failed': 0, 'errors': 0, 'skipped': 0},
+        'counts': {'collected': 42, 'passed': 42, 'failed': 0, 'errors': 0, 'skipped': 0},
     } for name, entry in validation.warehouse_matrix().items()]
     return [{'jobs': jobs}], {'postgres-full': {'result': 'success'}}, records
 

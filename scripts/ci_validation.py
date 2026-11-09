@@ -31,12 +31,12 @@ PLATFORMS = ('windows-latest', 'macos-latest')
 def warehouse_matrix():
     result = {
         f'postgres-full ({python}, {postgres})': {
-            'python': python, 'postgres': postgres, 'engine': '1.12.6', 'minimum': 41,
+            'python': python, 'postgres': postgres, 'engine': '1.12.6', 'minimum': 42,
         }
         for python in PYTHONS for postgres in POSTGRES
     }
     result['dbt-lower-bound'] = {
-        'python': '3.11', 'postgres': '16', 'engine': '1.11.0', 'minimum': 41,
+        'python': '3.11', 'postgres': '16', 'engine': '1.11.0', 'minimum': 42,
     }
     return result
 
@@ -52,7 +52,7 @@ def full_jobs():
     } | {'candidate-qa / memory-and-exports', 'candidate-qa / installed-wheel-browser'}
 
 
-def junit_counts(path, *, core=False, minimum=41, module=None):
+def junit_counts(path, *, core=False, minimum=42, module=None):
     cases = list(ET.parse(path).getroot().iter('testcase'))
     if module:
         cases = [case for case in cases if case.attrib.get('classname', '').split('.')[-1] == module]
@@ -74,7 +74,7 @@ def command(*args):
 
 
 def record(junit, output, job, python, postgres, engine, *, core=False):
-    counts = junit_counts(junit, core=core, minimum=8 if core else 41)
+    counts = junit_counts(junit, core=core, minimum=8 if core else 42)
     engine_python = os.environ.get('DBT_DQM_ENGINE_PYTHON', sys.executable)
     versions = json.loads(command(engine_python, '-c',
         'import importlib.metadata as m,json; print(json.dumps({n:m.version(n) '

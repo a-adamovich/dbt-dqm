@@ -73,11 +73,42 @@ def render(protocol_project, monkeypatch, macro, arguments="", variables=None):
             str(project),
             "--profiles-dir",
             str(profiles),
-            "--vars", json.dumps({"dqm_enabled": True, **(variables or {})}),
+            "--vars", json.dumps({"dqm_enabled": True, **(variables or {})}, ensure_ascii=False),
         ]
     )
     assert result.success, result.exception
     return result.result[0].node.compiled_code
+
+
+def test_identity_signature_and_compact_json_preserve_values(protocol_project, monkeypatch):
+    grain = ['source', 'é', '😀', 'é', 'a|b: c']
+    expected = 'dqm-id-v1|k6:source|k1:é|k1:😀|k2:é|k6:a|b: c|'
+    assert render(protocol_project, monkeypatch, 'identity_scheme_signature',
+                  "var('grain')", {'grain': grain}).strip() == expected
+    value = {'note': 'a, b: c', 'nested': ['x: y', {'q': 'é \\" \n <>&'}]}
+    compact = render(protocol_project, monkeypatch, 'compact_json',
+                     "var('value')", {'value': value}).strip()
+    assert json.loads(compact) == value
+
+
+@pytest.mark.parametrize('adapter', ['postgres', 'bigquery'])
+def test_identity_migration_parses_distinct_metadata_and_preserves_display(protocol_project, monkeypatch, adapter):
+    _project, profiles = protocol_project
+    path = profiles / 'profiles.yml'
+    original = path.read_text()
+    settings = yaml.safe_load(original)
+    if adapter == 'postgres':
+        settings['dbt_dqm_demo']['outputs']['dev'] = {
+            'type': 'postgres', 'host': 'localhost', 'user': 'offline', 'password': 'offline',
+            'port': 1, 'dbname': 'offline', 'schema': 'offline', 'threads': 1}
+    path.write_text(yaml.safe_dump(settings))
+    try:
+        sql = render(protocol_project, monkeypatch, 'default__canonical_identity_signature_backfill')
+        assert 'union distinct' in sql and 'dqm_identity_mapping' in sql
+        assert 'dqm-id-v1|' in sql and 'contradictory signature' in sql
+        assert 'set record_values_json' not in sql and 'set occurrence_id' not in sql
+    finally:
+        path.write_text(original)
 
 
 @pytest.mark.parametrize("value, expected", [
@@ -618,7 +649,8 @@ def test_collation_primitives_and_tracking_ddl(protocol_project, monkeypatch, ad
         if adapter == 'bigquery':
             assert ddl.count("default collate ''") == 9
             assert "`collate`(cur.identity_scheme_signature, '') is not distinct from `collate`(prev.identity_scheme_signature, '')" in history
-            assert "`collate`(state.record_values_json, '') is distinct from `collate`(state.previous_payload, '')" in replay
+            assert "`collate`(state.previous_payload, '') is not distinct from `collate`(state.record_values_json, '')" in replay
+            assert 'json_keys(parse_json' in replay
         else:
             assert '`collate`(' not in history + replay and 'default collate' not in ddl
             assert 'primary key' in ddl

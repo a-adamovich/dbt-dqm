@@ -785,7 +785,7 @@ def test_bigquery_0002_upgrades_populated_schema_after_interruption(demo):
     assert demo.sql("select 1 from @dataset.dqm_app_change_staging` limit 0") == []
     control = demo.sql("select * from @dataset.dqm_reconciliation_control`")[0]
     assert control["setup_status"] == "ready" and control["migration_owner"] is None
-    assert control["schema_version"] == "0007_browse_keyset_index"
+    assert control["schema_version"] == "0008_canonical_identity_signature"
 
 
 def test_bigquery_0004_preserves_history_and_bounds_legacy_staging(demo):
@@ -1448,3 +1448,9 @@ def test_generic_and_singular_lifecycle(demo):
     from generic_checks import check_generic_lifecycle
 
     check_generic_lifecycle(demo, dedicated)
+
+
+def test_bigquery_identity_signature_migration_preserves_continuity(demo):
+    from identity_contract import exercise_identity_migration
+
+    exercise_identity_migration(demo, 'bigquery')
