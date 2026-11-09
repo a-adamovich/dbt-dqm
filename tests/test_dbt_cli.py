@@ -160,7 +160,7 @@ def test_supported_engines_and_warehouses(engine, monkeypatch, version, adapter,
 
 def test_explicit_executable_precedes_environment_and_does_not_silently_fall_back(monkeypatch):
     monkeypatch.setenv("DBT_DQM_DBT_EXECUTABLE", "/environment/dbt")
-    monkeypatch.setattr(dbt_cli.shutil, "which", lambda name, **kwargs: name if name != "/missing/dbt" else None)
+    monkeypatch.setattr(dbt_cli.shutil, "which", lambda name, **kwargs: name if Path(name) != Path("/missing/dbt") else None)
     assert dbt_cli.resolve_dbt_executable("/explicit/dbt") == str(Path("/explicit/dbt").resolve())
     assert dbt_cli.resolve_dbt_executable() == str(Path("/environment/dbt").resolve())
     with pytest.raises(AppError, match="selected dbt executable"):

@@ -1,6 +1,7 @@
 """The explicit materialization override must not modify consumer files or resource paths."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 
@@ -102,7 +103,7 @@ def test_windows_projection_copies_without_privilege_and_keeps_originals(tmp_pat
         error.winerror = 1314
         raise error
     monkeypatch.setattr(Path, 'symlink_to', denied)
-    monkeypatch.setattr(runtime_project.sys, 'platform', 'win32')
+    monkeypatch.setattr(runtime_project, 'sys', SimpleNamespace(platform='win32'))
     payload = {'validation': {'compiled_queries': {'test.large': original * 20000}}}
     for compile_only in (False, True):
         with projected_project(project, {}, compile_only=compile_only, project_vars=payload) as root:

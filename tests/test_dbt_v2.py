@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -268,7 +269,7 @@ def test_v2_project_payload_is_literal_and_not_in_command_line(project, engine, 
             error.winerror = 1314
             raise error
         monkeypatch.setattr(Path, 'symlink_to', denied)
-        monkeypatch.setattr(runtime_project.sys, 'platform', 'win32')
+        monkeypatch.setattr(runtime_project, 'sys', SimpleNamespace(platform='win32'))
     runner = DbtCLI(executable=executable, callbacks=[events.append])
     payload = "{{ env_var('DO_NOT_RENDER') }}" + ('large SQL text ' * 10000)
     arguments = ['run-operation', 'payload_probe']
@@ -285,3 +286,40 @@ def test_v2_project_payload_is_literal_and_not_in_command_line(project, engine, 
     messages = '\n'.join(event.info.msg for event in events)
     assert 'DQM_PAYLOAD_SIZE=' + str(len(payload)) in messages
     assert "{{ env_var('DO_NOT_RENDER') }}" in messages
+
+
+def test_child_runner_projects_without_symlink_privilege(project, tmp_path):
+    """Inject denial at interpreter startup, across the runner process boundary."""
+    import subprocess
+    import sys
+
+    macros = project / 'macros'
+    macros.mkdir()
+    (macros / 'child_probe.sql').write_text('''{% macro child_probe() %}
+      {% do log('CHILD_PAYLOAD=' ~ fromjson(var('_dbt_dqm_internal_json')).value, info=true) %}
+    {% endmacro %}''')
+    startup = tmp_path / 'startup'
+    startup.mkdir()
+    (startup / 'sitecustomize.py').write_text('''from pathlib import Path
+from types import SimpleNamespace
+from dbt_dqm_app import runtime_project
+def denied(*args, **kwargs):
+    error = OSError('no symlink privilege in child')
+    error.winerror = 1314
+    raise error
+Path.symlink_to = denied
+runtime_project.sys = SimpleNamespace(platform='win32')
+''')
+    script = '''import sys
+from dbt_dqm_app.runner import Workflow
+workflow = Workflow({'project_dir': sys.argv[1], 'profiles_dir': sys.argv[1],
+                     'dbt_executable': sys.argv[2], 'verbose': True})
+workflow.checked(['run-operation', 'child_probe', '--target-path', sys.argv[1] + '/target'],
+                 project_vars={'value': 'projection-ok'})
+'''
+    environment = {**os.environ, 'PYTHONPATH': os.pathsep.join([str(startup), str(ROOT / 'src')])}
+    result = subprocess.run([sys.executable, '-c', script, str(project), EXECUTABLE],
+                            env=environment, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'CHILD_PAYLOAD=projection-ok' in result.stdout
+    assert (project / 'tests/marked.sql').exists()
