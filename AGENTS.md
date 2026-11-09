@@ -45,11 +45,12 @@ instructions take precedence. Preserve existing assertions and acceptance cases.
 - Do not reset shared QA, introduce schedules, create service-account keys, or change project
   quotas as part of routine test execution.
 
-## Temporary 0.2.4 release policy
+## Temporary 0.2.5 release policy
 
-- Only 0.2.4 may use fresh local BigQuery attestation. Never reuse historical warehouse reports.
+- Only 0.2.5 may use fresh local BigQuery attestation. Never reuse historical warehouse reports.
 - Freeze all tracked files before expensive validation. Require complete GitHub platform evidence,
-  both 33-case BigQuery suites and the serial restricted-permissions test on that source tree.
+  both 34-case BigQuery suites, the serial cross-engine/recovery scenario and the
+  serial restricted-permissions test on that source tree.
 - Present the agreed candidate/cost/redaction checkpoint before credentialed execution. No new
   GCP setup, IAM, keys, quotas, schedules or shared-QA resets are authorized.
 - Keep private originals outside Git and retain failed attempts and diagnoses. Public copies

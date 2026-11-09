@@ -21,7 +21,7 @@ def test_draft_download_is_bound_to_numeric_identity(modules, monkeypatch, tmp_p
     data = b'{"synthetic":true}'
     digest = hashlib.sha256(data).hexdigest()
     prefix = f"https://api.github.com/repos/{module.REPOSITORY}/releases/"
-    release = {"tag_name": "v0.2.4", "draft": True, "id": 7, "url": prefix + "7"}
+    release = {"tag_name": "v0.2.5", "draft": True, "id": 7, "url": prefix + "7"}
     asset = {"id": 8, "name": module.ASSET, "url": prefix + "assets/8", "state": "uploaded",
              "size": len(data), "digest": "sha256:" + digest}
     releases, assets = [release], [asset]
@@ -44,11 +44,11 @@ def test_draft_download_is_bound_to_numeric_identity(modules, monkeypatch, tmp_p
     monkeypatch.setattr(module, "api", api)
     target = tmp_path / "evidence.json"
     if change is None:
-        module.download("v0.2.4", digest, target)
+        module.download("v0.2.5", digest, target)
         assert target.read_bytes() == data
     else:
         with pytest.raises(ValueError):
-            module.download("v0.2.5" if change == "tag" else "v0.2.4", digest, target)
+            module.download("v0.2.6" if change == "tag" else "v0.2.5", digest, target)
         assert not target.exists()
 
 

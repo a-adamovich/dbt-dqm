@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.5 (unreleased)
 
 - Fix #105: use engine-independent identity metadata and migrate historical Core/dbt 2
   signatures without changing issue hashes or display order.

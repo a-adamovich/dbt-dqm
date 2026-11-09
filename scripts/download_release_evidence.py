@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 REPOSITORY = "a-adamovich/dbt-dqm"
-ASSET = "local-validation-0.2.4.json"
+ASSET = "local-validation-0.2.5.json"
 MAX_BYTES = 32 * 1024 * 1024
 
 
@@ -23,7 +23,7 @@ def api(path, *, binary=False):
 
 
 def download(tag, expected_digest, output):
-    if tag not in {"v0.2.4"} or not re.fullmatch(r"[0-9a-f]{64}", expected_digest):
+    if tag not in {"v0.2.5"} or not re.fullmatch(r"[0-9a-f]{64}", expected_digest):
         raise ValueError("Unsupported evidence tag or digest")
     pages = api(f"repos/{REPOSITORY}/releases?per_page=100")
     matches = [item for page in pages for item in page if item.get("tag_name") == tag]

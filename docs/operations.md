@@ -2,11 +2,11 @@
 
 The [README](../README.md) is the shortest path to a first run. This guide covers
 compatibility, environment resolution, maintenance, and upgrades. The Python command and
-dbt package are separate installations and must use matching 0.2.4 versions.
+dbt package are separate installations and must use matching 0.2.5 versions.
 
 ## Installation and compatibility
 
-Version 0.2.4 supports the dbt Core 1.11–1.12 workflow on BigQuery and
+Version 0.2.5 supports the dbt Core 1.11–1.12 workflow on BigQuery and
 Postgres 14/16, and adds a dbt 2.0.11 BigQuery path. Full v2 compatibility remains gated
 on the credentialed BigQuery acceptance suite; see the [verification record](dbt-2-compatibility.md).
 Python app support remains 3.11–3.14. Check [PyPI releases](https://pypi.org/project/dbt-dqm/#history)
@@ -20,7 +20,7 @@ packages:
   - local: /path/to/dbt-dqm
 ```
 
-For a published installation, use Git revision `v0.2.4` and `dbt-dqm==0.2.4`.
+For a published installation, use Git revision `v0.2.5` and `dbt-dqm==0.2.5`.
 
 Install the engine yourself. The app's `[bigquery]` and `[postgres]` extras install its
 warehouse clients, without installing dbt or its Python adapters:
@@ -28,15 +28,15 @@ warehouse clients, without installing dbt or its Python adapters:
 ```bash
 # BigQuery, dbt v2
 python -m pip install 'dbt==2.0.11'
-python -m pip install 'dbt-dqm[bigquery]==0.2.4'
+python -m pip install 'dbt-dqm[bigquery]==0.2.5'
 
 # BigQuery, dbt v1
 python -m pip install 'dbt-core==1.12.6' 'dbt-bigquery==1.12.1'
-python -m pip install 'dbt-dqm[bigquery]==0.2.4'
+python -m pip install 'dbt-dqm[bigquery]==0.2.5'
 
 # Postgres, dbt v1
 python -m pip install 'dbt-core==1.12.6' 'dbt-postgres==1.11.0'
-python -m pip install 'dbt-dqm[postgres]==0.2.4'
+python -m pip install 'dbt-dqm[postgres]==0.2.5'
 ```
 
 Use separate environments for dbt v1 and v2: both provide a `dbt` command. Engine selection
@@ -54,9 +54,10 @@ retain engines already installed; no engine is silently upgraded. Native dbt v2 
 outside this release. Use a Python version supported by your separately installed engine;
 the lower-bound Core 1.11.0 checks use an isolated Python 3.11 environment.
 
-When upgrading from earlier releases, install the matching 0.2.4 Python and dbt packages together. Warehouse
-relations, identities, review annotations, and local workspace identity are preserved; no reset
-or new migration is required. Development dependencies and engines are separate groups:
+When upgrading from earlier releases, install the matching 0.2.5 Python and dbt packages together. Migration `0008_canonical_identity_signature` converts historical identity metadata once.
+Issue hashes, review annotations and display order are preserved; no reset is required. An
+installation already affected by #105 also needs the explicit [incident repair](identity-105-recovery.md).
+Pause that installation and run setup only before repairing; do not start another workflow. Development dependencies and engines are separate groups:
 `uv sync --locked --all-groups --all-extras`, then `uv run --group dbt1 pytest -q`.
 
 On Windows PowerShell, for example:
@@ -64,7 +65,7 @@ On Windows PowerShell, for example:
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install 'dbt==2.0.11'
-.\.venv\Scripts\python.exe -m pip install 'dbt-dqm[bigquery]==0.2.4'
+.\.venv\Scripts\python.exe -m pip install 'dbt-dqm[bigquery]==0.2.5'
 .\.venv\Scripts\dbt.exe deps
 .\.venv\Scripts\dbt-dqm.exe run
 ```

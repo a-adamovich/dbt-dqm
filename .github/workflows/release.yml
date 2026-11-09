@@ -10,15 +10,15 @@ on:
         type: boolean
         default: true
       local_bigquery_attested:
-        description: "Maintainer attests the attached local BigQuery/permissions reports for 0.2.4"
+        description: "Maintainer attests the attached local BigQuery/permissions reports for 0.2.5"
         type: boolean
         default: false
       evidence_tag:
-        description: "Draft evidence source; restricted to v0.2.4"
+        description: "Draft evidence source; restricted to v0.2.5"
         type: string
-        default: v0.2.4
+        default: v0.2.5
       evidence_digest:
-        description: "SHA256 of local-validation-0.2.4.json attached to the draft release"
+        description: "SHA256 of local-validation-0.2.5.json attached to the draft release"
         type: string
       tested_sha:
         description: "Immutable tested candidate SHA (its tree must equal this checkout)"
@@ -57,26 +57,26 @@ jobs:
         run: |
           test "$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$GITHUB_ACTOR/permission" --jq '.permission')" = admin
           if [[ "$VERIFY_ONLY" != true ]]; then
-            test "$GITHUB_REF" = refs/tags/v0.2.4
+            test "$GITHUB_REF" = refs/tags/v0.2.5
             test "$ATTESTED" = true
-            test "$EVIDENCE_TAG" = v0.2.4
+            test "$EVIDENCE_TAG" = v0.2.5
           fi
       - name: Download draft evidence by numeric asset ID
         env:
           GH_TOKEN: ${{ github.token }}
           EVIDENCE_TAG: ${{ inputs.evidence_tag }}
           EVIDENCE_DIGEST: ${{ inputs.evidence_digest }}
-        run: python3 scripts/download_release_evidence.py --tag "$EVIDENCE_TAG" --digest "$EVIDENCE_DIGEST" --output "$RUNNER_TEMP/local-evidence/local-validation-0.2.4.json"
+        run: python3 scripts/download_release_evidence.py --tag "$EVIDENCE_TAG" --digest "$EVIDENCE_DIGEST" --output "$RUNNER_TEMP/local-evidence/local-validation-0.2.5.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: verified-draft-evidence
-          path: ${{ runner.temp }}/local-evidence/local-validation-0.2.4.json
+          path: ${{ runner.temp }}/local-evidence/local-validation-0.2.5.json
           if-no-files-found: error
   preflight:
     needs: fetch-evidence
     if: >-
       always() &&
-      ((github.event_name == 'push' && github.ref != 'refs/tags/v0.2.4') ||
+      ((github.event_name == 'push' && github.ref != 'refs/tags/v0.2.5') ||
        (github.event_name == 'workflow_dispatch' && (inputs.evidence_digest == '' || needs.fetch-evidence.result == 'success')))
     runs-on: ubuntu-latest
     permissions:
@@ -112,7 +112,7 @@ jobs:
           python3 - <<'PY'
           import os, re
           if os.environ['VERIFY_ONLY'] != 'true':
-              assert os.environ['GITHUB_REF'] == 'refs/tags/v0.2.4', 'Manual publication is restricted to v0.2.4'
+              assert os.environ['GITHUB_REF'] == 'refs/tags/v0.2.5', 'Manual publication is restricted to v0.2.5'
               assert os.environ['ATTESTED'] == 'true', 'Explicit maintainer attestation is required'
               assert re.fullmatch('[0-9a-f]{64}', os.environ['EVIDENCE_DIGEST']), 'Evidence digest is required'
           if os.environ['EVIDENCE_DIGEST']:
@@ -139,8 +139,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/local-evidence"
           flags=(--verify-only)
           if [[ "$VERIFY_ONLY" != true ]]; then flags=(--attest); fi
-          uv run --no-sync python scripts/check_bigquery_release_gate.py --version 0.2.4 \
-            --evidence "$RUNNER_TEMP/local-evidence/local-validation-0.2.4.json" \
+          uv run --no-sync python scripts/check_bigquery_release_gate.py --version 0.2.5 \
+            --evidence "$RUNNER_TEMP/local-evidence/local-validation-0.2.5.json" \
             --digest "$EVIDENCE_DIGEST" --tested-sha "$TESTED_SHA" \
             --ci-run "$CI_RUN" --full-run "$FULL_RUN" "${flags[@]}"
       - name: Verify normal credentialed evidence before approval
@@ -150,11 +150,11 @@ jobs:
         run: uv run --no-sync python scripts/check_bigquery_release_gate.py
   release:
     needs: preflight
-    # v0.2.4 tag pushes skip before approval or side effects. Other versions retain the live gate.
+    # v0.2.5 tag pushes skip before approval or side effects. Other versions retain the live gate.
     if: >-
       always() &&
-      ((github.event_name == 'push' && github.ref != 'refs/tags/v0.2.4' && needs.preflight.result == 'success') ||
-       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/tags/v0.2.4' && !inputs.verify_only && needs.preflight.result == 'success'))
+      ((github.event_name == 'push' && github.ref != 'refs/tags/v0.2.5' && needs.preflight.result == 'success') ||
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/tags/v0.2.5' && !inputs.verify_only && needs.preflight.result == 'success'))
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -164,7 +164,7 @@ jobs:
       attestations: write
     services:
       postgres:
-        # Preserve the legacy release lifecycle for other versions; the 0.2.4 exception
+        # Preserve the legacy release lifecycle for other versions; the 0.2.5 exception
         # already verifies the full Postgres matrix and does not repeat warehouse tests.
         image: ${{ github.event_name == 'push' && 'postgres:16' || '' }}
         env:
@@ -220,9 +220,9 @@ jobs:
           FULL_RUN: ${{ inputs.full_run }}
         run: |
           mkdir -p "$RUNNER_TEMP/local-evidence"
-          python3 scripts/download_release_evidence.py --tag v0.2.4 --digest "$EVIDENCE_DIGEST" --output "$RUNNER_TEMP/local-evidence/local-validation-0.2.4.json"
-          uv run --no-sync python scripts/check_bigquery_release_gate.py --version 0.2.4 --attest \
-            --evidence "$RUNNER_TEMP/local-evidence/local-validation-0.2.4.json" \
+          python3 scripts/download_release_evidence.py --tag v0.2.5 --digest "$EVIDENCE_DIGEST" --output "$RUNNER_TEMP/local-evidence/local-validation-0.2.5.json"
+          uv run --no-sync python scripts/check_bigquery_release_gate.py --version 0.2.5 --attest \
+            --evidence "$RUNNER_TEMP/local-evidence/local-validation-0.2.5.json" \
             --digest "$EVIDENCE_DIGEST" --tested-sha "$TESTED_SHA" --ci-run "$CI_RUN" --full-run "$FULL_RUN"
       - name: Verify, build, and inspect distributions
         run: |
@@ -337,7 +337,7 @@ jobs:
               --notes "Pre-release: interfaces may change. Install the Python app with pip install 'dbt-dqm[bigquery]==${version}' or 'dbt-dqm[postgres]==${version}' and install the dbt package separately from Git revision ${GITHUB_REF_NAME} (its dbt_project.yml spells the version ${dbt_version}). Version 0.2.0a8 preserves a4-a7 history when resolved names are unchanged. Alias naming now applies to state tables too: changed namespaces require a confirmed fresh start, leaving legacy shared history untouched. Pass matching naming vars to run, app and workspace. The optional --summary reports OPENED (NEW), RECURRING and ARCHIVED changes applied by the reconciliation alongside NEW (status) and ACTIVE workload by saved owner. Quiet test results sort by status and name, and completion reports collections reaching their native limit. Export columns follow review order and timestamp zones are labeled. Upgrades from earlier alphas still require the migration steps documented in README.md. Scheduled full refreshes now require --yes. The app supports cross-page bulk edits and filtered CSV/Excel exports of saved issues. DQM is disabled during ordinary commands. Use dbt-dqm run for full capture and bounded native test limits (default 100). Ownership uses dqm_owner with owner metadata fallback. See README.md and CHANGELOG.md at this tag for supported versions and operating limits."
           elif [[ "$GITHUB_REF_NAME" == "v0.2.0" ]]; then
             gh release create "${GITHUB_REF_NAME}" dist/* --notes-file docs/release-notes-0.2.0.md --verify-tag
-          elif [[ "$GITHUB_REF_NAME" == "v0.2.4" ]]; then
+          elif [[ "$GITHUB_REF_NAME" == "v0.2.5" ]]; then
             gh release view "${GITHUB_REF_NAME}" --json isDraft --jq '.isDraft' | grep -qx true
             gh release upload "${GITHUB_REF_NAME}" dist/*
             gh release edit "${GITHUB_REF_NAME}" --draft=false --latest

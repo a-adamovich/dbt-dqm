@@ -262,10 +262,10 @@ def test_only_pre_release_tags_create_a_github_pre_release(tmp_path):
     candidate = _create_release(tmp_path, "v0.2.3")
     assert "--prerelease" not in candidate
     assert "--generate-notes" in candidate
-    release = _create_release(tmp_path, "v0.2.4")
+    release = _create_release(tmp_path, "v0.2.5")
     assert "edit" in release and "--draft=false" in release
     assert "--notes-file" not in release
-    assert "--generate-notes" in _create_release(tmp_path, "v0.2.5")
+    assert "--generate-notes" in _create_release(tmp_path, "v0.2.6")
 
 
 def test_alpha_version_is_accepted_by_python_and_dbt():
@@ -281,13 +281,13 @@ def test_alpha_version_is_accepted_by_python_and_dbt():
 
 
 @pytest.mark.parametrize('event,ref,verify,preflight,publishes', [
-    ('push', 'refs/tags/v0.2.4', False, 'skipped', False),
     ('push', 'refs/tags/v0.2.5', False, 'skipped', False),
-    ('push', 'refs/tags/v0.2.5', False, 'success', True),
+    ('push', 'refs/tags/v0.2.6', False, 'skipped', False),
+    ('push', 'refs/tags/v0.2.6', False, 'success', True),
     ('workflow_dispatch', 'refs/heads/main', True, 'success', False),
-    ('workflow_dispatch', 'refs/tags/v0.2.4', False, 'failure', False),
-    ('workflow_dispatch', 'refs/tags/v0.2.4', False, 'success', True),
-    ('workflow_dispatch', 'refs/tags/v0.2.5', False, 'success', False),
+    ('workflow_dispatch', 'refs/tags/v0.2.5', False, 'failure', False),
+    ('workflow_dispatch', 'refs/tags/v0.2.5', False, 'success', True),
+    ('workflow_dispatch', 'refs/tags/v0.2.6', False, 'success', False),
 ])
 def test_only_attested_release_can_request_publication(event, ref, verify, preflight, publishes):
     flow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())

@@ -17,7 +17,7 @@ for DQM, captures their results, and updates the issue history.
 
 Start with an existing dbt project, a configured profile, and a supported warehouse adapter.
 dbt-dqm has **two installations**: the dbt package supplies warehouse models and macros; the
-Python package supplies the `dbt-dqm` command and local review app. Use matching `0.2.4`
+Python package supplies the `dbt-dqm` command and local review app. Use matching `0.2.5`
 versions. See the compatibility record below for tested engines and warehouses.
 The examples below install the published release. A local checkout can also be used for development.
 
@@ -26,7 +26,7 @@ The examples below install the published release. A local checkout can also be u
    ```yaml
    packages:
      - git: https://github.com/a-adamovich/dbt-dqm.git
-       revision: v0.2.4
+       revision: v0.2.5
    ```
 
    ```bash
@@ -41,10 +41,10 @@ The examples below install the published release. A local checkout can also be u
    ```bash
    # BigQuery with dbt v2
    python -m pip install 'dbt==2.0.11'
-   python -m pip install 'dbt-dqm[bigquery]==0.2.4'
+   python -m pip install 'dbt-dqm[bigquery]==0.2.5'
    # Postgres with dbt v1
    python -m pip install 'dbt-core==1.12.6' 'dbt-postgres==1.11.0'
-   python -m pip install 'dbt-dqm[postgres]==0.2.4'
+   python -m pip install 'dbt-dqm[postgres]==0.2.5'
    ```
 
    The Python command supports Python 3.11–3.14. dbt Core 1.11–1.12 supports both
@@ -116,7 +116,7 @@ for its controls and limits.
   maintenance, resets, upgrades, and troubleshooting.
 - [Try the demo projects](docs/operations.md#demo-projects) or inspect the
   [warehouse contract](docs/warehouse-interfaces.md) and [scale measurements](docs/scale.md).
-- [0.2.4 release notes](docs/release-notes-0.2.4.md) and [compatibility verification](docs/dbt-2-compatibility.md).
+- [0.2.5 release notes](docs/release-notes-0.2.5.md) and [compatibility verification](docs/dbt-2-compatibility.md).
 - [Historical 0.2.1 release notes](docs/release-notes-0.2.1.md) and
   [verification record](docs/release-0.2.1.md).
 

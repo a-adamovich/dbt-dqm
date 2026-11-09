@@ -33,16 +33,17 @@ push trigger starts the long matrix.
 The workflow retains the complete Python 3.11–3.14/Postgres 14–16 acceptance matrix, the
 Core 1.11.0 job, complete Windows/macOS and installed-wheel matrices, all BigQuery offline
 compile combinations, walkthroughs, query-plan checks, browser QA, and memory/export QA.
-Postgres uses four workers. The full suite contains 41 cases after adding generic coverage.
+Postgres uses four workers. The full suite contains 42 cases including generic lifecycle and
+populated identity-migration coverage.
 
 The `validated` check requires all 27 matrix/QA jobs and nine warehouse evidence records from
 the same run attempt and source tree. Each warehouse record includes the SHA, tree, matrix,
 installed versions, dependency digest, timestamps, and JUnit counts. Failures, missing jobs,
-unexpected skips, duplicate reports, or fewer than 41 passing warehouse cases fail validation.
+unexpected skips, duplicate reports, or fewer than 42 passing warehouse cases fail validation.
 Reports are retained for 30 days; this is retention, not permission to reuse them for release.
 
 Stage 1 certifies **Postgres and platforms only**. A passing result does not replace the
-BigQuery release gate. Version 0.2.4 has a separately scoped, fresh local-evidence exception; older reports cannot satisfy it. The maintainer must configure `required` as a required status and require up-to-date PRs;
+BigQuery release gate. Version 0.2.5 has a separately scoped, fresh local-evidence exception; older reports cannot satisfy it. The maintainer must configure `required` as a required status and require up-to-date PRs;
 adding a workflow alone does not enforce branch protection.
 
 ## Measurement record
@@ -58,7 +59,7 @@ evidence. Record suite, engine, worker count, elapsed time, result, and source r
 | Required Postgres core, local Python 3.11 | Core 1.12.5 / Postgres 16 | 4 | 184.53 s | Exactly 8 passed, no skips; Stage 1 worktree |
 | Real dbt 2 offline smoke, local Python 3.11 | dbt 2.0.9 / no warehouse access | 1 | 6.82 s | Exactly 11 passed, no skips; Stage 1 worktree |
 
-The 0.2.4 local receipt helper measures billed bytes and slot milliseconds after each approved
+The current local receipt helper measures billed bytes and slot milliseconds after each approved
 suite, excluding parent `SCRIPT` rows. It separates labelled queries (including children) from
 unlabelled queries referencing the test datasets; shared-QA activity may include other users.
 Missing metadata permissions are reported as unavailable, never as zero usage. No GCP roles or
@@ -81,3 +82,21 @@ fixture are not covered by this test cap. This is not a total-suite spending cei
 The first local Postgres attempt failed because pgcrypto was missing. Its output is retained;
 the extension was installed in the disposable database before the successful rerun.
 Development checks are not final-candidate BigQuery runtime evidence.
+
+## 0.2.5 development checks (before candidate freeze)
+
+These checks guide development; they are not frozen-candidate BigQuery release evidence.
+
+| Check | Engine / location | Result | Duration / source |
+| --- | --- | --- | --- |
+| Postgres core, four workers | Core 1.12.6 / disposable local Postgres 16 | Exactly 8 passed | 186.61 s; initial #105 development worktree |
+| Populated identity migration, damaged-name refusal and retry | Core 1.12.6 / disposable local Postgres 16 | 1 passed | 30.02 s; worktree committed as `ba5664a` |
+| Migration plus actual payload-event behavior | Core 1.12.6 / disposable local Postgres 16 | 2 passed | 68.66 s; #105 development worktree |
+| Real dbt 2 offline checks | dbt 2.0.11 / local, no warehouse queries | 17 passed | 16.41 s; #105 development worktree |
+| Complete release-preparation units | Python 3.11 / local | 662 passed, 25 conditional skips | 62.91 s; 0.2.5 preparation worktree |
+
+The release additionally requires a separate serial `bigquery-upgrade` receipt. It reproduces the
+0.2.4 defect on pinned historical source, migrates and repairs that disposable installation,
+and exercises both engines against it. Both engine inventories and dependency digests are
+required. Its execution and the two full warehouse suites remain subject to the candidate/cost
+checkpoint; ordinary offline compilation does not certify this recovery path.

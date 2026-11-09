@@ -34,7 +34,7 @@ def junit(local, suite, outcome=None):
 
 
 def evidence(local):
-    value = {"schema_version": 1, "version": "0.2.4", "repository": local.REPOSITORY,
+    value = {"schema_version": 1, "version": "0.2.5", "repository": local.REPOSITORY,
              "runs": [], "files": {}}
     for suite, (_, engine, workers, _) in local.SUITES.items():
         xml = junit(local, suite)
@@ -44,15 +44,20 @@ def evidence(local):
             value["files"][path] = text
             files[name] = {"name": path, "sha256": local.digest(text.encode())}
         value["runs"].append({"id": suite, "schema_version": 1, "suite": suite,
-            "version": "0.2.4", "repository": local.REPOSITORY, "sha": SHA, "tree": TREE,
+            "version": "0.2.5", "repository": local.REPOSITORY, "sha": SHA, "tree": TREE,
             "lock_digest": LOCK, "status": "passed", "returncode": 0, "engine": engine,
             "python": "3.14.6", "workers": workers, "dependency_digest": LOCK,
-            "environments": {'app': {'python': '3.14.6', 'packages': {'dbt-dqm': '0.2.4'}},
+            "environments": {'app': {'python': '3.14.6', 'packages': {'dbt-dqm': '0.2.5'}},
                              'engine': {'python': '3.14.6', 'packages': {
                                  'dbt' if engine == '2.0.11' else 'dbt-core': engine}}},
             "engine_dependency_digest": LOCK, "counts": local.report_counts(xml, suite),
             "started_at": (NOW - timedelta(hours=2)).isoformat(),
             "finished_at": (NOW - timedelta(hours=1)).isoformat(), "files": files})
+        if suite == 'bigquery-upgrade':
+            value['runs'][-1]['environments'].update(
+                upgrade_core={'python': '3.14.6', 'packages': {'dbt-core': '1.12.6'}},
+                upgrade_v2={'python': '3.14.6', 'packages': {'dbt': '2.0.11'}})
+            value['runs'][-1]['upgrade_v2_dependency_digest'] = LOCK
     return value
 
 
@@ -120,7 +125,7 @@ def test_failed_attempts_are_retained_and_require_diagnosis(modules, tmp_path):
     with pytest.raises(ValueError, match="diagnosis"):
         validate(local, tmp_path / "bundle.json", value)
     earlier["diagnosis"] = "Synthetic interrupted-run fixture"
-    assert len(validate(local, tmp_path / "bundle.json", value)["runs"]) == 4
+    assert len(validate(local, tmp_path / "bundle.json", value)["runs"]) == 5
 
 
 def test_redaction_preserves_machine_readable_junit_and_diagnostics(modules):
@@ -200,13 +205,13 @@ def test_bundle_digest_is_required(modules, tmp_path):
 def complete_gate(modules, monkeypatch, tmp_path):
     local, _ = modules
     gate = importlib.import_module("check_bigquery_release_gate")
-    monkeypatch.setattr(gate.tomllib, "loads", lambda _: {"project": {"version": "0.2.4"}})
+    monkeypatch.setattr(gate.tomllib, "loads", lambda _: {"project": {"version": "0.2.5"}})
     actual = "d" * 40  # A squash merge changes the SHA, while preserving the complete tree.
     monkeypatch.setenv("GITHUB_REPOSITORY", local.REPOSITORY)
     monkeypatch.setenv("GITHUB_SHA", actual)
     monkeypatch.setenv("GITHUB_ACTOR", "maintainer")
     monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_dispatch")
-    monkeypatch.setenv("GITHUB_REF", "refs/tags/v0.2.4")
+    monkeypatch.setenv("GITHUB_REF", "refs/tags/v0.2.5")
     monkeypatch.setattr(local, "command", lambda *args: "" if "status" in args else
                         TREE if args[-1] == "HEAD^{tree}" else actual)
     monkeypatch.setattr(local, "validate_bundle", lambda *a, **k: evidence(local))
@@ -247,7 +252,7 @@ def complete_gate(modules, monkeypatch, tmp_path):
                      if f"py{value['python']}-pg{value['postgres']}" in name)
         return records[entry]
     monkeypatch.setattr(gate, "warehouse_report", warehouse)
-    argv = ["--version", "0.2.4", "--evidence", str(tmp_path / "synthetic-fixture.json"),
+    argv = ["--version", "0.2.5", "--evidence", str(tmp_path / "synthetic-fixture.json"),
             "--digest", LOCK, "--tested-sha", SHA, "--ci-run", "6", "--full-run", "7"]
     return gate, argv, ci, full, records, looked_up, calls
 
@@ -267,7 +272,7 @@ def test_publication_verification_enforces_temporary_scope(complete_gate, monkey
     if change != "attestation":
         argv.append("--attest")
     if change == "version":
-        argv[1] = "0.2.5"
+        argv[1] = "0.2.6"
     elif change == "ref":
         monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
     elif change in ("actor", "main_tree"):
@@ -296,7 +301,7 @@ def test_publication_verification_enforces_temporary_scope(complete_gate, monkey
 @pytest.mark.parametrize('scope,change', [('app', 'version'), ('engine', 'version'), ('app', 'python')])
 def test_installed_versions_must_match_the_validation_protocol(modules, scope, change):
     local, _ = modules
-    value = {'app': {'python': '3.14.6', 'packages': {'dbt-dqm': '0.2.4'}},
+    value = {'app': {'python': '3.14.6', 'packages': {'dbt-dqm': '0.2.5'}},
              'engine': {'python': '3.14.6', 'packages': {'dbt': '2.0.11'}}}
     if change == 'python':
         value[scope]['python'] = '3.11.15'
@@ -304,3 +309,20 @@ def test_installed_versions_must_match_the_validation_protocol(modules, scope, c
         value[scope]['packages'] = {}
     with pytest.raises(ValueError, match='Installed'):
         local.validate_environments(value, '2.0.11')
+
+
+@pytest.mark.parametrize('problem', ['suite', 'core', 'v2', 'v2_version', 'digest'])
+def test_cross_engine_recovery_proof_is_mandatory_and_binds_both_engines(modules, tmp_path, problem):
+    local, _ = modules
+    value = evidence(local)
+    upgrade = next(run for run in value['runs'] if run['suite'] == 'bigquery-upgrade')
+    if problem == 'suite':
+        value['runs'].remove(upgrade)
+    elif problem in ('core', 'v2'):
+        del upgrade['environments']['upgrade_' + problem]
+    elif problem == 'v2_version':
+        upgrade['environments']['upgrade_v2']['packages']['dbt'] = '2.0.9'
+    else:
+        del upgrade['upgrade_v2_dependency_digest']
+    with pytest.raises(ValueError):
+        validate(local, tmp_path / 'bundle.json', value)
