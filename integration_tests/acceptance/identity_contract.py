@@ -77,6 +77,28 @@ def exercise_identity_migration(demo, adapter):
             assert normalize_signature(row['identity_scheme_signature'], row['granularity_signature']) == row['identity_scheme_signature']
     demo.dbt('run-operation', 'ensure_capture_tables')
     assert demo.sql(f'select * from {occurrences} order by occurrence_id') == baseline
+    # Replaying an older migration can leave canonical rows with the 0008 ledger missing.
+    # Exercise the backfill itself again, rather than only its already-recorded fast path.
+    demo.sql(f"delete from {ledger} where migration_id='0008_canonical_identity_signature'")
+    demo.sql(f"update {control} set schema_version='0007_browse_keyset_index' where true")
+    for invalid in ('not JSON', json.dumps({'version': 'unknown',
+            'granularity': json.loads(ordered['granularity_signature'])}),
+            json.dumps({'version': 'dqm-id-v1', 'granularity': ['different']})):
+        demo.sql(f'update {occurrences} set identity_scheme_signature={literal(invalid)} '
+                 f'where occurrence_id={literal(ordered["occurrence_id"])}')
+        rejected = demo.sql(f'select * from {occurrences} order by occurrence_id')
+        failure = demo.dbt('run-operation', 'ensure_capture_tables', success=False)
+        output = demo.last_output if adapter == 'bigquery' else failure.stdout
+        if adapter == 'bigquery' or invalid != 'not JSON':
+            assert 'unknown or contradictory signature' in output
+        assert demo.sql(f'select * from {occurrences} order by occurrence_id') == rejected
+        assert not demo.sql(f"select 1 from {ledger} where migration_id='0008_canonical_identity_signature'")
+        demo.sql(f'update {occurrences} set identity_scheme_signature={literal(ordered["identity_scheme_signature"])} '
+                 f'where occurrence_id={literal(ordered["occurrence_id"])}')
+        if adapter == 'bigquery':
+            demo.sql(f'update {control} set migration_lease_until=timestamp_sub(current_timestamp(), interval 1 minute) where true')
+    demo.dbt('run-operation', 'ensure_capture_tables')
+    assert demo.sql(f'select * from {occurrences} order by occurrence_id') == baseline
     event_table = table('dqm_issue_events')
     changed_before = demo.sql(f"select count(*) n from {event_table} where event_type='VALUES_CHANGED'")[0]['n']
     for row in baseline:

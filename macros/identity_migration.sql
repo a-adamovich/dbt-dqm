@@ -42,15 +42,17 @@
   {% if target.type == 'postgres' %}create temporary table dqm_identity_mapping on commit drop as
   {% else %}create or replace temp table dqm_identity_mapping default collate '' as{% endif %}
   select *, {{ dbt_dqm.canonical_signature_sql('grain') }} as canonical
+    {% if target.type == 'bigquery' %}, safe.parse_json(original) as original_json{% endif %}
   from dqm_identity_signatures;
 
   {# Already canonical rows allow safe reapplication after interrupted setup or ledger repair.
-     CASE protects the JSON parser from the deliberately non-JSON canonical format. #}
+     BigQuery can evaluate correlated subqueries outside their CASE branch: parse historical
+     JSON safely once, then explicitly reject invalid non-canonical input below. #}
   {{ dbt_dqm.assert_sql("not exists(select 1 from dqm_identity_mapping where not coalesce(case when original=canonical then true else "
       ~ ("jsonb_typeof(original::jsonb)='object' and original::jsonb->'version'=to_jsonb('dqm-id-v1'::text) and original::jsonb->'granularity'=grain and (select count(*) from jsonb_object_keys(original::jsonb))=2"
          if target.type=='postgres' else
-         "json_type(parse_json(original))='object' and json_value(original,'$.version')='dqm-id-v1' and array_length(json_keys(parse_json(original),1))=2 and json_type(json_query(parse_json(original),'$.granularity'))='array' and not exists(select 1 from unnest(json_query_array(parse_json(original),'$.granularity')) item where json_type(item)!='string') and "
-         ~ dbt_dqm.canonical_signature_sql("json_query(parse_json(original),'$.granularity')") ~ "=canonical")
+         "json_type(original_json)='object' and json_value(original_json,'$.version')='dqm-id-v1' and array_length(json_keys(original_json,1))=2 and json_type(json_query(original_json,'$.granularity'))='array' and not exists(select 1 from unnest(json_query_array(original_json,'$.granularity')) item where json_type(item)!='string') and "
+         ~ dbt_dqm.canonical_signature_sql("json_query(original_json,'$.granularity')") ~ "=canonical")
       ~ " end,false))", "'DQM identity migration: unknown or contradictory signature; restore original metadata before retrying.'") }}
 
   {# The old compact_json could corrupt a name containing ', ' or ': ' in BOTH metadata

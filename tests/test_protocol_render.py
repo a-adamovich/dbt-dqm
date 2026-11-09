@@ -112,6 +112,13 @@ def test_identity_migration_parses_distinct_metadata_and_preserves_display(proto
             import sqlglot
 
             assert sqlglot.parse(sql, dialect='bigquery')
+            # BigQuery may evaluate correlated subqueries outside their CASE branch.
+            # A retry contains non-JSON canonical signatures alongside legacy JSON;
+            # parsing must be total while the explicit validation still rejects bad input.
+            assert 'safe.parse_json(original) as original_json' in sql.lower()
+            assert not re.search(r'(?<!safe\.)\bparse_json\(original\)', sql, re.IGNORECASE)
+            assert "json_type(original_json)='object'" in sql
+            assert 'case when original=canonical then true else' in sql
     finally:
         path.write_text(original)
 
