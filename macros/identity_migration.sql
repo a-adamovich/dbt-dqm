@@ -53,6 +53,31 @@
          ~ dbt_dqm.canonical_signature_sql("json_query(parse_json(original),'$.granularity')") ~ "=canonical")
       ~ " end,false))", "'DQM identity migration: unknown or contradictory signature; restore original metadata before retrying.'") }}
 
+  {# The old compact_json could corrupt a name containing ', ' or ': ' in BOTH metadata
+     fields. Matching those two fields is insufficient: require the recorded grain to exist
+     in retained payloads too. Never infer a historical name from the current manifest. #}
+  {% for name in ['dqm_issue_occurrences','dqm_issue_observations'] %}
+    {% set subject = 'payload' if name=='dqm_issue_occurrences' else 'execution' %}
+    {% set invalid_payload %}
+      not exists(select 1 from {{ dbt_dqm.dqm_relation(name) }} payload
+      {% if name=='dqm_issue_observations' %}
+        join {{ dbt_dqm.dqm_relation('dqm_test_executions') }} execution
+          on execution.test_unique_id=payload.test_unique_id and execution.invocation_id=payload.invocation_id
+      {% endif %}
+      join dqm_identity_mapping mapping on mapping.original={{ subject }}.identity_scheme_signature
+        and mapping.grain_text={{ subject }}.granularity_signature
+      where exists(select 1 from
+        {% if target.type=='postgres' %}jsonb_array_elements_text(mapping.grain) grain(key)
+        where grain.key not in (select lower(key) from jsonb_object_keys(payload.record_values_json::jsonb) key)
+        {% else %}unnest(json_value_array(mapping.grain)) grain_key
+        where grain_key not in (select lower(case when starts_with(encoded_key, '"')
+          then json_value(parse_json(encoded_key)) else encoded_key end)
+          from unnest(json_keys(parse_json(payload.record_values_json),1)) encoded_key)
+        {% endif %}))
+    {% endset %}
+    {{ dbt_dqm.assert_sql(invalid_payload, "'DQM identity migration: recorded granularity is absent from captured fields; historical string contents may be damaged. Preserve original manifests and investigate; no column name was guessed.'") }}
+  {% endfor %}
+
   {% for name in ['dqm_test_executions','dqm_issue_occurrences'] %}
     update {{ dbt_dqm.dqm_relation(name) }} as target
     set identity_scheme_signature=mapping.canonical

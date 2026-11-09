@@ -106,7 +106,12 @@ def test_identity_migration_parses_distinct_metadata_and_preserves_display(proto
         sql = render(protocol_project, monkeypatch, 'default__canonical_identity_signature_backfill')
         assert 'union distinct' in sql and 'dqm_identity_mapping' in sql
         assert 'dqm-id-v1|' in sql and 'contradictory signature' in sql
+        assert 'recorded granularity is absent from captured fields' in sql
         assert 'set record_values_json' not in sql and 'set occurrence_id' not in sql
+        if adapter == 'bigquery':
+            import sqlglot
+
+            assert sqlglot.parse(sql, dialect='bigquery')
     finally:
         path.write_text(original)
 

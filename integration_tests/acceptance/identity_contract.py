@@ -21,15 +21,15 @@ def exercise_identity_migration(demo, adapter):
     control = table('dqm_reconciliation_control')
     root = demo.project if adapter == 'postgres' else demo.path
     (root / 'tests/ordered_identity.sql').write_text("""{{ config(enabled=var('dqm_enabled',false),
-        store_failures=true,severity='warn',tags=['dqm'],meta={'dbt_dqm':{'granularity':['z_last','é']}}) }}
-        select 'row' as z_last, 'a, b: c' as a_first, 'dot, key: value' as {{ adapter.quote('a.b') }}, 'unicode' as {{ adapter.quote('é') }}""")
+        store_failures=true,severity='warn',tags=['dqm'],meta={'dbt_dqm':{'granularity':['z_last','é','a: b']}}) }}
+        select 'row' as z_last, 'a, b: c' as a_first, 'punctuation' as {{ adapter.quote('a: b') }}, 'unicode' as {{ adapter.quote('é') }}""")
     demo.capture('initial')
     demo.dbt('build', '--select', 'package:dbt_dqm')
     demo.sql(f"update {occurrences} set notes='preserved through #105', annotation_version=7 where true")
     baseline = demo.sql(f'select * from {occurrences} order by occurrence_id')
     assert baseline
     ordered = next(row for row in baseline if row['test_name'] == 'ordered_identity')
-    assert list(json.loads(ordered['record_values_json'])) == ['z_last', 'a_first', 'a.b', 'é']
+    assert list(json.loads(ordered['record_values_json'])) == ['z_last', 'a_first', 'a: b', 'é']
     assert json.loads(ordered['record_values_json'])['a_first'] == 'a, b: c'
     for name in ('dqm_issue_occurrences', 'dqm_test_executions'):
         relation = table(name)
@@ -44,6 +44,21 @@ def exercise_identity_migration(demo, adapter):
     assert legacy_rows != baseline
     demo.sql(f"delete from {ledger} where migration_id='0008_canonical_identity_signature'")
     demo.sql(f"update {control} set schema_version='0007_browse_keyset_index' where true")
+    legacy_ordered = next(row for row in legacy_rows if row['occurrence_id'] == ordered['occurrence_id'])
+    # Reproduce the old helper corrupting the same field name in BOTH metadata strings.
+    broken_grain = json.dumps(['z_last', 'é', 'a:b'])
+    broken_signature = json.dumps({'version': 'dqm-id-v1', 'granularity': ['z_last', 'é', 'a:b']})
+    demo.sql(f'update {occurrences} set identity_scheme_signature={literal(broken_signature)}, '
+             f'granularity_signature={literal(broken_grain)} where occurrence_id={literal(ordered["occurrence_id"])}')
+    failure = demo.dbt('run-operation', 'ensure_capture_tables', success=False)
+    output = demo.last_output if adapter == 'bigquery' else failure.stdout
+    assert 'recorded granularity is absent from captured fields' in output
+    assert not demo.sql(f"select 1 from {ledger} where migration_id='0008_canonical_identity_signature'")
+    demo.sql(f'update {occurrences} set identity_scheme_signature={literal(legacy_ordered["identity_scheme_signature"])}, '
+             f'granularity_signature={literal(legacy_ordered["granularity_signature"])} '
+             f'where occurrence_id={literal(ordered["occurrence_id"])}')
+    if adapter == 'bigquery':
+        demo.sql(f'update {control} set migration_lease_until=timestamp_sub(current_timestamp(), interval 1 minute) where true')
     macro = root / 'macros/interrupt_identity.sql'
     macro.write_text("""{% macro """ + adapter + """__canonical_identity_signature_verify() %}
       {{ dbt_dqm.default__canonical_identity_signature_verify() }}
