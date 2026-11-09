@@ -250,8 +250,7 @@ def test_v2_dispatches_a_migration_name_supplied_at_runtime(project):
 @pytest.mark.parametrize("engine", ["v2", "core"])
 @pytest.mark.parametrize("deny_links", [False, True])
 def test_v2_project_payload_is_literal_and_not_in_command_line(project, engine, deny_links, monkeypatch):
-    macros = project / 'macros'
-    macros.mkdir()
+    macros = project / 'dbt_packages/dbt_dqm/macros'
     (macros / 'payload_probe.sql').write_text('''{% macro payload_probe() %}
       {% set payload=fromjson(var('_dbt_dqm_internal_json')) %}
       {% do log('DQM_PAYLOAD_SIZE=' ~ (payload.value|length), info=true) %}
@@ -272,12 +271,12 @@ def test_v2_project_payload_is_literal_and_not_in_command_line(project, engine, 
         monkeypatch.setattr(runtime_project, 'sys', SimpleNamespace(platform='win32'))
     runner = DbtCLI(executable=executable, callbacks=[events.append])
     payload = "{{ env_var('DO_NOT_RENDER') }}" + ('large SQL text ' * 10000)
-    arguments = ['run-operation', 'payload_probe']
+    arguments = ['run-operation', 'dbt_dqm.payload_probe']
     if engine == 'core':
         # Core's run-operation opens a connection even for a pure logging macro.
         # The offline compilation shim exercises the same vars without a warehouse.
         (project / 'analyses').mkdir()
-        (project / 'analyses/payload_probe.sql').write_text('{{ payload_probe() }} select 1 as id')
+        (project / 'analyses/payload_probe.sql').write_text('{{ dbt_dqm.payload_probe() }} select 1 as id')
         arguments = ['compile', '--no-introspect', '--select', 'payload_probe']
     result = runner.invoke([*arguments, '--project-dir', str(project),
                             '--profiles-dir', str(project), '--target-path', str(project / 'target'),

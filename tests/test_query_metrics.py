@@ -48,3 +48,33 @@ def test_denied_metrics_are_unavailable_instead_of_zero(modules, monkeypatch):
     assert result == {"status": "unavailable", "reason": "Forbidden"}
 
 
+
+
+def test_missing_statistics_are_not_reported_as_zero(modules, monkeypatch):
+    from types import SimpleNamespace
+
+    from google.cloud import bigquery
+
+    metrics, _ = modules
+    queries = []
+    def query(sql, job_config):
+        queries.append(sql)
+        return SimpleNamespace(result=lambda: [{'category': 'labelled', 'jobs': 2,
+            'billed_bytes': None, 'slot_ms': None, 'jobs_missing_billed_bytes': 2,
+            'jobs_missing_slot_ms': 2}])
+    monkeypatch.setattr(bigquery, 'Client', lambda **kwargs: SimpleNamespace(query=query))
+    result = metrics.job_metrics('private-project', 'opaque-run', NOW, NOW)
+    assert result['categories'][0]['billed_bytes'] is None
+    assert 'countif(total_bytes_billed is null)' in queries[0]
+    assert 'coalesce(total_bytes_billed,0)' not in queries[0]
+
+
+def test_empty_attribution_is_unavailable(modules, monkeypatch):
+    from types import SimpleNamespace
+
+    from google.cloud import bigquery
+
+    metrics, _ = modules
+    monkeypatch.setattr(bigquery, 'Client', lambda **kwargs: SimpleNamespace(
+        query=lambda *args, **kwargs: SimpleNamespace(result=list)))
+    assert metrics.job_metrics('private-project', 'opaque-run', NOW, NOW)['status'] == 'unavailable'

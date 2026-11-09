@@ -47,6 +47,9 @@ def evidence(local):
             "version": "0.2.4", "repository": local.REPOSITORY, "sha": SHA, "tree": TREE,
             "lock_digest": LOCK, "status": "passed", "returncode": 0, "engine": engine,
             "python": "3.14.6", "workers": workers, "dependency_digest": LOCK,
+            "environments": {'app': {'python': '3.14.6', 'packages': {'dbt-dqm': '0.2.4'}},
+                             'engine': {'python': '3.14.6', 'packages': {
+                                 'dbt' if engine == '2.0.11' else 'dbt-core': engine}}},
             "engine_dependency_digest": LOCK, "counts": local.report_counts(xml, suite),
             "started_at": (NOW - timedelta(hours=2)).isoformat(),
             "finished_at": (NOW - timedelta(hours=1)).isoformat(), "files": files})
@@ -288,3 +291,16 @@ def test_publication_verification_enforces_temporary_scope(complete_gate, monkey
         assert "Release blocked" in capsys.readouterr().err
 
 
+
+
+@pytest.mark.parametrize('scope,change', [('app', 'version'), ('engine', 'version'), ('app', 'python')])
+def test_installed_versions_must_match_the_validation_protocol(modules, scope, change):
+    local, _ = modules
+    value = {'app': {'python': '3.14.6', 'packages': {'dbt-dqm': '0.2.4'}},
+             'engine': {'python': '3.14.6', 'packages': {'dbt': '2.0.11'}}}
+    if change == 'python':
+        value[scope]['python'] = '3.11.15'
+    else:
+        value[scope]['packages'] = {}
+    with pytest.raises(ValueError, match='Installed'):
+        local.validate_environments(value, '2.0.11')

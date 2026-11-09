@@ -29,20 +29,21 @@ assessment and intentionally keeps its original findings.
 - CI pins third-party actions, declares read-only permissions, builds and smoke-tests distributions,
   runs Postgres 14/16 lifecycle suites, and compiles the BigQuery project without introspection.
 
-## Remaining before a stable v1
+## Remaining v1 interface and operating goals
 
-- Push all app filters, full-text search, metrics, and cursor pagination into warehouse queries;
-  keep SQLite only for a bounded offline page/snapshot and pending patches.
-- Add representative scale fixtures and automated `EXPLAIN` budget checks on Postgres and dry-run
-  byte budgets on BigQuery.
-- Expand the tested Python/dbt compatibility matrix only from observed demand.
-- Enable the scheduled credentialed BigQuery workflow: it is keyless and ready, and needs the
-  one-time cloud setup in [on-demand BigQuery verification](bigquery-lifecycle.md).
-- Validate dbt 1.12 and pandas 3 as separate compatibility upgrades (#11).
-- Identify what puts the app's sync peak at about 560–580 MiB in many runs (independent of the
-  PyArrow memory pool; see [scale](scale.md)).
-- Publish relation/column stability guarantees and remove the deprecated `test_status` alias only
-  in a clearly announced release.
+- Refine the existing warehouse-browsing preview using measured latency and byte costs.
+  Keyset pages, warehouse filters/search/metrics, bounded caches, scale fixtures and Postgres
+  query-plan checks already exist; they are not new implementation work.
+- Configure and prove approved, on-demand credentialed GitHub validation before enabling it.
+  Cloud PR smoke and WIF release validation remain unavailable pending maintainer setup.
+  No scheduled cloud execution is planned.
+- Add BigQuery byte-budget regressions when cloud validation is authorized.
+- Expand compatibility from observed demand. Core 1.12 and pandas 3 are already validated.
+- Identify the cause of the snapshot sync peak documented in [scale](scale.md).
+- Publish relation/column stability guarantees. Remove the deprecated `test_status` alias only
+  in an announced compatibility release.
+- Use the [Python quality baseline](quality-baseline.md) to prioritize tests and focused
+  refactoring; a type-checking rollout and query-label/cost-reporting work remain follow-ups.
 
 ## Adoption and commercial validation
 
@@ -56,4 +57,4 @@ integrations, managed operation, and support—not failure-row volume.
 
 Implemented: transactional tracking and recovery, fresh installation and additive migrations, row owners, metadata and verdicts, durable history and missed reports, warehouse health with local caching, and isolated optional maintenance with its own health. The remaining release gates are in the [release checklist](release-checklist.md).
 
-Deferred: VCG adoption/migration and warehouse-side issue filtering, search and cursor pagination. Pending local edits must remain accessible as that pagination work proceeds.
+Deferred: VCG adoption/migration and promotion of the warehouse-browsing preview. Existing warehouse filtering, search and pagination preserve access to pending local edits.

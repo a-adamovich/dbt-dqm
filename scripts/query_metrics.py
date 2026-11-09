@@ -28,8 +28,10 @@ def job_metrics(project, validation_id, started, finished, *, permissions=False)
         )
         select if(job_id in (select job_id from tagged) or parent_job_id in (select job_id from tagged),
                   'labelled','unlabelled_app_or_other_activity') as category,
-               count(*) as jobs, sum(coalesce(total_bytes_billed,0)) as billed_bytes,
-               sum(coalesce(total_slot_ms,0)) as slot_ms
+               count(*) as jobs, sum(total_bytes_billed) as billed_bytes,
+               sum(total_slot_ms) as slot_ms,
+               countif(total_bytes_billed is null) as jobs_missing_billed_bytes,
+               countif(total_slot_ms is null) as jobs_missing_slot_ms
         from window_jobs
         where statement_type is distinct from 'SCRIPT'
           and (job_id in (select job_id from tagged) or parent_job_id in (select job_id from tagged)
@@ -44,7 +46,11 @@ def job_metrics(project, validation_id, started, finished, *, permissions=False)
             bigquery.ScalarQueryParameter("validation_id", "STRING", validation_id),
             bigquery.ScalarQueryParameter("permissions", "BOOL", permissions)])
         rows = bigquery.Client(project=project, location=location).query(sql, job_config=config).result()
-        return {"status": "measured", "categories": [dict(row.items()) for row in rows],
+        categories = [dict(row.items()) for row in rows]
+        if not categories:
+            return {'status': 'unavailable', 'reason': 'No attributed jobs found'}
+        return {"status": "measured", "categories": categories,
+                'coverage': 'Reported statistics only; missing values are not zero usage.',
                 "attribution": "Labels/parent labels and referenced datasets in the suite window; "
                                "unlabelled shared-QA activity may include other users."}
     except Exception as error:  # noqa: BLE001 - optional metrics must report unavailable, never zero

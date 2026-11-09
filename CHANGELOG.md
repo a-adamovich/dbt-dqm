@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.4
+
+- Fix Windows execution without symlink privileges using private temporary project copies.
+- Move compiled queries, collection payloads and column maps out of command-line arguments;
+  preserve literal SQL and add platform argument-size guards.
+- Quote BigQuery COLLATE function identifiers so dbt 2 strict analysis accepts package SQL.
+- Add native Windows real-engine regressions and pinned resolved-environment security audits.
+- Require fresh validation for the 0.2.4-only local BigQuery attestation path, retaining human
+  PyPI approval and provenance verification. Historical 0.2.3 reports cannot authorize it.
+- Preserve warehouse tables, issue identities and annotations; no migration or reset is needed.
+
 ## 0.2.3
 
 - Recover the unpublished 0.2.2 candidate with corrected numeric-ID draft-evidence retrieval.

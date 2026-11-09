@@ -36,6 +36,24 @@ def command(*args):
     return subprocess.run(args, cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
 
 
+def installed_environment(python):
+    return json.loads(command(str(python), '-c',
+        'import json,sys,platform,re; from importlib.metadata import distributions; '
+        'print(json.dumps({"python":sys.version.split()[0],"platform":sys.platform,'
+        '"machine":platform.machine(),"packages":{'
+        're.sub(r"[-_.]+","-",d.metadata["Name"]).lower():d.version '
+        'for d in distributions() if d.metadata["Name"]}}))'))
+
+
+def validate_environments(environments, engine):
+    for scope, package, version in [('app', 'dbt-dqm', VERSION),
+                                    ('engine', 'dbt' if engine == '2.0.11' else 'dbt-core', engine)]:
+        item = environments.get(scope, {})
+        if (not isinstance(item.get('python'), str) or not item['python'].startswith('3.14.')
+                or item.get('packages', {}).get(package) != version):
+            raise ValueError('Installed validation environment does not match the release protocol')
+
+
 def identity():
     if command("git", "status", "--porcelain"):
         raise ValueError("Local release validation requires a clean worktree")
@@ -99,6 +117,10 @@ def run_suite(suite, executable, directory):
     output = command(str(executable), "--version")
     if not re.search(r"(?:installed:\s*|\bdbt\s+)" + re.escape(engine) + r"(?:\s|$)", output):
         raise ValueError("The selected engine does not match this validation suite")
+    engine_python = executable.parent / ('python.exe' if sys.platform == 'win32' else 'python')
+    environments = {'app': installed_environment(sys.executable),
+                    'engine': installed_environment(engine_python)}
+    validate_environments(environments, engine)
     started = datetime.now(UTC)
     validation_id = uuid.uuid4().hex
     directory = directory / (started.strftime("%Y%m%dT%H%M%S") + "-" + suite + "-" + validation_id[:8])
@@ -122,13 +144,14 @@ def run_suite(suite, executable, directory):
     receipt = {"schema_version": 1, "version": VERSION, "repository": REPOSITORY,
                **before, "id": directory.name, "validation_id": validation_id, "suite": suite, "engine": engine,
                "python": sys.version.split()[0], "workers": workers, "command": args,
+               "environments": environments,
                "started_at": started.isoformat(), "finished_at": finished.isoformat(),
                "returncode": code, "status": "failed", "diagnosis": "",
                "redact_literals": [os.environ.get("DBT_DQM_BIGQUERY_TEST_PROJECT", ""), "dbt-dqm"],
                "maximum_bytes_billed": maximum, "query_metrics": {"status": "pending"},
                "dependency_digest": digest(command("uv", "pip", "freeze", "--python", sys.executable).encode()),
                "engine_dependency_digest": digest(command("uv", "pip", "freeze", "--python",
-                   str(executable.parent / "python")).encode())}
+                   str(engine_python)).encode())}
     try:
         if identity() != before:
             raise ValueError("Source changed during acceptance")
@@ -250,6 +273,7 @@ def validate_bundle(path, expected_digest, *, tree, lock_digest, now=None):
             if digest(value["files"][item["name"]].encode()) != item["sha256"]:
                 raise ValueError("Changed evidence attachment")
         if run["status"] == "passed":
+            validate_environments(run.get('environments', {}), SUITES[suite][1])
             counts = report_counts(value["files"][run["files"]["junit.xml"]["name"]], suite)
             if (run.get("returncode") != 0 or counts != run.get("counts")
                     or counts["passed"] != SUITES[suite][3] or "pytest.log" not in run["files"]

@@ -44,3 +44,17 @@ instructions take precedence. Preserve existing assertions and acceptance cases.
   A measured, justified timeout or test-architecture change requires review.
 - Do not reset shared QA, introduce schedules, create service-account keys, or change project
   quotas as part of routine test execution.
+
+## Temporary 0.2.4 release policy
+
+- Only 0.2.4 may use fresh local BigQuery attestation. Never reuse historical warehouse reports.
+- Freeze all tracked files before expensive validation. Require complete GitHub platform evidence,
+  both 33-case BigQuery suites and the serial restricted-permissions test on that source tree.
+- Present the agreed candidate/cost/redaction checkpoint before credentialed execution. No new
+  GCP setup, IAM, keys, quotas, schedules or shared-QA resets are authorized.
+- Keep private originals outside Git and retain failed attempts and diagnoses. Public copies
+  redact secrets, local paths, account emails and project/dataset names.
+- Verify-only execution cannot publish or request environment approval. Synthetic fixtures are
+  not runtime evidence. Use numeric draft/asset IDs and verify bundle digests.
+- Preserve immutable tags, release-specific maintainer attestation and human PyPI approval.
+  Open a removal issue after shipping. Later versions require the credentialed GitHub gate.

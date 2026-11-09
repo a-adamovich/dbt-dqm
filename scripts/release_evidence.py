@@ -130,6 +130,7 @@ def warehouse_report(repository, run, name, tree, *, core=False):
             or record.get("repository") != repository or record.get("worktree_dirty") is not False
             or record.get("run_id") != str(run["id"])
             or record.get("run_attempt") != str(run["run_attempt"])
+            or record.get("sha") != run["head_sha"]
             or record.get("tree") != tree or commit_tree(repository, record["sha"]) != tree):
         raise ValueError("Stale or mismatched warehouse checkout evidence")
     with tempfile.TemporaryDirectory() as directory:
