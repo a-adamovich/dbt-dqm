@@ -15,7 +15,7 @@ def modules(monkeypatch):
 
 
 @pytest.mark.parametrize("change", [None, "missing", "duplicate", "published", "repo", "asset_missing",
-    "asset_duplicate", "size", "digest", "body", "tag"])
+    "asset_duplicate", "size", "digest", "body", "tag", "release_id", "asset_id"])
 def test_draft_download_is_bound_to_numeric_identity(modules, monkeypatch, tmp_path, change):
     _, module = modules
     data = b'{"synthetic":true}'
@@ -34,6 +34,8 @@ def test_draft_download_is_bound_to_numeric_identity(modules, monkeypatch, tmp_p
     elif change == "size": asset["size"] = module.MAX_BYTES + 1
     elif change == "digest": asset["digest"] = "sha256:" + "a" * 64
     elif change == "body": data = b'changed'
+    elif change == "release_id": release["id"] = "7"
+    elif change == "asset_id": asset["id"] = "8"
     def api(path, *, binary=False):
         if binary:
             assert path.endswith("/assets/8")

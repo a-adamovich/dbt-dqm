@@ -14,6 +14,7 @@ evidence = importlib.import_module('bigquery_evidence')
 
 @pytest.mark.parametrize('problem', [None, 'missing', 'skipped', 'duplicate', 'wrong_engine'])
 def test_record_requires_complete_successful_selection(tmp_path, monkeypatch, problem):
+    monkeypatch.setattr(evidence.platform, 'python_version', lambda: '3.14.6')
     root = ET.Element('testsuites')
     suite = ET.SubElement(root, 'testsuite', timestamp='2026-11-08T12:00:00Z')
     names = sorted(evidence.release_evidence.source_names('test_bigquery.py'))
@@ -48,7 +49,7 @@ def test_record_requires_complete_successful_selection(tmp_path, monkeypatch, pr
         assert json.loads(output.read_text())['counts']['passed'] == 33
 
 
-@pytest.mark.parametrize('problem', [None, 'skipped', 'attempt', 'sha', 'engine', 'missing'])
+@pytest.mark.parametrize('problem', [None, 'skipped', 'attempt', 'sha', 'engine', 'missing', 'python'])
 def test_verifier_rejects_mismatched_bigquery_evidence(monkeypatch, problem):
     module = evidence.release_evidence
     tree, sha = 'a' * 40, 'b' * 40
@@ -64,8 +65,8 @@ def test_verifier_rejects_mismatched_bigquery_evidence(monkeypatch, problem):
     record = {'schema_version': 1, 'scope': 'bigquery', 'suite': 'bigquery-full',
               'repository': 'owner/repo', 'run_id': '42', 'run_attempt': '1',
               'sha': sha, 'tree': tree, 'worktree_dirty': False,
-              'matrix': {'engine': 'dbt2', 'version': '2.0.11'},
-              'installed': {'dbt': '2.0.11'}, 'dependency_digest': 'c' * 64,
+              'matrix': {'engine': 'dbt2', 'version': '2.0.11', 'python': '3.14'},
+              'installed': {'dbt': '2.0.11', 'python': '3.14.6'}, 'dependency_digest': 'c' * 64,
               'counts': {'collected': 33, 'passed': 33, 'failed': 0, 'errors': 0, 'skipped': 0}}
     if problem == 'attempt':
         record['run_attempt'] = '2'
@@ -73,6 +74,8 @@ def test_verifier_rejects_mismatched_bigquery_evidence(monkeypatch, problem):
         record['sha'] = 'd' * 40
     if problem == 'engine':
         record['matrix']['version'] = '2.0.9'
+    if problem == 'python':
+        record['installed']['python'] = '3.11.15'
     monkeypatch.setattr(module, 'commit_tree', lambda *args: tree)
     monkeypatch.setattr(module, 'artifact_files', lambda *args: {
         'evidence.json': json.dumps(record), 'junit.xml': ET.tostring(root, encoding='unicode')})

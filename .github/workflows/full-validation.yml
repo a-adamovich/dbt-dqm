@@ -129,6 +129,23 @@ jobs:
         uv sync --locked --all-groups --all-extras
         uv venv /tmp/dbt-dqm-v111-engine --python 3.11
         uv pip install --python /tmp/dbt-dqm-v111-engine/bin/python dbt-core==1.11.0 dbt-postgres==1.11.0 dbt-bigquery==1.11.0 'oauthlib>=4.0.1,<5' 'pyasn1>=0.6.5,<0.7'
+    - name: Compile BigQuery on the lower-bound engine without warehouse access
+      run: |
+        mkdir -p /tmp/dbt-dqm-core111-profile
+        cat > /tmp/dbt-dqm-core111-profile/profiles.yml <<'PROFILES'
+        dbt_dqm_demo:
+          target: offline
+          outputs:
+            offline:
+              type: bigquery
+              method: oauth
+              project: dbt-dqm-compile-only
+              dataset: offline
+              location: US
+              threads: 1
+        PROFILES
+        /tmp/dbt-dqm-v111-engine/bin/dbt deps --project-dir integration_tests/demo_bigquery --profiles-dir /tmp/dbt-dqm-core111-profile
+        /tmp/dbt-dqm-v111-engine/bin/python scripts/compile_bigquery.py --profiles-dir /tmp/dbt-dqm-core111-profile
     - name: Audit isolated compatibility engine
       run: |
         uv run --group dbt1 python scripts/audit_environment.py --scope core-1.11 \

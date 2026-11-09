@@ -20,6 +20,9 @@ def command(*args):
 
 def record(junit, output, engine, executable):
     expected = {'dbt1': '1.12.6', 'dbt2': '2.0.11'}[engine]
+    python = platform.python_version()
+    if not python.startswith('3.14.'):
+        raise ValueError('BigQuery release validation requires Python 3.14')
     cases = list(ET.parse(junit).getroot().iter('testcase'))
     names = [case.attrib['name'] for case in cases]
     if (len(names) != 33 or len(set(names)) != 33
@@ -38,8 +41,8 @@ def record(junit, output, engine, executable):
             'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'sha': command('git', 'rev-parse', 'HEAD'),
             'tree': command('git', 'rev-parse', 'HEAD^{tree}'),
             'worktree_dirty': bool(command('git', 'status', '--porcelain', '--untracked-files=no')),
-            'matrix': {'engine': engine, 'version': expected},
-            'installed': {'python': platform.python_version(), 'dbt': expected},
+            'matrix': {'engine': engine, 'version': expected, 'python': '3.14'},
+            'installed': {'python': python, 'dbt': expected},
             'dependency_digest': hashlib.sha256(freeze.encode()).hexdigest(),
             'counts': {'collected': 33, 'passed': 33, 'failed': 0, 'errors': 0, 'skipped': 0},
             'started_at': next((suite.attrib['timestamp'] for suite in ET.parse(junit).getroot().iter('testsuite')

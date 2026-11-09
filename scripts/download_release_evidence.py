@@ -31,14 +31,16 @@ def download(tag, expected_digest, output):
         raise ValueError("Expected exactly one matching draft release")
     release = matches[0]
     prefix = f"https://api.github.com/repos/{REPOSITORY}/releases/"
-    if release.get("url") != prefix + str(release["id"]):
+    if (type(release.get('id')) is not int or release['id'] <= 0
+            or release.get("url") != prefix + str(release["id"])):
         raise ValueError("Unexpected draft repository identity")
     pages = api(f"repos/{REPOSITORY}/releases/{release['id']}/assets?per_page=100")
     assets = [item for page in pages for item in page if item.get("name") == ASSET]
     if len(assets) != 1:
         raise ValueError("Expected exactly one evidence asset")
     asset = assets[0]
-    if (asset.get("state") != "uploaded" or not 0 < asset.get("size", 0) <= MAX_BYTES
+    if (type(asset.get('id')) is not int or asset['id'] <= 0
+            or asset.get("state") != "uploaded" or not 0 < asset.get("size", 0) <= MAX_BYTES
             or asset.get("digest") != "sha256:" + expected_digest
             or asset.get("url") != prefix + "assets/" + str(asset["id"])):
         raise ValueError("Incorrect evidence asset identity, size or digest")

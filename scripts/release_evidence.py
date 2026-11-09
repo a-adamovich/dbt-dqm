@@ -179,8 +179,9 @@ def bigquery_report(repository, run, name, tree, engine, *, permissions=False):
             or record.get("run_attempt") != str(run["run_attempt"])
             or record.get("sha") != run["head_sha"] or record.get("tree") != tree
             or record.get("worktree_dirty") is not False
-            or record.get("matrix") != {"engine": engine, "version": version}
+            or record.get("matrix") != {"engine": engine, "version": version, "python": '3.14'}
             or record.get("installed", {}).get("dbt") != version
+            or not record.get('installed', {}).get('python', '').startswith('3.14.')
             or not re.fullmatch(r"[0-9a-f]{64}", record.get("dependency_digest", ""))
             or commit_tree(repository, record["sha"]) != tree):
         raise ValueError("Mismatched BigQuery evidence")
