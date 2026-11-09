@@ -46,7 +46,7 @@ def test_record_requires_complete_successful_selection(tmp_path, monkeypatch, pr
         assert not output.exists()
     else:
         evidence.record(junit, output, 'dbt2', '/engine/dbt')
-        assert json.loads(output.read_text())['counts']['passed'] == 33
+        assert json.loads(output.read_text())['counts']['passed'] == 34
 
 
 @pytest.mark.parametrize('problem', [None, 'skipped', 'attempt', 'sha', 'engine', 'missing', 'python'])
@@ -67,7 +67,7 @@ def test_verifier_rejects_mismatched_bigquery_evidence(monkeypatch, problem):
               'sha': sha, 'tree': tree, 'worktree_dirty': False,
               'matrix': {'engine': 'dbt2', 'version': '2.0.11', 'python': '3.14'},
               'installed': {'dbt': '2.0.11', 'python': '3.14.6'}, 'dependency_digest': 'c' * 64,
-              'counts': {'collected': 33, 'passed': 33, 'failed': 0, 'errors': 0, 'skipped': 0}}
+              'counts': {'collected': 34, 'passed': 34, 'failed': 0, 'errors': 0, 'skipped': 0}}
     if problem == 'attempt':
         record['run_attempt'] = '2'
     if problem == 'sha':

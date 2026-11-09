@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Fix #105: use engine-independent identity metadata and migrate historical Core/dbt 2
+  signatures without changing issue hashes or display order.
+- Preserve whitespace inside metadata JSON strings and avoid value-change events caused only
+  by record field order. Report structural closures separately from confirmed passes.
+- Add an explicit, preview-first incident recovery utility; see
+  [the recovery guide](docs/identity-105-recovery.md) for its scope and verification status.
+
 ## 0.2.4
 
 - Fix Windows execution without symlink privileges using private temporary project copies.

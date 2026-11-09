@@ -54,10 +54,7 @@
       {% endfor %}
     {% endif %}
     {% set granularity_signature = dbt_dqm.compact_json(signature_grain) %}
-    {% set identity_scheme_signature = dbt_dqm.compact_json({
-      'version': 'dqm-id-v1',
-      'granularity': signature_grain
-    }) %}
+    {% set identity_scheme_signature = dbt_dqm.identity_scheme_signature(signature_grain) %}
     {% set source = namespace(unique_id=none, relation=none) %}
     {% for dependency_id in node.depends_on.nodes %}
       {% if source.unique_id is none %}

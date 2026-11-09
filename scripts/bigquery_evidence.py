@@ -25,13 +25,13 @@ def record(junit, output, engine, executable):
         raise ValueError('BigQuery release validation requires Python 3.14')
     cases = list(ET.parse(junit).getroot().iter('testcase'))
     names = [case.attrib['name'] for case in cases]
-    if (len(names) != 33 or len(set(names)) != 33
+    if (len(names) != 34 or len(set(names)) != 34
             or set(names) != release_evidence.source_names('test_bigquery.py')
             or any(case.attrib.get('classname', '').split('.')[-1] != 'test_bigquery'
                    for case in cases)
             or any(any(case.find(tag) is not None for tag in ('skipped', 'failure', 'error'))
                    for case in cases)):
-        raise ValueError('BigQuery evidence requires exactly 33 passing acceptance cases')
+        raise ValueError('BigQuery evidence requires exactly 34 passing acceptance cases')
     version_output = command(executable, '--version')
     if not re.search(r'(?:installed:\s*|\bdbt\s+)' + re.escape(expected) + r'(?:\s|$)', version_output):
         raise ValueError('Unexpected dbt engine version')
@@ -44,7 +44,7 @@ def record(junit, output, engine, executable):
             'matrix': {'engine': engine, 'version': expected, 'python': '3.14'},
             'installed': {'python': python, 'dbt': expected},
             'dependency_digest': hashlib.sha256(freeze.encode()).hexdigest(),
-            'counts': {'collected': 33, 'passed': 33, 'failed': 0, 'errors': 0, 'skipped': 0},
+            'counts': {'collected': 34, 'passed': 34, 'failed': 0, 'errors': 0, 'skipped': 0},
             'started_at': next((suite.attrib['timestamp'] for suite in ET.parse(junit).getroot().iter('testsuite')
                                 if 'timestamp' in suite.attrib), None),
             'finished_at': datetime.now(UTC).isoformat()}

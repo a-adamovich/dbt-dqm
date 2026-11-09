@@ -38,7 +38,12 @@ def owner_summary(config, reconciliation):
         where occ.record_status='Active' or changes.occurrence_id is not null
         group by coalesce(nullif(trim(occ.dqm_owner),''),'Unassigned')
     )
-    select counts.*, run.status as summary_run_status,
+    select counts.*, (select count(distinct event.occurrence_id)
+        from {_table(config, "dqm_issue_events")} event
+        inner join {_table(config, "dqm_reconciliation_inputs")} input
+            on input.test_unique_id=event.test_unique_id and input.invocation_id=event.invocation_id
+        where input.run_id={parameter} and event.event_type='CLOSED_STRUCTURAL') as structural_count,
+        run.status as summary_run_status,
         run.generation_at_freeze as summary_generation_at_freeze
     from (select max(status) as status, max(generation_at_freeze) as generation_at_freeze
         from {_table(config, "dqm_reconciliation_runs")} where run_id={parameter}) run
@@ -67,6 +72,7 @@ def owner_summary(config, reconciliation):
         "owners": owners,
         "generation": generation,
         "reconciliation_id": reconciliation,
+        "structural": int(rows[0].get('structural_count') or 0),
     }
 
 
@@ -83,6 +89,9 @@ def print_summary(summary):
     for row in rows:
         print(f"{row['owner']:<{width}}  " + "  ".join(
             f"{row[field]:>{len(label)}}" for field, label in columns), flush=True)
+    if summary.get('structural'):
+        print(f"Structural closures: {summary['structural']} (identity changed or test removed; "
+              "these are not confirmed passes).", flush=True)
     print("OPENED (NEW), RECURRING and ARCHIVED are changes applied by this reconciliation. "
           "NEW (status) is the active review workload with status NEW; ACTIVE includes it.",
           flush=True)

@@ -138,9 +138,28 @@
 
 {% macro relation_name(name) %}{{ return(dbt_dqm.dqm_relation(name)) }}{% endmacro %}
 
-{# Serialize manifest values to stable compact JSON for warehouse storage. #}
+{# Compact JSON without rewriting whitespace inside string values. Object order is display
+   metadata only: identity must use identity_scheme_signature, never engine JSON rendering. #}
 {% macro compact_json(value) -%}
-  {{ return(tojson(value).replace(', ', ',').replace(': ', ':')) }}
+  {% set parts = [] %}
+  {% if value is mapping %}
+    {% for key, item in value.items() %}
+      {% do parts.append(tojson(key|string) ~ ':' ~ dbt_dqm.compact_json(item)) %}
+    {% endfor %}
+    {{ return('{' ~ parts|join(',') ~ '}') }}
+  {% elif value is sequence and value is not string %}
+    {% for item in value %}{% do parts.append(dbt_dqm.compact_json(item)) %}{% endfor %}
+    {{ return('[' ~ parts|join(',') ~ ']') }}
+  {% endif %}
+  {{ return(tojson(value)) }}
+{%- endmacro %}
+
+{# Identity metadata has its own byte contract. Lengths count Unicode code points, matching
+   the existing identity preimage. Grain is already normalized by the capture validator. #}
+{% macro identity_scheme_signature(grain) -%}
+  {% set parts = ['dqm-id-v1|'] %}
+  {% for key in grain %}{% do parts.append('k' ~ (key|length) ~ ':' ~ key ~ '|') %}{% endfor %}
+  {{ return(parts|join('')) }}
 {%- endmacro %}
 
 {# Validate cost/retention variables at compile time. Accept YAML integers only: silently

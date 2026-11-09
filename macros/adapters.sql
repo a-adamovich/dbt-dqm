@@ -75,11 +75,14 @@
 {% endmacro %}
 
 {% macro bigquery__json_object_string(pairs) %}
-  to_json_string(struct(
+  {# Explicit text construction preserves SELECT field order without depending on native
+     JSON object ordering. Encode keys and scalar values, never concatenate unescaped data. #}
+  concat('{'
     {% for key, value_sql in pairs %}
-      {{ value_sql }} as {{ adapter.quote(key) }}{% if not loop.last %},{% endif %}
+      {% if not loop.first %}, ','{% endif %},
+      to_json_string({{ dbt_dqm.sql_string(key) }}), ':', coalesce(to_json_string({{ value_sql }}), 'null')
     {% endfor %}
-  ))
+  , '}')
 {% endmacro %}
 
 {% macro postgres__json_object_string(pairs) %}
@@ -250,9 +253,21 @@
 
 {% macro bigquery__json_changed_keys(before, after) -%}
   (select string_agg(distinct changed_key, ',' order by changed_key)
-   from unnest(array_concat(
+   from (select distinct case when starts_with(encoded_key, '"')
+       then json_value(parse_json(encoded_key)) else encoded_key end as changed_key
+     from unnest(array_concat(
      json_keys(parse_json(coalesce({{ before }}, '{}')), 1),
-     json_keys(parse_json(coalesce({{ after }}, '{}')), 1))) changed_key
-   where `collate`(to_json_string(parse_json(coalesce({{ before }}, '{}'))[changed_key]), '')
+     json_keys(parse_json(coalesce({{ after }}, '{}')), 1))) encoded_key)
+   where json_type(parse_json(coalesce({{ before }}, '{}'))[changed_key])
+     is distinct from json_type(parse_json(coalesce({{ after }}, '{}'))[changed_key])
+     or `collate`(to_json_string(parse_json(coalesce({{ before }}, '{}'))[changed_key]), '')
      is distinct from `collate`(to_json_string(parse_json(coalesce({{ after }}, '{}'))[changed_key]), ''))
+{%- endmacro %}
+
+{# Keep the fast byte-equality path. Only differing payload text needs semantic comparison;
+   presentation-only field reordering must not generate a VALUES_CHANGED event. #}
+{% macro payload_changed(before, after) -%}
+  (case when {{ dbt_dqm.uncollated_string(before) }} is not distinct from {{ dbt_dqm.uncollated_string(after) }} then false
+    when {{ before }} is null or {{ after }} is null then true
+    else {{ dbt_dqm.json_changed_keys(before, after) }} is not null end)
 {%- endmacro %}

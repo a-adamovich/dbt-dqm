@@ -136,7 +136,7 @@ def warehouse_report(repository, run, name, tree, *, core=False):
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "junit.xml"
         path.write_text(reports[0])
-        counts = ci_validation.junit_counts(path, core=core, minimum=8 if core else 41)
+        counts = ci_validation.junit_counts(path, core=core, minimum=8 if core else 42)
     if counts != record.get("counts"):
         raise ValueError("Warehouse counts disagree with JUnit")
     if not core:
@@ -171,7 +171,7 @@ def bigquery_report(repository, run, name, tree, engine, *, permissions=False):
     version = {"dbt1": "1.12.6", "dbt2": "2.0.11"}[engine]
     suite = 'bigquery-permissions' if permissions else 'bigquery-full'
     filename = 'test_bigquery_permissions.py' if permissions else 'test_bigquery.py'
-    count = 1 if permissions else 33
+    count = 1 if permissions else 34
     if permissions and engine != 'dbt1':
         raise ValueError('Restricted permissions requires the Core engine')
     if (record.get("schema_version") != 1 or record.get("scope") != "bigquery"

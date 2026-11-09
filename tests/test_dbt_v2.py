@@ -72,6 +72,24 @@ def test_v2_parse_select_and_compile_without_python_adapters(project):
     assert "select 1 as id" in compiled.result.nodes["test.compat.marked"].compiled_code
 
 
+def test_v2_identity_signature_and_compact_json_keep_unicode_and_values(project):
+    events = []
+    runner = DbtCLI(executable=EXECUTABLE, callbacks=[events.append])
+    value = {'note': 'a, b: c', 'nested': ['é', {'quote': '<>&\" \\ \n'}]}
+    expected = 'dqm-id-v1|k6:source|k1:é|k1:😀|k2:é|k6:a|b: c|'
+    source = ("{{ log('SIGNATURE=' ~ dbt_dqm.identity_scheme_signature(var('grain')), info=True) }}"
+              "{{ log('PAYLOAD=' ~ dbt_dqm.compact_json(var('payload')), info=True) }} select 1")
+    result = runner.invoke(['compile', '--no-introspect', '--inline', source,
+        '--project-dir', str(project), '--profiles-dir', str(project),
+        '--target-path', str(project / 'target'), '--log-path', str(project / 'logs'),
+        '--vars', json.dumps({'grain': ['source', 'é', '😀', 'é', 'a|b: c'], 'payload': value}, ensure_ascii=False)])
+    assert result.success, result.exception
+    messages = [event.info.msg for event in events]
+    assert 'SIGNATURE=' + expected in messages
+    assert json.loads(next(msg.removeprefix('PAYLOAD=') for msg in messages
+                           if msg.startswith('PAYLOAD='))) == value
+
+
 def test_v2_app_naming_isolated_from_consumer_artifacts(project):
     project_file = project / "dbt_project.yml"
     document = yaml.safe_load(project_file.read_text())

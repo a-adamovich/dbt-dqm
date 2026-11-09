@@ -73,6 +73,7 @@ def test_owner_changes_workload_and_saved_ownership(summary_db, capsys):
     closed = result["owners"][-1]
     assert closed["archived"] == 1 and closed["active"] == closed["new"] == 0
     assert result["reconciliation_id"] == "run" and result["generation"] == ("install", 4)
+    assert result['structural'] == 1
     assert len(queries) == 1 and queries[0].params == {"run_id": "run"}
     print_summary(result)
     lines = capsys.readouterr().out.splitlines()
@@ -80,6 +81,7 @@ def test_owner_changes_workload_and_saved_ownership(summary_db, capsys):
     assert lines[1].index("OPENED (NEW)") < lines[1].index("RECURRING") < lines[1].index("ARCHIVED")
     assert lines[1].index("ARCHIVED") < lines[1].index("NEW (status)") < lines[1].index("ACTIVE")
     assert "changes applied by this reconciliation" in lines[-1]
+    assert any('Structural closures: 1' in line for line in lines)
 
 
 def test_pending_captures_and_multiple_categories_count_each_occurrence_once(summary_db):

@@ -892,12 +892,19 @@ def test_event_payload_migration_upgrades_an_existing_02_schema(demo):
         "0005_maintenance_log",
         "0006_maintenance_attribution",
         "0007_browse_keyset_index",
+        "0008_canonical_identity_signature",
     }
     control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
     assert (
-        control["schema_version"] == "0007_browse_keyset_index"
+        control["schema_version"] == "0008_canonical_identity_signature"
         and control["setup_status"] == "ready"
     )
+
+
+def test_identity_signature_migration_preserves_continuity_after_interruption(demo):
+    from identity_contract import exercise_identity_migration
+
+    exercise_identity_migration(demo, 'postgres')
 
 
 RETENTION = {"dbt_dqm_retention_days": 30, "dbt_dqm_event_retention_days": 365}
@@ -1001,7 +1008,7 @@ def test_migration_0005_upgrades_a_populated_schema_after_interruption(demo):
     demo.sql(
         "delete from @schema.dqm_schema_migrations "
         "where migration_id in "
-        "('0005_maintenance_log', '0006_maintenance_attribution', '0007_browse_keyset_index')"
+        "('0005_maintenance_log', '0006_maintenance_attribution', '0007_browse_keyset_index', '0008_canonical_identity_signature')"
     )
     demo.sql(
         "update @schema.dqm_reconciliation_control set schema_version='0004_app_staging_safety'"
@@ -1018,7 +1025,7 @@ def test_migration_0005_upgrades_a_populated_schema_after_interruption(demo):
     assert demo.sql("select count(*) n from @schema.dqm_maintenance_log")[0]["n"] == 0
     control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
     assert (
-        control["schema_version"] == "0007_browse_keyset_index"
+        control["schema_version"] == "0008_canonical_identity_signature"
         and control["setup_status"] == "ready"
     )
 
@@ -1253,7 +1260,7 @@ def test_migration_0006_adds_attribution_to_a_populated_log(demo):
     )
     demo.sql(
         "delete from @schema.dqm_schema_migrations "
-        "where migration_id in ('0006_maintenance_attribution', '0007_browse_keyset_index')"
+        "where migration_id in ('0006_maintenance_attribution', '0007_browse_keyset_index', '0008_canonical_identity_signature')"
     )
     demo.sql("update @schema.dqm_reconciliation_control set schema_version='0005_maintenance_log'")
     legacy = _maintenance(demo)
@@ -1285,7 +1292,7 @@ def test_migration_0006_adds_attribution_to_a_populated_log(demo):
     assert len(preserved) == len(legacy)
     assert {row["trigger_kind"] for row in preserved} == {None}
     control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
-    assert control["schema_version"] == "0007_browse_keyset_index"
+    assert control["schema_version"] == "0008_canonical_identity_signature"
 
 
 def test_migration_0007_adds_the_browse_index_after_interruption(demo):
@@ -1301,7 +1308,7 @@ def test_migration_0007_adds_the_browse_index_after_interruption(demo):
     # A 0006 schema.
     demo.sql("drop index @schema.dqm_occurrence_browse_active")
     demo.sql(
-        "delete from @schema.dqm_schema_migrations where migration_id='0007_browse_keyset_index'"
+        "delete from @schema.dqm_schema_migrations where migration_id >= '0007_browse_keyset_index'"
     )
     demo.sql(
         "update @schema.dqm_reconciliation_control set schema_version='0006_maintenance_attribution'"
@@ -1313,7 +1320,7 @@ def test_migration_0007_adds_the_browse_index_after_interruption(demo):
     assert demo.sql(index, [demo.schema])
     assert demo.occurrences() == before
     control = demo.sql("select * from @schema.dqm_reconciliation_control")[0]
-    assert control["schema_version"] == "0007_browse_keyset_index"
+    assert control["schema_version"] == "0008_canonical_identity_signature"
     assert control["setup_status"] == "ready"
     # The app's page query matches the index expressions, so the planner can use it.
     query = page_query("postgres", f'"{demo.schema}".dqm_all_issues', "record_status = 'Active'",

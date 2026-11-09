@@ -64,7 +64,7 @@ def validate(local, path, value):
 
 def test_complete_local_selection_passes(modules, tmp_path):
     local, _ = modules
-    assert len(local.expected_names("bigquery-dbt2")) == 33
+    assert len(local.expected_names("bigquery-dbt2")) == 34
     assert validate(local, tmp_path / "bundle.json", evidence(local))
 
 
@@ -236,7 +236,7 @@ def complete_gate(modules, monkeypatch, tmp_path):
         "repository": local.REPOSITORY, "run_id": "7", "run_attempt": "2", "sha": SHA,
         "tree": TREE, "worktree_dirty": False, "suite": "postgres-full",
         "matrix": {key: entry[key] for key in ("python", "postgres", "engine")},
-        "counts": {"collected": 41, "passed": 41, "failed": 0, "errors": 0, "skipped": 0}}
+        "counts": {"collected": 42, "passed": 42, "failed": 0, "errors": 0, "skipped": 0}}
         for name, entry in gate.ci_validation.warehouse_matrix().items()}
     def warehouse(repository, run, name, tree, *, core=False):
         if core:

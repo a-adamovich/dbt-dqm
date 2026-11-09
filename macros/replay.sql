@@ -348,7 +348,7 @@ transition_events as (
         case when {{ dbt_dqm.uncollated_string('state.identity_scheme_signature') }} is distinct from {{ dbt_dqm.uncollated_string('state.execution_identity_scheme_signature') }}
           then 'CLOSED_STRUCTURAL' else 'DISAPPEARED' end
       when state.is_failing=1 and state.previous_failing=1
-        and {{ dbt_dqm.uncollated_string('state.record_values_json') }} is distinct from {{ dbt_dqm.uncollated_string('state.previous_payload') }} then 'VALUES_CHANGED'
+        and {{ dbt_dqm.payload_changed('state.previous_payload','state.record_values_json') }} then 'VALUES_CHANGED'
       else 'STILL_FAILING' end as event_type,
     state.previous_payload as previous_record_values_json,
     coalesce(state.record_values_json,state.previous_payload) as record_values_json,
@@ -364,7 +364,7 @@ transition_events as (
   where (state.is_failing=1 and state.previous_failing=0)
      or (state.is_failing=0 and state.previous_failing=1)
      or (state.is_failing=1 and state.previous_failing=1 and (
-          ({{ dbt_dqm.uncollated_string('state.record_values_json') }} is distinct from {{ dbt_dqm.uncollated_string('state.previous_payload') }})
+          ({{ dbt_dqm.payload_changed('state.previous_payload','state.record_values_json') }})
           {% if var('dbt_dqm_emit_still_failing_events',false) %}or true{% endif %}))
 ),
 event_changes_full as (
