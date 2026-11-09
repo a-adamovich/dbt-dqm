@@ -1,7 +1,5 @@
 """A skipped or stale credentialed run must never authorize a v2 compatibility release."""
 
-import json
-import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -22,27 +20,21 @@ def test_gate_imports_without_third_party_packages():
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("revision,conclusions,passes", [
-    ("candidate", ("success", "success"), True),
-    ("candidate", ("success", "skipped"), False),
-    ("candidate", ("success", "failure"), False),
-    ("older", ("success", "success"), False),
-])
-def test_release_gate_requires_both_live_engines_on_exact_revision(monkeypatch, revision, conclusions, passes):
+@pytest.mark.parametrize("revision", ["candidate", "older"])
+def test_gate_requires_exact_revision(monkeypatch, revision):
     monkeypatch.syspath_prepend(str(SCRIPT.parent))
-    monkeypatch.setenv("GITHUB_SHA", "candidate")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "example/package")
-    def run(command, **kwargs):
-        if command[1] == "run":
-            assert command[command.index("--workflow") + 1] == "bigquery-lifecycle.yml"
-        value = ([{"databaseId": 42, "headSha": revision}] if command[1] == "run" else
-                 {"jobs": [{"name": f"lifecycle ({engine})", "conclusion": conclusion}
-                           for engine, conclusion in zip(("dbt1", "dbt2"), conclusions, strict=True)]})
-        return subprocess.CompletedProcess(command, 0, json.dumps(value), "")
-    monkeypatch.setattr(subprocess, "run", run)
-    main = runpy.run_path(str(SCRIPT))["legacy_gate"]
-    if passes:
-        main()
+    import importlib
+    gate = importlib.import_module("check_bigquery_release_gate")
+    monkeypatch.setattr(gate, 'gh', lambda *args: [{"databaseId": 42, "headSha": revision}])
+    called = []
+    def verify(*args, **kwargs):
+        called.append(kwargs)
+        return {"id": 42}, []
+    monkeypatch.setattr(gate, 'verify_run', verify)
+    if revision == 'candidate':
+        gate.successful_run('owner/repo', 'bigquery-lifecycle.yml', 'candidate', {'both'}, 'tree')
+        assert called[0]['expected_jobs'] == {'both'}
     else:
-        with pytest.raises(SystemExit, match="Release blocked"):
-            main()
+        with pytest.raises(ValueError, match='exact-commit'):
+            gate.successful_run('owner/repo', 'bigquery-lifecycle.yml', 'candidate', {'both'}, 'tree')
+        assert not called

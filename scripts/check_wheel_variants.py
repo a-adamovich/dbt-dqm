@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("wheel", type=Path)
+    parser.add_argument("--audit-directory", type=Path)
     args = parser.parse_args()
     wheel = args.wheel.resolve()
     uv = shutil.which("uv")
@@ -25,6 +26,10 @@ def main():
             subprocess.run([uv, "pip", "install", "--python", str(python), str(wheel) + extras], check=True)
             subprocess.run([uv, "pip", "check", "--python", str(python)], check=True)
             subprocess.run([str(python), str(smoke), variant], check=True)
+            if args.audit_directory:
+                subprocess.run([sys.executable, str(smoke.with_name("audit_environment.py")),
+                                "--python", str(python), "--scope", "runtime",
+                                "--output", str(args.audit_directory / (variant + ".json"))], check=True)
 
 
 if __name__ == "__main__":

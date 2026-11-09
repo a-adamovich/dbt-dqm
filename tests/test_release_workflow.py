@@ -262,7 +262,10 @@ def test_only_pre_release_tags_create_a_github_pre_release(tmp_path):
     candidate = _create_release(tmp_path, "v0.2.3")
     assert "--prerelease" not in candidate
     assert "--generate-notes" in candidate
-    assert "--generate-notes" in _create_release(tmp_path, "v0.2.4")
+    release = _create_release(tmp_path, "v0.2.4")
+    assert "edit" in release and "--draft=false" in release
+    assert "--notes-file" not in release
+    assert "--generate-notes" in _create_release(tmp_path, "v0.2.5")
 
 
 def test_alpha_version_is_accepted_by_python_and_dbt():
@@ -275,3 +278,31 @@ def test_alpha_version_is_accepted_by_python_and_dbt():
     assert VersionSpecifier.from_version_string("0.2.0-a1").prerelease == "a1"
     # Parsing a version alone is insufficient: dbt validates package project schemas too.
     Project.validate(yaml.safe_load((ROOT / "dbt_project.yml").read_text()))
+
+
+@pytest.mark.parametrize('event,ref,verify,preflight,publishes', [
+    ('push', 'refs/tags/v0.2.4', False, 'skipped', False),
+    ('push', 'refs/tags/v0.2.5', False, 'skipped', False),
+    ('push', 'refs/tags/v0.2.5', False, 'success', True),
+    ('workflow_dispatch', 'refs/heads/main', True, 'success', False),
+    ('workflow_dispatch', 'refs/tags/v0.2.4', False, 'failure', False),
+    ('workflow_dispatch', 'refs/tags/v0.2.4', False, 'success', True),
+    ('workflow_dispatch', 'refs/tags/v0.2.5', False, 'success', False),
+])
+def test_only_attested_release_can_request_publication(event, ref, verify, preflight, publishes):
+    flow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())
+    job = flow['jobs']['release']
+    assert job['needs'] == 'preflight'
+    expression = job['if']
+    for key, value in {'always()': True, 'github.event_name': event, 'github.ref': ref,
+                       'inputs.verify_only': verify, 'needs.preflight.result': preflight}.items():
+        expression = expression.replace(key, repr(value))
+    expression = expression.replace('&&', ' and ').replace('||', ' or ').replace('!', 'not ')
+    expression = expression.replace('not =', '!=')
+    assert bool(eval(expression, {'__builtins__': {}})) is publishes
+    verifier = flow['jobs']['preflight']
+    assert 'environment' not in verifier
+    assert verifier['permissions'] == {'contents': 'read', 'actions': 'read'}
+    assert all('uv publish' not in step.get('run', '') for step in verifier['steps'])
+    retrieval = flow['jobs']['fetch-evidence']
+    assert 'environment' not in retrieval and 'id-token' not in retrieval['permissions']
