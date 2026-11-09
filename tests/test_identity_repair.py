@@ -150,6 +150,8 @@ def test_apply_checks_all_snapshots_in_transaction_and_never_resets_tables():
 def test_preview_is_read_only_and_completed_apply_is_idempotent(incident, tmp_path, monkeypatch, capsys):
     from dbt_dqm_app import config, relations, warehouse
 
+    incident['raw'] = {name: [json.dumps(row) for row in rows]
+                       for name, rows in incident['tables'].items()}
     settings = SimpleNamespace(adapter_type='bigquery')
     monkeypatch.setattr(config, 'load_config', lambda *a, **k: settings)
     monkeypatch.setattr(relations, 'resolve_config', lambda value: value)
@@ -182,3 +184,21 @@ def test_preview_is_read_only_and_completed_apply_is_idempotent(incident, tmp_pa
     with pytest.raises(SystemExit):
         repair.main([*arguments, '--apply', '0' * 64])
     assert client.query.call_count == 3
+
+
+def test_decoded_rows_cannot_disagree_with_the_snapshot_checked_by_sql(incident):
+    incident['raw'] = {name: [json.dumps(row) for row in rows]
+                       for name, rows in incident['tables'].items()}
+    repair.validate_snapshot(incident)
+    incident['tables']['dqm_issue_occurrences'][0]['notes'] = 'not in the original snapshot'
+    with pytest.raises(ValueError, match='Decoded snapshot differs'):
+        repair.validate_snapshot(incident)
+
+
+def test_snapshot_download_stops_before_building_an_oversized_manifest(monkeypatch):
+    client = MagicMock()
+    client.query.return_value.result.return_value = iter([{'raw': 'x' * 100}, {'raw': 'unread'}])
+    monkeypatch.setattr(repair, 'MAX_BYTES', 128)
+    with pytest.raises(ValueError, match='bounded snapshot limit'):
+        repair.read_snapshot(client, lambda name: '`project.dataset.' + name + '`', 'run', 1024 ** 3)
+    assert client.query.call_count == 1

@@ -1,4 +1,4 @@
-"""Verify release evidence; local attestation is restricted to 0.2.4."""
+"""Verify release evidence; local attestation is restricted to 0.2.5."""
 
 import argparse
 import os
@@ -59,7 +59,7 @@ def normal_gate():
 def local_gate(args):
     repository = os.environ["GITHUB_REPOSITORY"]
     if repository != local.REPOSITORY or args.version != local.VERSION:
-        raise ValueError("The local attestation exception is restricted to dbt-dqm 0.2.4")
+        raise ValueError("The local attestation exception is restricted to dbt-dqm 0.2.5")
     if tomllib.loads((local.ROOT / "pyproject.toml").read_text())["project"]["version"] != args.version:
         raise ValueError("The package version does not match the attestation")
     actual = os.environ["GITHUB_SHA"]
@@ -71,9 +71,9 @@ def local_gate(args):
         raise ValueError("The checkout and tested candidate must have identical trees")
     if not args.verify_only:
         if (os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
-                or os.environ.get("GITHUB_REF") != "refs/tags/v0.2.4"
+                or os.environ.get("GITHUB_REF") != "refs/tags/v0.2.5"
                 or not args.attest):
-            raise ValueError("Publication requires explicit manual attestation on v0.2.4")
+            raise ValueError("Publication requires explicit manual attestation on v0.2.5")
         actor = os.environ["GITHUB_ACTOR"]
         permission = gh("api", f"repos/{repository}/collaborators/{actor}/permission")
         if permission.get("permission") != "admin":

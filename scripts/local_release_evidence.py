@@ -18,12 +18,13 @@ from pathlib import Path
 from query_metrics import job_metrics
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.2.4"
+VERSION = "0.2.5"
 REPOSITORY = "a-adamovich/dbt-dqm"
 SUITES = {
     "bigquery-dbt2": ("test_bigquery.py", "2.0.11", 4, 34),
     "bigquery-dbt1": ("test_bigquery.py", "1.12.6", 2, 34),
     "bigquery-permissions": ("test_bigquery_permissions.py", "1.12.6", 0, 1),
+    "bigquery-upgrade": ("test_identity_upgrade.py", "1.12.6", 0, 1),
 }
 MAX_BUNDLE_BYTES = 32 * 1024 * 1024
 
@@ -45,9 +46,12 @@ def installed_environment(python):
         'for d in distributions() if d.metadata["Name"]}}))'))
 
 
-def validate_environments(environments, engine):
-    for scope, package, version in [('app', 'dbt-dqm', VERSION),
-                                    ('engine', 'dbt' if engine == '2.0.11' else 'dbt-core', engine)]:
+def validate_environments(environments, engine, *, upgrade=False):
+    expected = [('app', 'dbt-dqm', VERSION),
+                ('engine', 'dbt' if engine == '2.0.11' else 'dbt-core', engine)]
+    if upgrade:
+        expected += [('upgrade_core', 'dbt-core', '1.12.6'), ('upgrade_v2', 'dbt', '2.0.11')]
+    for scope, package, version in expected:
         item = environments.get(scope, {})
         if (not isinstance(item.get('python'), str) or not item['python'].startswith('3.14.')
                 or item.get('packages', {}).get(package) != version):
@@ -120,7 +124,16 @@ def run_suite(suite, executable, directory):
     engine_python = executable.parent / ('python.exe' if sys.platform == 'win32' else 'python')
     environments = {'app': installed_environment(sys.executable),
                     'engine': installed_environment(engine_python)}
-    validate_environments(environments, engine)
+    upgrade_digest = None
+    if suite == 'bigquery-upgrade':
+        core = Path(os.environ['DBT_DQM_UPGRADE_CORE_EXECUTABLE']).resolve()
+        v2 = Path(os.environ['DBT_DQM_UPGRADE_V2_EXECUTABLE']).resolve()
+        if core != executable or not re.search(r'\bdbt\s+2\.0\.11(?:\s|$)', command(str(v2), '--version')):
+            raise ValueError('Upgrade proof requires the exact Core 1.12.6 and dbt 2.0.11 executables')
+        v2_python = v2.parent / ('python.exe' if sys.platform == 'win32' else 'python')
+        environments.update(upgrade_core=environments['engine'], upgrade_v2=installed_environment(v2_python))
+        upgrade_digest = digest(command('uv', 'pip', 'freeze', '--python', str(v2_python)).encode())
+    validate_environments(environments, engine, upgrade=suite == 'bigquery-upgrade')
     started = datetime.now(UTC)
     validation_id = uuid.uuid4().hex
     directory = directory / (started.strftime("%Y%m%dT%H%M%S") + "-" + suite + "-" + validation_id[:8])
@@ -152,6 +165,8 @@ def run_suite(suite, executable, directory):
                "dependency_digest": digest(command("uv", "pip", "freeze", "--python", sys.executable).encode()),
                "engine_dependency_digest": digest(command("uv", "pip", "freeze", "--python",
                    str(engine_python)).encode())}
+    if upgrade_digest is not None:
+        receipt['upgrade_v2_dependency_digest'] = upgrade_digest
     try:
         if identity() != before:
             raise ValueError("Source changed during acceptance")
@@ -273,7 +288,9 @@ def validate_bundle(path, expected_digest, *, tree, lock_digest, now=None):
             if digest(value["files"][item["name"]].encode()) != item["sha256"]:
                 raise ValueError("Changed evidence attachment")
         if run["status"] == "passed":
-            validate_environments(run.get('environments', {}), SUITES[suite][1])
+            validate_environments(run.get('environments', {}), SUITES[suite][1], upgrade=suite == 'bigquery-upgrade')
+            if suite == 'bigquery-upgrade' and not re.fullmatch(r'[0-9a-f]{64}', run.get('upgrade_v2_dependency_digest', '')):
+                raise ValueError('Upgrade proof lacks the second engine dependency digest')
             counts = report_counts(value["files"][run["files"]["junit.xml"]["name"]], suite)
             if (run.get("returncode") != 0 or counts != run.get("counts")
                     or counts["passed"] != SUITES[suite][3] or "pytest.log" not in run["files"]

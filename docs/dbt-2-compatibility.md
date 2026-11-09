@@ -1,6 +1,6 @@
 # dbt v2 compatibility verification
 
-Version 0.2.4 targets **dbt 2.0.11**, retaining v2 support from 2.0.9 and Core
+Version 0.2.5 targets **dbt 2.0.11**, retaining v2 support from 2.0.9 and Core
 1.11–1.12. Real 2.0.9 and 2.0.11 offline regression checks are required. Full live
 2.0.11/Core 1.12.6 verification is required before publication. The published release
 provides its reports as attachments; historical results below cannot substitute for them.
@@ -21,8 +21,10 @@ not replace the credentialed release gate below.
 
 ## Release gate
 
-Version 0.2.4 requires fresh local 33-case suites on dbt 2.0.11 and Core 1.12.6, the serial
-restricted-permissions test and complete GitHub platform validation. Local results are
+Version 0.2.5 requires fresh local 34-case suites on dbt 2.0.11 and Core 1.12.6, the serial
+restricted-permissions test, a serial cross-engine historical-recovery scenario, and complete
+GitHub platform validation. Identity signature contracts are checked with both real engines,
+including Unicode; migration 0008 is exercised on populated history. Local results are
 maintainer-attested and cannot certify live WIF. See the [current release checklist](release-checklist.md).
 Historical results below cannot substitute for fresh evidence. Native Windows checks cover
 unprivileged project projection and large literal payloads on real engines without warehouse access.
@@ -62,7 +64,7 @@ executes the maintenance steps normally on dbt 2; dbt 1 retains the shortcuts wh
 
 ## Local results
 
-These are historical 2.0.9-era results, not 0.2.4 release evidence.
+These are historical 2.0.9-era results, not 0.2.5 release evidence.
 
 The complete Postgres 16 acceptance suite passed with each v1 engine. After replacing dynamic
 type macro lookups, three affected setup, empty-mode, and migration tests passed again on each.

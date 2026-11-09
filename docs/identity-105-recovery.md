@@ -68,6 +68,8 @@ records in the private manifest. A matching repair audit makes repeated applicat
 
 The per-query byte ceiling defaults to 1 GiB and may be set with `--maximum-bytes-billed`. It is
 not a total budget. No quotas, IAM, keys or shared datasets are changed by this utility.
+Snapshot download and request sizes are bounded separately. An oversized incident is refused
+before writes and requires a separately reviewed recovery approach, rather than automatic batches.
 
 An edited successor, later execution, missing observation, limited capture or ambiguous history
 stops the whole repair. Absence without a successor is not automatically a pass. Genuine new

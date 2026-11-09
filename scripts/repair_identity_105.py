@@ -35,6 +35,14 @@ def digest(value):
     return hashlib.sha256(encoded(value)).hexdigest()
 
 
+def validate_snapshot(snapshot):
+    """The planner's decoded rows must be the exact rows fenced by SQL, not a second input."""
+    tables, raw = snapshot['tables'], snapshot['raw']
+    if set(tables) != set(raw) or any(
+            [json.loads(value) for value in raw[name]] != rows for name, rows in tables.items()):
+        raise ValueError('Decoded snapshot differs from the original warehouse rows')
+
+
 def _one(rows, message):
     if len(rows) != 1:
         raise ValueError(message)
@@ -210,11 +218,16 @@ def read_snapshot(client, table, run_id, maximum_bytes):
     config = bigquery.QueryJobConfig(maximum_bytes_billed=maximum_bytes,
         query_parameters=[bigquery.ScalarQueryParameter('run_id', 'STRING', run_id)])
     tables, raw = {}, {}
+    downloaded_bytes = 0
     for name, predicate in scopes(table).items():
         query = f'select to_json_string(t) as raw from {table(name)} t where {predicate} limit {MAX_ROWS + 1}'
-        values = [r['raw'] for r in client.query(query, job_config=config).result()]
-        if len(values) > MAX_ROWS:
-            raise ValueError('Repair scope exceeds the supported row limit')
+        values = []
+        for row in client.query(query, job_config=config).result():
+            value = row['raw']
+            downloaded_bytes += len(value.encode('utf-8'))
+            if len(values) >= MAX_ROWS or downloaded_bytes > MAX_BYTES // 2:
+                raise ValueError('Repair scope exceeds the bounded snapshot limit')
+            values.append(value)
         raw[name] = sorted(values)
         tables[name] = [json.loads(value) for value in sorted(values)]
     later = client.query(f'select count(*) n from {table("dqm_test_executions")} '
@@ -308,6 +321,7 @@ def main(argv=None):
         if len(data) > MAX_BYTES or hashlib.sha256(data).hexdigest() != args.apply:
             parser.error('Manifest digest mismatch or size limit exceeded')
         bundle = json.loads(data)
+        validate_snapshot(bundle['snapshot'])
         if make_plan(bundle['snapshot']) != bundle['plan'] or bundle['snapshot']['run_id'] != args.run_id:
             parser.error('Repair manifest does not reproduce its plan')
         parameters = [bigquery.ScalarQueryParameter(name, 'STRING', value) for name, value in (
@@ -315,6 +329,10 @@ def main(argv=None):
             ('plan', encoded(bundle['plan']).decode()), ('snapshot', encoded(bundle['snapshot']).decode()))]
         query_config = bigquery.QueryJobConfig(maximum_bytes_billed=args.maximum_bytes_billed,
                                              query_parameters=parameters)
+        # BigQuery has a request-size limit independent of query bytes scanned. Refuse before
+        # any write; larger incidents require a separately reviewed, bounded recovery design.
+        if len(json.dumps(query_config.to_api_repr()).encode()) > 8 * 1024 * 1024:
+            parser.error('Repair request exceeds the bounded utility limit; no changes made')
         completed = list(client.query(f"select count(*) n from {table('dqm_issue_events')} "
             "where event_type='IDENTITY_REPAIRED' and reason=@digest", job_config=query_config).result())
         if completed[0]['n'] == len(bundle['plan']['updates']):
@@ -326,6 +344,7 @@ def main(argv=None):
         print('Repair applied. Originals remain in the private manifest; synchronize reviewer workspaces.')
     else:
         snapshot = read_snapshot(client, table, args.run_id, args.maximum_bytes_billed)
+        validate_snapshot(snapshot)
         bundle = {'snapshot': snapshot, 'plan': make_plan(snapshot)}
         data = encoded(bundle)
         if len(data) > MAX_BYTES:
