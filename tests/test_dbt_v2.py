@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -154,6 +155,9 @@ def test_v2_workflow_compile_does_not_execute_consumer_or_package_global_hooks(p
 
 
 def test_v2_compiles_package_models_without_warehouse_credentials(project):
+    configuration = yaml.safe_load((project / 'dbt_project.yml').read_text())
+    configuration['models'] = {'dbt_dqm': {'+static_analysis': 'strict'}}
+    (project / 'dbt_project.yml').write_text(yaml.safe_dump(configuration))
     events = []
     runner = DbtCLI(executable=EXECUTABLE, callbacks=[events.append])
     arguments = ["compile", "--no-introspect", "--select", "package:dbt_dqm",
@@ -164,6 +168,8 @@ def test_v2_compiles_package_models_without_warehouse_credentials(project):
     errors = [event.info.msg for event in events if event.info.level == "error"]
     assert result.success, result.exception or "\n".join(errors)
     assert result.result.nodes["model.dbt_dqm.dqm_reconcile"].compiled_code
+    warnings = [event.info.msg for event in events if event.info.level in ('warn', 'warning')]
+    assert not any('collate' in warning.lower() for warning in warnings), warnings
 
 
 def test_v2_maintenance_probe_conservatively_runs_steps_without_dispatch_metadata(project):
@@ -239,3 +245,81 @@ def test_v2_dispatches_a_migration_name_supplied_at_runtime(project):
     errors = [event.info.msg for event in events if event.info.level == "error"]
     assert result.success, result.exception or "\n".join(errors)
     assert any(event.info.msg == "DQM_DISPATCH_TEST=ok" for event in events)
+
+
+@pytest.mark.parametrize("engine", ["v2", "core"])
+@pytest.mark.parametrize("deny_links", [False, True])
+def test_v2_project_payload_is_literal_and_not_in_command_line(project, engine, deny_links, monkeypatch):
+    macros = project / 'macros'
+    macros.mkdir()
+    (macros / 'payload_probe.sql').write_text('''{% macro payload_probe() %}
+      {% set payload=fromjson(var('_dbt_dqm_internal_json')) %}
+      {% do log('DQM_PAYLOAD_SIZE=' ~ (payload.value|length), info=true) %}
+      {% do log('DQM_PAYLOAD_PREFIX=' ~ payload.value[:30], info=true) %}
+    {% endmacro %}''')
+    events = []
+    executable = EXECUTABLE if engine == "v2" else shutil.which("dbt")
+    if not executable:
+        pytest.skip("Core engine is not installed in this isolated environment")
+    if deny_links:
+        from dbt_dqm_app import runtime_project
+
+        def denied(*args, **kwargs):
+            error = OSError('symlink privilege denied')
+            error.winerror = 1314
+            raise error
+        monkeypatch.setattr(Path, 'symlink_to', denied)
+        monkeypatch.setattr(runtime_project, 'sys', SimpleNamespace(platform='win32'))
+    runner = DbtCLI(executable=executable, callbacks=[events.append])
+    payload = "{{ env_var('DO_NOT_RENDER') }}" + ('large SQL text ' * 10000)
+    arguments = ['run-operation', 'payload_probe']
+    if engine == 'core':
+        # Core's run-operation opens a connection even for a pure logging macro.
+        # The offline compilation shim exercises the same vars without a warehouse.
+        (project / 'analyses').mkdir()
+        (project / 'analyses/payload_probe.sql').write_text('{{ payload_probe() }} select 1 as id')
+        arguments = ['compile', '--no-introspect', '--select', 'payload_probe']
+    result = runner.invoke([*arguments, '--project-dir', str(project),
+                            '--profiles-dir', str(project), '--target-path', str(project / 'target'),
+                            '--log-path', str(project / 'logs')], project_vars={'value': payload})
+    assert result.success, result.exception
+    messages = '\n'.join(event.info.msg for event in events)
+    assert 'DQM_PAYLOAD_SIZE=' + str(len(payload)) in messages
+    assert "{{ env_var('DO_NOT_RENDER') }}" in messages
+
+
+def test_child_runner_projects_without_symlink_privilege(project, tmp_path):
+    """Inject denial at interpreter startup, across the runner process boundary."""
+    import subprocess
+    import sys
+
+    macros = project / 'macros'
+    macros.mkdir()
+    (macros / 'child_probe.sql').write_text('''{% macro child_probe() %}
+      {% do log('CHILD_PAYLOAD=' ~ fromjson(var('_dbt_dqm_internal_json')).value, info=true) %}
+    {% endmacro %}''')
+    startup = tmp_path / 'startup'
+    startup.mkdir()
+    (startup / 'sitecustomize.py').write_text('''from pathlib import Path
+from types import SimpleNamespace
+from dbt_dqm_app import runtime_project
+def denied(*args, **kwargs):
+    error = OSError('no symlink privilege in child')
+    error.winerror = 1314
+    raise error
+Path.symlink_to = denied
+runtime_project.sys = SimpleNamespace(platform='win32')
+''')
+    script = '''import sys
+from dbt_dqm_app.runner import Workflow
+workflow = Workflow({'project_dir': sys.argv[1], 'profiles_dir': sys.argv[1],
+                     'dbt_executable': sys.argv[2], 'verbose': True})
+workflow.checked(['run-operation', 'child_probe', '--target-path', sys.argv[1] + '/target'],
+                 project_vars={'value': 'projection-ok'})
+'''
+    environment = {**os.environ, 'PYTHONPATH': os.pathsep.join([str(startup), str(ROOT / 'src')])}
+    result = subprocess.run([sys.executable, '-c', script, str(project), EXECUTABLE],
+                            env=environment, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'CHILD_PAYLOAD=projection-ok' in result.stdout
+    assert (project / 'tests/marked.sql').exists()

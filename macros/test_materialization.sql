@@ -31,7 +31,15 @@
   {{ return({'relations':[target_relation]}) }}
 {% endmacro %}
 
-{% macro validate_outputs(test_ids, compiled_queries=none) %}
+{% macro validate_outputs(test_ids=none, compiled_queries=none) %}
+  {% if test_ids is none %}
+    {% set validation=fromjson(var('_dbt_dqm_internal_json', '{}')).get('validation', {}) %}
+    {% if 'test_ids' not in validation or 'compiled_queries' not in validation %}
+      {{ exceptions.raise_compiler_error('DQM validation payload is missing') }}
+    {% endif %}
+    {% set test_ids=validation.get('test_ids', []) %}
+    {% set compiled_queries=validation.get('compiled_queries', {}) %}
+  {% endif %}
   {% set resolved=[] %}
   {% for id in test_ids %}
     {% set node=graph.nodes[id] %}

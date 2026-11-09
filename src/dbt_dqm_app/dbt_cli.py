@@ -22,6 +22,27 @@ from .errors import AppError
 logger = logging.getLogger(__name__)
 
 
+def check_command_size(command, environment, *, windows=None):
+    """Leave headroom for dbt's executable trampoline and platform quoting."""
+    windows = sys.platform == 'win32' if windows is None else windows
+    message = ('The dbt command exceeds the platform argument-size limit. '
+               'Narrow --select or shorten user-supplied variables and paths.')
+    if windows:
+        size = len(subprocess.list2cmdline(command).encode('utf-16-le')) // 2 + 1
+        if size > 24000:
+            raise AppError(message)
+    else:
+        encoded = [os.fsencode(value) for value in command]
+        env = [os.fsencode(key + '=' + value) for key, value in environment.items()]
+        # Linux limits each argument and environment string separately, too.
+        if sys.platform.startswith('linux') and any(len(value) + 1 > 96 * 1024
+                                                  for value in [*encoded, *env]):
+            raise AppError(message)
+        maximum = os.sysconf('SC_ARG_MAX')
+        if sum(len(value) + 1 for value in [*encoded, *env]) + 8192 > maximum:
+            raise AppError(message)
+
+
 class Record(dict):
     """Attribute access to serialized dbt records, without importing engine internals."""
 
@@ -168,7 +189,7 @@ class DbtCLI:
             callback(event)
         return event
 
-    def invoke(self, arguments, *, vars=None):
+    def invoke(self, arguments, *, vars=None, project_vars=None):
         arguments = list(arguments)
         command = arguments[0]
         if vars is not None:
@@ -178,6 +199,8 @@ class DbtCLI:
             arguments += ["--vars", yaml.safe_dump(vars)]
         variables = (yaml.safe_load(arguments[arguments.index("--vars") + 1]) or {}
                      if "--vars" in arguments else {})
+        if project_vars and '_dbt_dqm_internal_json' in variables:
+            raise AppError('Remove the reserved _dbt_dqm_internal_json CLI variable.')
         # Capture debug events for query/job metrics; only the workflow's filtered output
         # reaches the terminal unless --verbose was requested.
         arguments += ["--log-format", "json", "--log-level", "debug", "--write-json"]
@@ -222,7 +245,7 @@ class DbtCLI:
                     executable = [str(interpreter), str(Path(__file__).with_name("dbt1_entrypoint.py"))]
             projection = nullcontext(None)
             compile_projection = command == "compile" and self.is_v2 and variables.get("_dbt_dqm_workflow")
-            if (command == "test" and variables.get("_dbt_dqm_workflow")) or compile_projection:
+            if (command == "test" and variables.get("_dbt_dqm_workflow")) or compile_projection or project_vars:
                 from .config import _render, resolve_profiles_dir, resolve_project_dir
                 from .runtime_project import test_project
 
@@ -237,7 +260,8 @@ class DbtCLI:
                     log_path = _render(configuration.get("log-path", "logs"), variables)
                     arguments += ["--log-path", str((project / log_path).resolve())]
                 projection = test_project(project, variables, compile_only=compile_projection,
-                                          packages_install_path=environment.get("DBT_PACKAGES_INSTALL_PATH"))
+                                          packages_install_path=environment.get("DBT_PACKAGES_INSTALL_PATH"),
+                                          project_vars=project_vars)
             with projection as runtime_project:
                 if runtime_project is not None:
                     if compile_projection and environment.get("DBT_PACKAGES_INSTALL_PATH"):
@@ -253,6 +277,7 @@ class DbtCLI:
                     for key in ("DBT_STATE", "DBT_DEFER_STATE", "DBT_LOG_PATH"):
                         if environment.get(key):
                             environment[key] = str((project / environment[key]).resolve())
+                check_command_size([*executable, *arguments], environment)
                 process = subprocess.run([*executable, *arguments], capture_output=True, text=True,
                                          encoding="utf-8", errors="replace", check=False,
                                          cwd=self.cwd, env=environment)

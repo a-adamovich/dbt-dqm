@@ -160,7 +160,7 @@ def test_supported_engines_and_warehouses(engine, monkeypatch, version, adapter,
 
 def test_explicit_executable_precedes_environment_and_does_not_silently_fall_back(monkeypatch):
     monkeypatch.setenv("DBT_DQM_DBT_EXECUTABLE", "/environment/dbt")
-    monkeypatch.setattr(dbt_cli.shutil, "which", lambda name, **kwargs: name if name != "/missing/dbt" else None)
+    monkeypatch.setattr(dbt_cli.shutil, "which", lambda name, **kwargs: name if Path(name) != Path("/missing/dbt") else None)
     assert dbt_cli.resolve_dbt_executable("/explicit/dbt") == str(Path("/explicit/dbt").resolve())
     assert dbt_cli.resolve_dbt_executable() == str(Path("/environment/dbt").resolve())
     with pytest.raises(AppError, match="selected dbt executable"):
@@ -238,3 +238,13 @@ def test_capability_probe_is_cached_and_errors_are_explicit(monkeypatch):
             dbt_cli.command_flags("/broken/dbt", "test")
     finally:
         dbt_cli.command_flags.cache_clear()
+
+
+def test_windows_command_budget_counts_quoted_utf16_without_exposing_payload():
+    from dbt_dqm_app.dbt_cli import check_command_size
+    from dbt_dqm_app.errors import AppError
+
+    check_command_size(['dbt', 'run-operation', 'macro'], {}, windows=True)
+    with pytest.raises(AppError, match='argument-size') as error:
+        check_command_size(['dbt', '--vars', 'private-é😀' * 4000], {}, windows=True)
+    assert 'private' not in str(error.value)

@@ -1,6 +1,7 @@
 """The explicit materialization override must not modify consumer files or resource paths."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 
@@ -82,3 +83,47 @@ def test_projection_preserves_other_macros_when_consumer_overrides_native_test(t
         assert "{% macro another_macro() %}" in source
         assert (runtime / paths[-1] / "test.sql").exists()
         assert (macros / "test.sql").read_text() == original
+
+
+def test_windows_projection_copies_without_privilege_and_keeps_originals(tmp_path, monkeypatch):
+    import json
+
+    from dbt_dqm_app import runtime_project
+
+    project = tmp_path / 'consumer unicode é'
+    package = project / 'dbt_packages/dependency'
+    (package / 'macros').mkdir(parents=True)
+    (package / 'dbt_project.yml').write_text('name: dependency\non-run-start: [select 1]\n')
+    (project / 'dbt_project.yml').write_text('name: consumer\nvars: {user_value: kept}\n')
+    (project / 'models').mkdir()
+    original = "select '{{ literal }}' as id"
+    (project / 'models/example.sql').write_text(original)
+    def denied(*args, **kwargs):
+        error = OSError('symlink denied')
+        error.winerror = 1314
+        raise error
+    monkeypatch.setattr(Path, 'symlink_to', denied)
+    monkeypatch.setattr(runtime_project, 'sys', SimpleNamespace(platform='win32'))
+    payload = {'validation': {'compiled_queries': {'test.large': original * 20000}}}
+    for compile_only in (False, True):
+        with projected_project(project, {}, compile_only=compile_only, project_vars=payload) as root:
+            config = yaml.safe_load((root / 'dbt_project.yml').read_text())
+            assert config['vars']['user_value'] == 'kept'
+            assert '{{' not in config['vars']['_dbt_dqm_internal_json']
+            assert json.loads(config['vars']['_dbt_dqm_internal_json']) == payload
+            assert (root / 'models/example.sql').read_text() == original
+        assert not root.exists()
+        assert (project / 'models/example.sql').read_text() == original
+        assert (package / 'dbt_project.yml').exists()
+
+
+def test_projection_does_not_hide_unrelated_filesystem_errors(tmp_path, monkeypatch):
+    import pytest
+
+    from dbt_dqm_app.runtime_project import _project_path
+
+    def denied(*args, **kwargs):
+        raise PermissionError('unrelated permission failure')
+    monkeypatch.setattr(Path, 'symlink_to', denied)
+    with pytest.raises(PermissionError, match='unrelated'):
+        _project_path(tmp_path / 'source', tmp_path / 'destination')
