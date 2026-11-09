@@ -1,6 +1,6 @@
 [project]
 name = "dbt-dqm"
-version = "0.2.3"
+version = "0.2.4"
 description = "Persistent dbt test issue tracking and a local review application"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
@@ -30,7 +30,7 @@ dependencies = [
   "platformdirs>=4,<5",
   "pyarrow>=25.0.1,<26",
   "pyyaml>=6,<7",
-  "sqlparse>=0.6.0,<0.7",  # five advisories fixed in 0.6.0; dbt-core 1.12.5 allows <0.7
+  "sqlparse>=0.6.0,<0.7",  # five advisories fixed in 0.6.0; dbt-core 1.12.6 allows <0.7
   "streamlit>=1.52,<2",
   "XlsxWriter>=3.2,<4",
   "urllib3>=2.8.0,<3",  # three advisories fixed in 2.8.0

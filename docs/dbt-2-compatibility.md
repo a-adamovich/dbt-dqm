@@ -1,13 +1,13 @@
 # dbt v2 compatibility verification
 
-The current candidate targets **dbt 2.0.11**, retaining v2 support from 2.0.9 and Core
+Version 0.2.4 targets **dbt 2.0.11**, retaining v2 support from 2.0.9 and Core
 1.11–1.12. Real 2.0.9 and 2.0.11 offline regression checks are required. Full live
 2.0.11/Core 1.12.6 verification is required before publication. The published release
 provides its reports as attachments; historical results below cannot substitute for them.
 
 ## Historical 2.0.9 verification
 
-The 0.2.2 candidate uses an installed dbt executable and serialized artifacts instead of
+The historical 0.2.2 candidate used an installed dbt executable and serialized artifacts instead of
 in-memory manifest mutation. The package version constraint permits v2 for testing; it does
 not replace the credentialed release gate below.
 
@@ -21,10 +21,11 @@ not replace the credentialed release gate below.
 
 ## Release gate
 
-For the unpublished **0.2.2** candidate, the maintainer approved complete local BigQuery acceptance on dbt 2.0.11
-and Core 1.12.6 using existing credentials, followed by the serial restricted runner/reviewer
-check. The 33-case selections, reports, failures/reruns and identical source tree are recorded.
-The 0.2.3 release used maintainer-attested BigQuery evidence. Future releases require the credentialed gate and its planned evidence improvements.
+Version 0.2.4 requires fresh local 33-case suites on dbt 2.0.11 and Core 1.12.6, the serial
+restricted-permissions test and complete GitHub platform validation. Local results are
+maintainer-attested and cannot certify live WIF. See the [current release checklist](release-checklist.md).
+Historical results below cannot substitute for fresh evidence. Native Windows checks cover
+unprivileged project projection and large literal payloads on real engines without warehouse access.
 
 ## Offline and local checks
 
@@ -42,9 +43,12 @@ opening an unused lazy connection on close. It does not inject manifests or regi
 
 dbt requires a builtin test materialization override in the root project. For the dedicated
 test phase, dbt-dqm creates a temporary project with the same name and relative source paths,
-symlinks the consumer sources and installed packages, and adds a root forwarding macro. Test
+links the consumer sources and installed packages, using private copies when Windows denies
+symlinks, and adds a root forwarding macro. Test
 identities and selection stay stable, and original source/config files are never edited.
 Artifacts and state paths remain absolute and resolve against the original project.
+Internal SQL, result payloads and column maps are literal JSON in temporary project variables;
+they do not consume command-line space or depend on a later compiled graph.
 For v2 preflight compilation, a separate temporary view omits consumer and dependency global
 hooks so compilation cannot execute them before validation and refresh confirmation.
 
@@ -57,6 +61,8 @@ macros have been overridden. When maintenance shortcuts are enabled, dbt-dqm the
 executes the maintenance steps normally on dbt 2; dbt 1 retains the shortcuts when safe.
 
 ## Local results
+
+These are historical 2.0.9-era results, not 0.2.4 release evidence.
 
 The complete Postgres 16 acceptance suite passed with each v1 engine. After replacing dynamic
 type macro lookups, three affected setup, empty-mode, and migration tests passed again on each.

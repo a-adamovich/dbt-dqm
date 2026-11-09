@@ -42,7 +42,7 @@ unexpected skips, duplicate reports, or fewer than 41 passing warehouse cases fa
 Reports are retained for 30 days; this is retention, not permission to reuse them for release.
 
 Stage 1 certifies **Postgres and platforms only**. A passing result does not replace the
-BigQuery release gate. The retired local-attestation exception is not available for future releases. The maintainer must configure `required` as a required status and require up-to-date PRs;
+BigQuery release gate. Version 0.2.4 has a separately scoped, fresh local-evidence exception; older reports cannot satisfy it. The maintainer must configure `required` as a required status and require up-to-date PRs;
 adding a workflow alone does not enforce branch protection.
 
 ## Measurement record
@@ -58,7 +58,7 @@ evidence. Record suite, engine, worker count, elapsed time, result, and source r
 | Required Postgres core, local Python 3.11 | Core 1.12.5 / Postgres 16 | 4 | 184.53 s | Exactly 8 passed, no skips; Stage 1 worktree |
 | Real dbt 2 offline smoke, local Python 3.11 | dbt 2.0.9 / no warehouse access | 1 | 6.82 s | Exactly 11 passed, no skips; Stage 1 worktree |
 
-The 0.2.2 local receipt helper measures billed bytes and slot milliseconds after each approved
+The 0.2.4 local receipt helper measures billed bytes and slot milliseconds after each approved
 suite, excluding parent `SCRIPT` rows. It separates labelled queries (including children) from
 unlabelled queries referencing the test datasets; shared-QA activity may include other users.
 Missing metadata permissions are reported as unavailable, never as zero usage. No GCP roles or
@@ -66,6 +66,18 @@ quotas are changed. Do not infer cost from fixture size or elapsed time.
 
 Acceptance fixture clients and dbt profiles request a per-query limit of 1 GiB by default,
 configurable with `DBT_DQM_BIGQUERY_MAX_BYTES_BILLED`. Real 2.0.9 and 2.0.11 offline checks
-accept the profile/label configuration. Runtime propagation must be checked during live validation.
+accept the profile/label configuration. dbt 2.0.11 did not enforce this profile limit on previously tested paths. Treat it as configured, not guaranteed; record fresh observations during live validation.
 App search retains its own configured limit; other app queries and the restricted-permissions
 fixture are not covered by this test cap. This is not a total-suite spending ceiling.
+
+## 0.2.4 development measurements
+
+| Check | Environment | Result | Duration |
+| --- | --- | --- | --- |
+| Postgres core | Core 1.12.6 / disposable Postgres 16, Python 3.11, four workers | 8 passed | 187.99 s |
+| Required CI Postgres core | Core 1.12.6 / Postgres 16, Python 3.14, run 42539282721 | 8 passed | 7m58s job time |
+| Native Windows portability | Windows / Python 3.11, same run | Passed, including real engines and startup-injected symlink denial | 4m00s job time |
+
+The first local Postgres attempt failed because pgcrypto was missing. Its output is retained;
+the extension was installed in the disposable database before the successful rerun.
+Development checks are not final-candidate BigQuery runtime evidence.

@@ -2,6 +2,7 @@
 
 import copy
 import importlib
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -71,5 +72,18 @@ def test_artifact_binding_rejects_stale_or_ambiguous_metadata(modules, monkeypat
     monkeypatch.setattr(gate, "gh", lambda *args: [{"artifacts": artifacts}])
     with pytest.raises(ValueError):
         gate.artifact_files(local.REPOSITORY, run, "warehouse-core-acceptance")
+
+
+def test_warehouse_checkout_must_match_run_sha_even_with_identical_tree(modules, monkeypatch):
+    local, gate = modules
+    record = {"schema_version": 1, "scope": "postgres-and-platform",
+              "repository": local.REPOSITORY, "worktree_dirty": False,
+              "run_id": "7", "run_attempt": "2", "sha": "c" * 40, "tree": TREE}
+    monkeypatch.setattr(gate, "artifact_files", lambda *args: {
+        "evidence.json": json.dumps(record), "junit.xml": "<testsuite/>"})
+    monkeypatch.setattr(gate, "commit_tree", lambda *args: TREE)
+    with pytest.raises(ValueError, match="checkout"):
+        gate.warehouse_report(local.REPOSITORY, {"id": 7, "run_attempt": 2, "head_sha": SHA},
+                              "warehouse-core-acceptance", TREE, core=True)
 
 

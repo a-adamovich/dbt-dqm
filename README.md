@@ -17,35 +17,34 @@ for DQM, captures their results, and updates the issue history.
 
 Start with an existing dbt project, a configured profile, and a supported warehouse adapter.
 dbt-dqm has **two installations**: the dbt package supplies warehouse models and macros; the
-Python package supplies the `dbt-dqm` command and local review app. Use matching `0.2.3`
-versions. Publication requires credentialed BigQuery verification on dbt 2.0.11 and Core
-1.12.6; the release includes maintainer-attested reports. The examples below install a local
-checkout, which is also useful when developing or validating a release.
+Python package supplies the `dbt-dqm` command and local review app. Use matching `0.2.4`
+versions. See the compatibility record below for tested engines and warehouses.
+The examples below install the published release. A local checkout can also be used for development.
 
 1. Add the dbt package to your project's `packages.yml`, then install it:
 
    ```yaml
    packages:
-     - local: /path/to/dbt-dqm
+     - git: https://github.com/a-adamovich/dbt-dqm.git
+       revision: v0.2.4
    ```
 
    ```bash
    dbt deps
    ```
 
-   After publication, use Git revision `v0.2.3` or the verified Hub listing.
-   [Hub registration](https://github.com/dbt-labs/hubcap/pull/464) is pending.
+   For development, replace the Git entry with `local: /path/to/dbt-dqm`.
 
-2. From this checkout, install your dbt engine separately, then install the command and
-   warehouse client used by the review app:
+2. Choose one engine/warehouse option in a Python environment, then install the command
+   and its warehouse client separately:
 
    ```bash
    # BigQuery with dbt v2
    python -m pip install 'dbt==2.0.11'
-   python -m pip install -e '.[bigquery]'
+   python -m pip install 'dbt-dqm[bigquery]==0.2.4'
    # Postgres with dbt v1
    python -m pip install 'dbt-core==1.12.6' 'dbt-postgres==1.11.0'
-   python -m pip install -e '.[postgres]'
+   python -m pip install 'dbt-dqm[postgres]==0.2.4'
    ```
 
    The Python command supports Python 3.11–3.14. dbt Core 1.11–1.12 supports both
@@ -117,8 +116,8 @@ for its controls and limits.
   maintenance, resets, upgrades, and troubleshooting.
 - [Try the demo projects](docs/operations.md#demo-projects) or inspect the
   [warehouse contract](docs/warehouse-interfaces.md) and [scale measurements](docs/scale.md).
-- [0.2.3 candidate notes](docs/release-notes-0.2.3.md) and [compatibility verification](docs/dbt-2-compatibility.md).
-- [Stable 0.2.1 release notes](docs/release-notes-0.2.1.md) and
+- [0.2.4 release notes](docs/release-notes-0.2.4.md) and [compatibility verification](docs/dbt-2-compatibility.md).
+- [Historical 0.2.1 release notes](docs/release-notes-0.2.1.md) and
   [verification record](docs/release-0.2.1.md).
 
 dbt-dqm is Apache-2.0 open source. See the [roadmap](docs/roadmap.md) and [license](LICENSE.md).
