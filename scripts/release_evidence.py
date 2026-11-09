@@ -75,7 +75,7 @@ def verify_run(repository, run_id, *, workflow, expected_jobs, tree, now=None):
             or run.get("workflow_id") != reference["id"]
             or run.get("path", "").split("@")[0] != ".github/workflows/" + workflow
             or run.get("status") != "completed" or run.get("conclusion") != "success"
-            or run.get("event") not in ({"workflow_dispatch"} if workflow == "full-validation.yml"
+            or run.get("event") not in ({"workflow_dispatch"} if workflow in {"full-validation.yml", "bigquery-lifecycle.yml"}
                                        else {"pull_request", "push"})
             or commit_tree(repository, run["head_sha"]) != tree):
         raise ValueError("Wrong, incomplete or unsuccessful validation run")
@@ -157,3 +157,40 @@ def warehouse_report(repository, run, name, tree, *, core=False):
     return record
 
 
+
+
+def bigquery_report(repository, run, name, tree, engine, *, permissions=False):
+    """Require fresh, same-attempt evidence and every BigQuery acceptance case."""
+    files = artifact_files(repository, run, name)
+    records = [json.loads(value) for path, value in files.items() if Path(path).name == "evidence.json"]
+    reports = [value for path, value in files.items() if Path(path).name == "junit.xml"]
+    if len(records) != 1 or len(reports) != 1 or engine not in {"dbt1", "dbt2"}:
+        raise ValueError("Missing BigQuery evidence or JUnit report")
+    record = records[0]
+    version = {"dbt1": "1.12.6", "dbt2": "2.0.11"}[engine]
+    suite = 'bigquery-permissions' if permissions else 'bigquery-full'
+    filename = 'test_bigquery_permissions.py' if permissions else 'test_bigquery.py'
+    count = 1 if permissions else 33
+    if permissions and engine != 'dbt1':
+        raise ValueError('Restricted permissions requires the Core engine')
+    if (record.get("schema_version") != 1 or record.get("scope") != "bigquery"
+            or record.get("suite") != suite or record.get("repository") != repository
+            or record.get("run_id") != str(run["id"])
+            or record.get("run_attempt") != str(run["run_attempt"])
+            or record.get("sha") != run["head_sha"] or record.get("tree") != tree
+            or record.get("worktree_dirty") is not False
+            or record.get("matrix") != {"engine": engine, "version": version}
+            or record.get("installed", {}).get("dbt") != version
+            or not re.fullmatch(r"[0-9a-f]{64}", record.get("dependency_digest", ""))
+            or commit_tree(repository, record["sha"]) != tree):
+        raise ValueError("Mismatched BigQuery evidence")
+    cases = list(ET.fromstring(reports[0]).iter("testcase"))
+    names = [case.attrib["name"] for case in cases]
+    if (len(names) != count or len(set(names)) != count or set(names) != source_names(filename)
+            or any(case.attrib.get("classname", "").split(".")[-1] != filename[:-3] for case in cases)
+            or any(any(case.find(tag) is not None for tag in ("failure", "error", "skipped"))
+                   for case in cases)
+            or record.get("counts") != {"collected": count, "passed": count, "failed": 0,
+                                        "errors": 0, "skipped": 0}):
+        raise ValueError("Incomplete BigQuery test selection")
+    return record

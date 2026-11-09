@@ -9,7 +9,6 @@ on:
 permissions:
   contents: read
   id-token: write
-  issues: write
 
 jobs:
   lifecycle:
@@ -45,8 +44,10 @@ jobs:
             uv venv /tmp/dbt-dqm-v2-engine --python 3.14
             uv pip install --python /tmp/dbt-dqm-v2-engine/bin/python dbt==2.0.11
             echo "DBT_DQM_DBT_EXECUTABLE=/tmp/dbt-dqm-v2-engine/bin/dbt" >> "$GITHUB_ENV"
+            echo "DBT_DQM_ENGINE_PYTHON=/tmp/dbt-dqm-v2-engine/bin/python" >> "$GITHUB_ENV"
           else
             echo "DBT_DQM_DBT_EXECUTABLE=$GITHUB_WORKSPACE/.venv/bin/dbt" >> "$GITHUB_ENV"
+            echo "DBT_DQM_ENGINE_PYTHON=$GITHUB_WORKSPACE/.venv/bin/python" >> "$GITHUB_ENV"
           fi
       - name: Write profile (Application Default Credentials from the step above)
         run: |
@@ -96,7 +97,12 @@ jobs:
           mkdir -p acceptance-results
           set -o pipefail
           uv run --group dbt1 pytest -q -rA -n 6 --dist load integration_tests/acceptance/test_bigquery.py \
-            --junitxml=acceptance-results/bigquery.xml 2>&1 | tee acceptance-results/bigquery.log
+            --junitxml=acceptance-results/junit.xml 2>&1 | tee acceptance-results/bigquery.log
+      - name: Record complete acceptance evidence
+        run: |
+          uv run --group dbt1 python scripts/bigquery_evidence.py --junit acceptance-results/junit.xml \
+            --output acceptance-results/evidence.json --engine "${{ matrix.engine }}" \
+            --executable "$DBT_DQM_DBT_EXECUTABLE"
       - name: Sweep stale acceptance datasets
         if: always()
         run: uv run --group dbt1 python integration_tests/acceptance/bigquery_datasets.py --project "$DBT_DQM_BIGQUERY_PROJECT" --older-than-hours 6
@@ -107,17 +113,3 @@ jobs:
           name: scheduled-bigquery-${{ matrix.engine }}-results
           path: acceptance-results/
           if-no-files-found: ignore
-      - name: Report failure in an issue
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          gh label create scheduled-bigquery --color B60205 --description "Scheduled BigQuery verification" 2>/dev/null || true
-          existing="$(gh issue list --label scheduled-bigquery --state open --json number --jq '.[0].number')"
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body "Scheduled BigQuery ${{ matrix.engine }} verification failed again: $RUN_URL"
-          else
-            gh issue create --label scheduled-bigquery --title "Scheduled BigQuery verification failed" \
-              --body "The credentialed BigQuery run failed on \`main\`: $RUN_URL"
-          fi
