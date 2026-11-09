@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
+import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -13,6 +15,23 @@ import yaml
 _ROOT_TEST_MATERIALIZATION = re.compile(
     r"\{%-?\s*materialization\s+test(?:\s*,[^%]*)?\s*-?%\}.*?"
     r"\{%-?\s*endmaterialization\s*-?%\}", re.DOTALL)
+
+
+def _project_path(source: Path, destination: Path):
+    """Link sources where possible; unprivileged Windows users get private copies."""
+    try:
+        destination.symlink_to(source, target_is_directory=source.is_dir())
+    except OSError as error:
+        if sys.platform != 'win32' or getattr(error, 'winerror', None) != 1314:
+            raise
+        try:
+            if source.is_dir():
+                shutil.copytree(source, destination, symlinks=False)
+            else:
+                shutil.copy2(source, destination)
+        except (OSError, shutil.Error) as copy_error:
+            raise ValueError('DQM could not copy a project resource into its temporary '
+                             'project. Check for inaccessible or cyclic links.') from copy_error
 
 
 def _hide_root_test_materializations(original, root, paths):
@@ -35,7 +54,7 @@ def _hide_root_test_materializations(original, root, paths):
             raise ValueError("A root test materialization in macro-path '.' cannot be isolated; "
                              "place root macros in a dedicated macro directory.")
         clone = Path(tempfile.mkdtemp(prefix="__dbt_dqm_consumer_macros_", dir=root))
-        shutil.copytree(source, clone, dirs_exist_ok=True, symlinks=True)
+        shutil.copytree(source, clone, dirs_exist_ok=True, symlinks=False)
         for relative, text in modified.items():
             destination = clone / relative
             destination.unlink()
@@ -45,7 +64,8 @@ def _hide_root_test_materializations(original, root, paths):
 
 
 @contextmanager
-def test_project(project_dir, variables, *, compile_only=False, packages_install_path=None):
+def test_project(project_dir, variables, *, compile_only=False, packages_install_path=None,
+                 project_vars=None):
     """dbt requires builtin materialization overrides to belong to the root project.
 
     Keep the same project name and relative source paths (hence test identities/FQNs).
@@ -59,11 +79,16 @@ def test_project(project_dir, variables, *, compile_only=False, packages_install
     with tempfile.TemporaryDirectory(prefix="dbt-dqm-test-project-") as directory:
         root = Path(directory)
         project = yaml.safe_load((original / "dbt_project.yml").read_text(encoding="utf-8"))
+        if project_vars:
+            # Escape Jinja delimiters inside JSON strings so dbt cannot render payload SQL.
+            payload = json.dumps(project_vars, ensure_ascii=True).replace(
+                '{{', r'\u007b\u007b').replace('{%', r'\u007b%').replace('{#', r'\u007b#')
+            project.setdefault('vars', {})['_dbt_dqm_internal_json'] = payload
         manifests = {"packages.yml", "dependencies.yml", "package-lock.yml"}
         for source in original.iterdir():
             if source.name in {"dbt_project.yml", ".git", ".venv", "target", "logs", *manifests}:
                 continue
-            (root / source.name).symlink_to(source, target_is_directory=source.is_dir())
+            _project_path(source, root / source.name)
         # A local package declaration is relative to the real project, not this projection.
         for name in manifests:
             source = original / name
@@ -95,13 +120,13 @@ def test_project(project_dir, variables, *, compile_only=False, packages_install
                 for source in installed.iterdir():
                     package_config = source / "dbt_project.yml"
                     if not source.is_dir() or not package_config.is_file():
-                        (packages / source.name).symlink_to(source, target_is_directory=source.is_dir())
+                        _project_path(source, packages / source.name)
                         continue
                     destination = packages / source.name
                     destination.mkdir()
                     for child in source.iterdir():
                         if child.name != "dbt_project.yml":
-                            (destination / child.name).symlink_to(child, target_is_directory=child.is_dir())
+                            _project_path(child, destination / child.name)
                     config = yaml.safe_load(package_config.read_text(encoding="utf-8"))
                     config.pop("on-run-start", None)
                     config.pop("on-run-end", None)

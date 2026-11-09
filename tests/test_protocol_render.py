@@ -611,16 +611,16 @@ def test_collation_primitives_and_tracking_ddl(protocol_project, monkeypatch, ad
         path.write_text(yaml.safe_dump(profile))
     try:
         expression = render(protocol_project, monkeypatch, 'uncollated_string', "'a.value'")
-        assert expression.strip() == ("collate(a.value, '')" if adapter == 'bigquery' else 'a.value')
+        assert expression.strip() == ("`collate`(a.value, '')" if adapter == 'bigquery' else 'a.value')
         ddl = render(protocol_project, monkeypatch, 'capture_tables_ddl')
         history = render(protocol_project, monkeypatch, 'issues_with_history')
         replay = render(protocol_project, monkeypatch, 'reconcile_change_set_sql', "'test-run'")
         if adapter == 'bigquery':
             assert ddl.count("default collate ''") == 9
-            assert "collate(cur.identity_scheme_signature, '') is not distinct from collate(prev.identity_scheme_signature, '')" in history
-            assert "collate(state.record_values_json, '') is distinct from collate(state.previous_payload, '')" in replay
+            assert "`collate`(cur.identity_scheme_signature, '') is not distinct from `collate`(prev.identity_scheme_signature, '')" in history
+            assert "`collate`(state.record_values_json, '') is distinct from `collate`(state.previous_payload, '')" in replay
         else:
-            assert 'collate(' not in history + replay and 'default collate' not in ddl
+            assert '`collate`(' not in history + replay and 'default collate' not in ddl
             assert 'primary key' in ddl
     finally:
         path.write_text(original)
@@ -629,6 +629,6 @@ def test_collation_primitives_and_tracking_ddl(protocol_project, monkeypatch, ad
 def test_collation_catalog_check_uses_only_resolved_tracking_tables(protocol_project, monkeypatch):
     sql = render(protocol_project, monkeypatch, 'bigquery_collation_check_sql')
     assert "collation_name not in ('', 'NULL')" in sql
-    assert "collate(table_name, '') in (" in sql
+    assert "`collate`(table_name, '') in (" in sql
     assert 'dqm_annotation_changes' in sql and 'dqm_install' in sql
     assert 'like' not in sql.lower()

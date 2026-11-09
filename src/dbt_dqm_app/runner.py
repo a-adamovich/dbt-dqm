@@ -345,9 +345,9 @@ class Workflow:
                        for node in nodes}
             if isinstance(self.runner, DbtCLI) and any(not query for query in queries.values()):
                 raise RuntimeError("dbt did not produce compiled SQL for every selected DQM test")
-            self.checked(["run-operation", "dbt_dqm.validate_outputs", "--args",
-                          json.dumps({"test_ids": [node.unique_id for node in nodes],
-                                      "compiled_queries": queries})])
+            self.checked(["run-operation", "dbt_dqm.validate_outputs"], project_vars={
+                "validation": {"test_ids": [node.unique_id for node in nodes],
+                               "compiled_queries": queries}})
         if self.request.get("full_refresh"):
             from .refresh import confirm_refresh, full_refresh
 
@@ -369,7 +369,7 @@ class Workflow:
             arguments = ["test", "--select", *selectors]
             if self.request.get("threads") is not None:
                 arguments += ["--threads", str(self.request["threads"])]
-            tests = self.invoke(arguments, vars={**self.variables, "_dbt_dqm_output_columns": {
+            tests = self.invoke(arguments, project_vars={"output_columns": {
                 row["unique_id"]: row["columns"] for row in self.columns}})
             if tests.result is None:
                 raise RuntimeError(f"DQM test execution failed: {self.failure_reason(tests)}")
@@ -391,7 +391,8 @@ class Workflow:
                 {"unique_id": r.node.unique_id, "status": str(r.status), "failures": r.failures,
                  "execution_time": r.execution_time, "message": r.message} for r in results]}
             try:
-                self.checked(["run-operation", "dbt_dqm.collect_results", "--args", json.dumps({"payload": payload})])
+                self.checked(["run-operation", "dbt_dqm.collect_results"],
+                             project_vars={"collection": payload})
             except RuntimeError as error:
                 # Earlier tests can already have committed evidence. Reconcile those commits;
                 # pending/error executions remain unusable and never imply resolution.

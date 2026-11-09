@@ -232,7 +232,7 @@
     select table_name,column_name from `{{ dataset }}.INFORMATION_SCHEMA.COLUMNS`
     {# The catalog can report the literal string 'NULL' for an uncollated column. #}
     where collation_name is not null and collation_name not in ('', 'NULL')
-      and collate(table_name, '') in ({{ names|join(',') }})
+      and `collate`(table_name, '') in ({{ names|join(',') }})
   {% endfor %}
   {% if not included.count %}select cast(null as string) as table_name,cast(null as string) as column_name where false{% endif %}
 {% endmacro %}

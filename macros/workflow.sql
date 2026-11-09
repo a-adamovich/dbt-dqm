@@ -17,7 +17,8 @@
   {% endif %}
   {% set budget = limit if limit is not none else dbt_dqm.positive_integer_var('dbt_dqm_default_test_limit',100) %}
   {% set grain = model.config.meta.dbt_dqm.get('granularity', []) %}
-  {% set names = var('_dbt_dqm_output_columns',{}).get(model.unique_id) or dbt.get_columns_in_query(sql) %}
+  {% set output_columns=fromjson(var('_dbt_dqm_internal_json', '{}')).get('output_columns', {}) %}
+  {% set names = output_columns.get(model.unique_id) or var('_dbt_dqm_output_columns',{}).get(model.unique_id) or dbt.get_columns_in_query(sql) %}
   {% set keys = [] %}
   {% for key in grain %}
     {% set found = [] %}
@@ -42,8 +43,12 @@
   {% do run_query(script) %}
 {% endmacro %}
 
-{% macro collect_results(payload) %}
+{% macro collect_results(payload=none) %}
   {% if not execute or not var('dqm_enabled',false) %}{{ return('') }}{% endif %}
+  {% if payload is none %}
+    {% set payload=fromjson(var('_dbt_dqm_internal_json', '{}')).get('collection') %}
+    {% if payload is none %}{{ exceptions.raise_compiler_error('DQM collection payload is missing') }}{% endif %}
+  {% endif %}
   {% set results=[] %}
   {% for row in payload.results %}
     {% set node=graph.nodes.get(row.unique_id) %}

@@ -238,3 +238,13 @@ def test_capability_probe_is_cached_and_errors_are_explicit(monkeypatch):
             dbt_cli.command_flags("/broken/dbt", "test")
     finally:
         dbt_cli.command_flags.cache_clear()
+
+
+def test_windows_command_budget_counts_quoted_utf16_without_exposing_payload():
+    from dbt_dqm_app.dbt_cli import check_command_size
+    from dbt_dqm_app.errors import AppError
+
+    check_command_size(['dbt', 'run-operation', 'macro'], {}, windows=True)
+    with pytest.raises(AppError, match='argument-size') as error:
+        check_command_size(['dbt', '--vars', 'private-é😀' * 4000], {}, windows=True)
+    assert 'private' not in str(error.value)

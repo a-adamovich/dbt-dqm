@@ -167,6 +167,14 @@ jobs:
       run: uv run --group dbt1 pytest -q tests/test_runner.py tests/test_portability.py tests/test_config.py tests/test_cli.py
         tests/test_credentials.py tests/test_dependency_floors.py tests/test_python_compatibility.py tests/test_wif.py
         tests/test_review_actions.py tests/test_exports.py tests/test_store.py tests/test_ui.py tests/test_ui_browse.py
+        tests/test_runtime_project.py tests/test_dbt_cli.py
+    - name: Native Windows real-engine projection and payload regressions
+      if: runner.os == 'Windows'
+      run: |
+        uv venv "$RUNNER_TEMP/dbt-v2" --python 3.11
+        uv pip install --python "$RUNNER_TEMP/dbt-v2/Scripts/python.exe" dbt==2.0.11
+        export DBT_DQM_V2_EXECUTABLE="$(cygpath -m "$RUNNER_TEMP/dbt-v2/Scripts/dbt.exe")"
+        uv run --group dbt1 pytest -q tests/test_dbt_v2.py
     - name: Build and check each installed wheel variant
       run: |
         uv build --no-create-gitignore
