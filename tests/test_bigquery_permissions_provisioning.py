@@ -101,3 +101,31 @@ def test_shared_qa_mode_does_not_provision(monkeypatch):
     monkeypatch.setattr(module, "PROVISIONER_FILE", None)
     generator = module.restricted_dataset.__wrapped__(Path("/unused"), "run-id")
     assert next(generator) == "dbt_dqm_qa"
+
+
+def test_restricted_environments_never_inherit_provisioner_credentials(gate, monkeypatch):
+    monkeypatch.setenv("DBT_DQM_BIGQUERY_PROVISIONER_CREDENTIALS", "/federated/provisioner.json")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/federated/provisioner.json")
+    environment = gate._identity_environment("/federated/runner.json")
+    assert environment["GOOGLE_APPLICATION_CREDENTIALS"] == "/federated/runner.json"
+    assert "DBT_DQM_BIGQUERY_PROVISIONER_CREDENTIALS" not in environment
+    assert "/federated/provisioner.json" not in environment.values()
+
+
+def test_only_provisioning_code_passes_provisioner_credentials():
+    import ast
+
+    tree = ast.parse((ROOT / "integration_tests/acceptance/test_bigquery_permissions.py").read_text())
+    users = set()
+    for function in (node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)):
+        for call in (node for node in ast.walk(function) if isinstance(node, ast.Call)):
+            arguments = [*call.args, *(keyword.value for keyword in call.keywords)]
+            if any(isinstance(node, ast.Name) and node.id == "PROVISIONER_FILE"
+                   for argument in arguments for node in ast.walk(argument)):
+                users.add(function.name)
+    assert users == {"_install", "_provisioned_dataset"}
+    body = next(node for node in tree.body
+                if isinstance(node, ast.FunctionDef) and node.name == "test_restricted_bigquery_runner_and_reviewer")
+    removed = {node.args[0].value for node in ast.walk(body)
+               if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "delenv"}
+    assert removed == {"DBT_DQM_BIGQUERY_PROVISIONER_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS"}

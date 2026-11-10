@@ -70,6 +70,14 @@ def _client(path):
     return bigquery.Client(project=PROJECT, credentials=credentials, location="US")
 
 
+def _identity_environment(path):
+    """A subprocess environment for exactly one identity; provisioner credentials are never inherited."""
+    environment = {key: value for key, value in os.environ.items()
+                   if key not in ("DBT_DQM_BIGQUERY_PROVISIONER_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS")}
+    environment["GOOGLE_APPLICATION_CREDENTIALS"] = str(Path(path).resolve())
+    return environment
+
+
 def _session_user(client):
     return next(iter(client.query("select session_user() as identity").result())).identity
 
@@ -100,7 +108,7 @@ def _install(dataset, directory):
     grants = {"roles/bigquery.dataEditor": ["serviceAccount:" + REVIEWER]}
     variables = json.dumps({"dqm_enabled": True,
                             "dbt_dqm_table_grants": dict.fromkeys(REVIEWER_WRITE_TABLES, grants)})
-    environment = {**os.environ, "GOOGLE_APPLICATION_CREDENTIALS": str(Path(PROVISIONER_FILE).resolve())}
+    environment = _identity_environment(PROVISIONER_FILE)
     for step in (["run-operation", "dbt_dqm.initialize_dqm"], ["build", "--select", "package:dbt_dqm"]):
         result = subprocess.run(
             [str(Path(sys.executable).with_name("dbt")), *step, "--project-dir", str(project),
@@ -156,6 +164,9 @@ def test_restricted_bigquery_runner_and_reviewer(tmp_path, monkeypatch, restrict
     fails this gate rather than silently fixing privileges or deleting tables.
     """
     dataset = restricted_dataset
+    if PROVISIONER_FILE:  # Only the fixture uses the provisioner; nothing below can inherit it.
+        monkeypatch.delenv("DBT_DQM_BIGQUERY_PROVISIONER_CREDENTIALS", raising=False)
+        monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
     runner, reviewer = _client(RUNNER_FILE), _client(REVIEWER_FILE)
     for client, expected in ((runner, RUNNER), (reviewer, REVIEWER)):
         identity = next(iter(client.query("select session_user() as identity").result())).identity
@@ -183,7 +194,7 @@ def test_restricted_bigquery_runner_and_reviewer(tmp_path, monkeypatch, restrict
     )
     profiles = tmp_path / "profiles"
     _write_profile(profiles, dataset)
-    environment = {**os.environ, "GOOGLE_APPLICATION_CREDENTIALS": str(Path(RUNNER_FILE).resolve())}
+    environment = _identity_environment(RUNNER_FILE)
 
     def dbt(*args, test_failure=False, dqm=False):
         result = subprocess.run(

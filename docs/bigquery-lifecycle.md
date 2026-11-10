@@ -26,9 +26,10 @@ pass on the exact candidate commit before a release; see the
 ## How the connection works
 
 1. A manually started GitHub Actions job asks GitHub for a short-lived **OIDC token**. This
-   token identifies the repository and branch running the job.
+   token identifies the repository, workflow, branch and event running the job.
 2. The Google Cloud **workload identity provider** verifies that token and accepts it only for
-   `a-adamovich/dbt-dqm` on `refs/heads/main`. The provider belongs to a **workload identity
+   this repository's numeric ID and owner ID, the exact `bigquery-lifecycle.yml` workflow on
+   `refs/heads/main`, and a manual dispatch. The provider belongs to a **workload identity
    pool**, which groups external identities Google Cloud can trust.
 3. An IAM binding lets that trusted GitHub identity impersonate a dedicated Google Cloud
    **service account**. The job receives short-lived credentials for that account.
@@ -86,21 +87,28 @@ by itself.
 gcloud iam workload-identity-pools create github \
   --project="$PROJECT_ID" --location=global --display-name="GitHub Actions"
 
-# Trust GitHub's OIDC issuer, but only tokens for this repository's main branch.
-# The attribute mapping copies identity, repository, and ref claims from the GitHub token;
-# the condition restricts which of those tokens Google will accept. A pull request or a
-# different repository cannot satisfy this condition merely by knowing the provider name.
+# Numeric IDs survive a rename and cannot be claimed by a re-created repository of the same name.
+REPOSITORY_ID=$(gh api repos/a-adamovich/dbt-dqm --jq .id)
+OWNER_ID=$(gh api repos/a-adamovich/dbt-dqm --jq .owner.id)
+WORKFLOW_REF="a-adamovich/dbt-dqm/.github/workflows/bigquery-lifecycle.yml@refs/heads/main"
+echo "$REPOSITORY_ID $OWNER_ID"
+
+# Trust GitHub's OIDC issuer, but only a manual dispatch of this one workflow on main in this
+# repository. A pull request, another workflow (including release.yml) or another repository
+# cannot satisfy this condition merely by knowing the provider name.
+# For an existing provider, run "update-oidc" with the same mapping and condition instead.
 gcloud iam workload-identity-pools providers create-oidc dbt-dqm \
   --project="$PROJECT_ID" --location=global --workload-identity-pool=github \
   --display-name="dbt-dqm repository" \
   --issuer-uri="https://token.actions.githubusercontent.com" \
-  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref" \
-  --attribute-condition="assertion.repository=='a-adamovich/dbt-dqm' && assertion.ref=='refs/heads/main'"
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository_id=assertion.repository_id,attribute.repository_owner_id=assertion.repository_owner_id,attribute.workflow_ref=assertion.workflow_ref,attribute.event_name=assertion.event_name" \
+  --attribute-condition="assertion.repository_id=='$REPOSITORY_ID' && assertion.repository_owner_id=='$OWNER_ID' && assertion.workflow_ref=='$WORKFLOW_REF' && assertion.ref=='refs/heads/main' && assertion.event_name=='workflow_dispatch'"
 ```
 
-The repository and branch names above are security restrictions. If you move or rename the
-repository or change its release branch, update and review the condition before running the
-workflow under the new name.
+The repository, owner, workflow, branch and event above are security restrictions. If you
+transfer the repository, rename the workflow or change its branch, update and review the
+condition before running the workflow under the new name. Adding another workflow does not
+extend this trust.
 
 ### 3. Create the CI service account and grant BigQuery roles
 
@@ -138,7 +146,7 @@ condition from step 2 still applies.
 gcloud iam service-accounts add-iam-policy-binding \
   "dbt-dqm-ci@$PROJECT_ID.iam.gserviceaccount.com" --project="$PROJECT_ID" \
   --role=roles/iam.workloadIdentityUser \
-  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/a-adamovich/dbt-dqm"
+  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository_id/$REPOSITORY_ID"
 
 # Print the provider's full resource name; copy this value for the GitHub variable below.
 echo "projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/dbt-dqm"
@@ -163,6 +171,16 @@ The dataset and table grants are made per run by the provisioner, so neither ide
 data access. Don't reuse `dbt-dqm-runner` or `dbt-dqm-reviewer`: they have access to the shared QA
 dataset, and the test fails if a CI identity can read it.
 
+**Residual limitation, for maintainer review.** Inside the `restricted-permissions` job all three
+identities trust the same federated principal, and each credential file can request a GitHub
+token for any of them. So the separation proves what the runner and reviewer identities are
+permitted to do; it is not a security boundary between steps of that job. Any code running in
+the job, such as a compromised dependency, could act as the provisioner, which can create
+datasets, run billed queries and read or delete the datasets it owns, but cannot read the shared
+QA dataset. The job turns off automatic credential exports and passes each identity explicitly,
+which prevents accidental use but not deliberate misuse. Running the provisioner in a separate
+job would remove this, but the test needs it before and after the restricted steps.
+
 ```bash
 for name in dbt-dqm-ci-runner dbt-dqm-ci-reviewer; do
   gcloud iam service-accounts create "$name" --project="$PROJECT_ID"
@@ -172,7 +190,7 @@ for name in dbt-dqm-ci-runner dbt-dqm-ci-reviewer; do
   gcloud iam service-accounts add-iam-policy-binding \
     "$name@$PROJECT_ID.iam.gserviceaccount.com" --project="$PROJECT_ID" \
     --role=roles/iam.workloadIdentityUser \
-    --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/a-adamovich/dbt-dqm"
+    --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository_id/$REPOSITORY_ID"
 done
 
 gh variable set GCP_CI_RUNNER_SERVICE_ACCOUNT --repo a-adamovich/dbt-dqm \

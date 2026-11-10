@@ -20,7 +20,7 @@ def test_keyless_authentication_through_a_pinned_action():
     auth = next(step for step in job["steps"] if "google-github-actions/auth" in step.get("uses", ""))
     ref = auth["uses"].partition("@")[2]
     assert len(ref) == 40 and all(c in "0123456789abcdef" for c in ref)  # a commit SHA, not a tag
-    assert set(auth["with"]) == {"workload_identity_provider", "service_account"}
+    assert set(auth["with"]) == {"workload_identity_provider", "service_account", "export_environment_variables"}
     assert WORKFLOW["permissions"]["id-token"] == "write"
 
 
@@ -71,9 +71,42 @@ def test_restricted_job_keeps_three_keyless_identities_separate():
         "${{ vars.GCP_CI_SERVICE_ACCOUNT }}", "${{ vars.GCP_CI_RUNNER_SERVICE_ACCOUNT }}",
         "${{ vars.GCP_CI_REVIEWER_SERVICE_ACCOUNT }}"]
     for step in auths:
-        assert set(step["with"]) == {"workload_identity_provider", "service_account"}
+        assert set(step["with"]) == {"workload_identity_provider", "service_account", "export_environment_variables"}
     test = next(step for step in WORKFLOW["jobs"]["restricted-permissions"]["steps"]
                 if step.get("name") == "Restricted runner and reviewer on a disposable dataset")
     for role in ("provisioner", "runner", "reviewer"):
         assert test["env"][f"DBT_DQM_BIGQUERY_{role.upper()}_CREDENTIALS"] == (
             "${{ steps." + role + ".outputs.credentials_file_path }}")
+
+
+def test_no_identity_is_exported_implicitly():
+    for name, job in WORKFLOW["jobs"].items():
+        auths = job_auth(name)
+        assert auths and all(step["with"]["export_environment_variables"] is False for step in auths)
+        own = {"${{ steps." + step["id"] + ".outputs.credentials_file_path }}" for step in auths}
+        for step in job["steps"]:
+            for value in step.get("env", {}).values():
+                assert "credentials_file_path" not in str(value) or value in own
+
+
+def test_restricted_job_selects_each_identity_explicitly():
+    steps = WORKFLOW["jobs"]["restricted-permissions"]["steps"]
+    assert all("GITHUB_ENV" not in step.get("run", "") for step in steps)
+    provisioner = "${{ steps.provisioner.outputs.credentials_file_path }}"
+    for step in steps:
+        selected = step.get("env", {}).get("GOOGLE_APPLICATION_CREDENTIALS")
+        assert selected is None or (step["name"] == "Sweep stale acceptance datasets" and selected == provisioner)
+    test = next(step for step in steps if step.get("name") == "Restricted runner and reviewer on a disposable dataset")
+    assert "GOOGLE_APPLICATION_CREDENTIALS" not in test["env"]
+
+
+def test_documented_trust_is_pinned_to_ids_this_workflow_and_manual_dispatch():
+    guide = (ROOT / "docs/bigquery-lifecycle.md").read_text()
+    for clause in ("assertion.repository_id=='$REPOSITORY_ID'", "assertion.repository_owner_id=='$OWNER_ID'",
+                   "assertion.workflow_ref=='$WORKFLOW_REF'", "assertion.ref=='refs/heads/main'",
+                   "assertion.event_name=='workflow_dispatch'",
+                   'WORKFLOW_REF="a-adamovich/dbt-dqm/.github/workflows/bigquery-lifecycle.yml@refs/heads/main"'):
+        assert clause in guide
+    assert "attribute.repository/" not in guide
+    assert guide.count("attribute.repository_id/$REPOSITORY_ID") == 2
+    assert "Residual limitation, for maintainer review" in guide
