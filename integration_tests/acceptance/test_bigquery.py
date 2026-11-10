@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -18,7 +19,7 @@ from pathlib import Path
 import pytest
 import yaml
 from google.cloud import bigquery
-from phase_timing import timed
+from phase_timing import record, timed
 
 from dbt_dqm_app.dbt_cli import resolve_dbt_executable
 
@@ -146,6 +147,7 @@ def demo(tmp_path, acceptance_run_id, request):
             {**value.to_api_repr(), 'defaultCollation': request.param})
     with timed("fixture", "create dataset"):
         client.create_dataset(value)
+    preparing = time.monotonic()
     path = tmp_path / "project"
     shutil.copytree(
         ROOT / "integration_tests/demo_bigquery",
@@ -213,6 +215,7 @@ values ('tamper-row', 'tamper@example.com', 'tampered');
     (path / "packages.yml").write_text(
         yaml.safe_dump({"packages": [{"local": str(ROOT)}, {"local": str(tamper)}]})
     )
+    record("fixture", "prepare project", time.monotonic() - preparing)
     result = Demo(path, profiles, dataset, client)
     try:
         result.dbt("seed")
@@ -1303,7 +1306,7 @@ def dedicated(demo, *options, variables=None, code=0, confirm=True):
         command.append("--yes")
     if variables:
         command += ["--vars", json.dumps(variables)]
-    with timed("dbt-dqm", " ".join(options[:2])):
+    with timed("dbt-dqm", " ".join(options[:2]), runner_metrics=demo.path / "target/dqm_workflow_metrics.json"):
         result = subprocess.run(command, text=True, capture_output=True, timeout=900, check=False)
     assert result.returncode == code, result.stdout + result.stderr
     return result

@@ -20,6 +20,11 @@ ROOT = Path(__file__).resolve().parents[1]
 TIMING_ENVIRONMENT = "DBT_DQM_BIGQUERY_TIMING_DIRECTORY"
 BYTE_LIMIT_NOTE = ("Requested per query only. dbt 2.0.11 did not enforce it on tested paths, some app "
                    "queries are outside it, and it is not a total spending ceiling.")
+CONSOLIDATION_NOTE = ("Timings cover only the cases in this selection. They cannot justify merging a case "
+                      "that was not selected; see docs/ci-measurements.md.")
+PACKAGE_DEPLOYMENTS = {"build --select package:dbt_dqm", "run --select package:dbt_dqm"}
+FIXTURE_STEPS = {"create dataset": "fixture_dataset_seconds", "prepare project": "fixture_project_seconds",
+                 "seed": "fixture_seed_seconds"}
 
 
 def command(*args):
@@ -52,33 +57,138 @@ def report_counts(junit, expected, filename):
     return counts
 
 
-def summarize_timings(directory):
-    """Aggregate per-phase records. Setup includes the fixture's dbt seed, so totals overlap."""
-    tests = {}
+def case_durations(junit):
+    """Return each case's total time from JUnit, or nothing if the run left no readable report."""
+    try:
+        return {case.attrib["name"]: float(case.attrib["time"]) for case in ET.parse(junit).getroot().iter("testcase")}
+    except (OSError, ET.ParseError, KeyError, ValueError):
+        return {}
+
+
+def new_row():
+    return {"case_seconds": None, "fixture_setup_seconds": 0.0, "fixture_dataset_seconds": 0.0,
+            "fixture_project_seconds": 0.0, "fixture_seed_seconds": 0.0, "installation_seconds": 0.0,
+            "installation_steps": [], "installation_includes_reconcile": False,
+            "initialize_repeat_seconds": 0.0, "teardown_seconds": 0.0, "scenario_seconds": None,
+            "dbt_subprocesses": 0, "dbt_seconds": 0.0, "dbt_dqm_runs": 0, "dbt_dqm_seconds": 0.0,
+            "queries": 0, "query_seconds": 0.0, "runner_metrics_missing": 0, "runner_phase_seconds": {},
+            "runner_sql_calls": {}, "runner_query_jobs": {}}
+
+
+class Installation:
+    """Attribute only a case's first tracking setup to installation, in the order it happened."""
+
+    def __init__(self, row):
+        self.row, self.initialized, self.deployed, self.captured = row, False, False, False
+
+    def initialize(self, seconds, source):
+        if self.initialized:
+            self.row["initialize_repeat_seconds"] += seconds
+            return
+        self.initialized = True
+        self.row["installation_seconds"] += seconds
+        self.row["installation_steps"].append(f"{source}: initialize_dqm")
+
+    def deploy(self, seconds, step):
+        if self.deployed:
+            return
+        self.deployed = True
+        self.row["installation_seconds"] += seconds
+        self.row["installation_steps"].append(step)
+        self.row["installation_includes_reconcile"] = self.captured
+
+    def harness(self, detail, seconds):
+        if detail == "dbt_dqm.initialize_dqm":
+            self.initialize(seconds, "harness")
+        elif detail == "dbt_dqm.collect_results":
+            self.captured = True
+        elif detail in PACKAGE_DEPLOYMENTS:
+            self.deploy(seconds, f"harness: {detail}")
+
+    def runner(self, phases):
+        if "initialize_dqm" in phases:
+            self.initialize(phases["initialize_dqm"], "runner")
+        self.captured = self.captured or "collect_results" in phases
+        if "run" in phases:
+            self.deploy(phases["run"], "runner: run")
+
+
+def add_runner_metrics(row, installation, runner):
+    if runner is None:
+        row["runner_metrics_missing"] += 1
+        return
+    phases = runner.get("phase_seconds") or {}
+    installation.runner(phases)
+    for phase, seconds in phases.items():
+        row["runner_phase_seconds"][phase] = row["runner_phase_seconds"].get(phase, 0.0) + seconds
+    for phase, calls in (runner.get("sql_calls") or {}).items():
+        row["runner_sql_calls"][phase] = row["runner_sql_calls"].get(phase, 0) + calls
+    for phase, jobs in (runner.get("query_jobs") or {}).items():
+        row["runner_query_jobs"][phase] = row["runner_query_jobs"].get(phase, 0) + len(set(jobs))
+
+
+def add_record(row, installation, record):
+    seconds, phase, detail, stage = record["seconds"], record["phase"], record["detail"], record["stage"]
+    if stage == "setup":
+        row["fixture_setup_seconds"] += seconds
+        if detail in FIXTURE_STEPS:
+            row[FIXTURE_STEPS[detail]] += seconds
+    elif stage == "teardown":
+        row["teardown_seconds"] += seconds
+    if phase == "dbt":
+        row["dbt_subprocesses"] += 1
+        row["dbt_seconds"] += seconds
+        installation.harness(detail, seconds)
+    elif phase == "dbt-dqm":
+        row["dbt_dqm_runs"] += 1
+        row["dbt_dqm_seconds"] += seconds
+        add_runner_metrics(row, installation, record.get("runner"))
+    elif phase == "query":
+        row["queries"] += 1
+        row["query_seconds"] += seconds
+
+
+def finished_row(row, duration):
+    """Round a row. An engine that reports no SQL calls or job ids shows null, never zero."""
+    if duration is not None:
+        row["case_seconds"] = duration
+        row["scenario_seconds"] = (duration - row["fixture_setup_seconds"] - row["installation_seconds"]
+                                   - row["teardown_seconds"])
+    for key, value in row.items():
+        if isinstance(value, float):
+            row[key] = round(value, 3)
+        elif isinstance(value, dict):
+            row[key] = {name: round(item, 3) for name, item in sorted(value.items())} or None
+    return row
+
+
+def combined_totals(rows):
+    totals = {"runner_phase_seconds": {}, "runner_sql_calls": {}, "runner_query_jobs": {}}
+    for row in rows:
+        for key, value in row.items():
+            if isinstance(value, dict):
+                for name, item in value.items():
+                    totals[key][name] = round(totals[key].get(name, 0) + item, 3)
+            elif isinstance(value, (int, float)) and not isinstance(value, bool):
+                totals[key] = round(totals.get(key, 0) + value, 3)
+    return {key: (value or None) if isinstance(value, dict) else value for key, value in totals.items()}
+
+
+def summarize_timings(directory, junit=None):
+    """Aggregate per-phase records.
+
+    The fixture's seed is in both fixture setup and dbt subprocess totals, and installation is
+    part of the dbt and runner totals, so these columns overlap and must not be added together.
+    """
+    rows, installations = {}, {}
     for path in sorted(directory.glob("*.jsonl")):
         for line in path.read_text(encoding="utf-8").splitlines():
             record = json.loads(line)
-            row = tests.setdefault(record["test"], {
-                "setup_seconds": 0.0, "teardown_seconds": 0.0, "dbt_subprocesses": 0, "dbt_seconds": 0.0,
-                "dbt_dqm_runs": 0, "dbt_dqm_seconds": 0.0, "queries": 0, "query_seconds": 0.0})
-            seconds = record["seconds"]
-            if record["stage"] in ("setup", "teardown"):
-                row[record["stage"] + "_seconds"] += seconds
-            if record["phase"] == "dbt":
-                row["dbt_subprocesses"] += 1
-                row["dbt_seconds"] += seconds
-            elif record["phase"] == "dbt-dqm":
-                row["dbt_dqm_runs"] += 1
-                row["dbt_dqm_seconds"] += seconds
-            elif record["phase"] == "query":
-                row["queries"] += 1
-                row["query_seconds"] += seconds
-    tests = {name: {key: round(value, 3) for key, value in row.items()} for name, row in sorted(tests.items())}
-    totals = {}
-    for row in tests.values():
-        for key, value in row.items():
-            totals[key] = round(totals.get(key, 0) + value, 3)
-    return {"tests": tests, "totals": totals}
+            row = rows.setdefault(record["test"], new_row())
+            add_record(row, installations.setdefault(record["test"], Installation(row)), record)
+    durations = case_durations(junit) if junit else {}
+    tests = {name: finished_row(row, durations.get(name)) for name, row in sorted(rows.items())}
+    return {"tests": tests, "totals": combined_totals(tests.values())}
 
 
 def engine_version(executable):
@@ -132,14 +242,15 @@ def measure(selection, executable, workers, directory):
               "started_at": started.isoformat(), "finished_at": finished.isoformat(),
               "wall_seconds": round((finished - started).total_seconds(), 1), "returncode": code,
               "status": "failed", "maximum_bytes_billed_requested": maximum,
-              "maximum_bytes_billed_note": BYTE_LIMIT_NOTE, "validation_id": validation_id}
+              "maximum_bytes_billed_note": BYTE_LIMIT_NOTE, "consolidation_note": CONSOLIDATION_NOTE,
+              "validation_id": validation_id}
     try:
         result["counts"] = report_counts(run_directory / "junit.xml", expected, filename)
         if code == 0 and result["counts"]["passed"] == len(expected):
             result["status"] = "passed"
     except (ValueError, OSError, ET.ParseError) as error:
         result["validation_error"] = str(error)
-    result["timing"] = summarize_timings(timings)
+    result["timing"] = summarize_timings(timings, run_directory / "junit.xml")
     result["query_metrics"] = job_metrics(project, validation_id, started, finished)
     (run_directory / "measurement.json").write_text(json.dumps(result, indent=2, default=str) + "\n")
     print(f"{selection} on dbt {version}: {result['status']}; output: {run_directory}")

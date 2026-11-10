@@ -71,6 +71,46 @@ accept the profile/label configuration. dbt 2.0.11 did not enforce this profile 
 App search retains its own configured limit; other app queries and the restricted-permissions
 fixture are not covered by this test cap. This is not a total-suite spending ceiling.
 
+## BigQuery development measurements
+
+`scripts/bigquery_measure.py` runs a BigQuery selection once and writes `measurement.json` to a
+private directory outside the repository. Its output is marked as a development measurement and
+can never count as release evidence. Each case reports:
+
+| Field | Meaning |
+| --- | --- |
+| `case_seconds` | Whole case from JUnit: setup, call and teardown |
+| `fixture_setup_seconds` | Pytest setup stage: `fixture_dataset_seconds`, `fixture_project_seconds` and `fixture_seed_seconds` |
+| `installation_seconds` | The case's first `initialize_dqm` plus its first deployment of the package models |
+| `installation_steps` | The steps counted as installation, in order |
+| `installation_includes_reconcile` | The first deployment also reconciled captured evidence, so its time is an upper bound on installing |
+| `initialize_repeat_seconds` | Later, idempotent `initialize_dqm` calls. Not installation |
+| `scenario_seconds` | `case_seconds` minus fixture setup, installation and teardown |
+| `runner_phase_seconds`, `runner_sql_calls`, `runner_query_jobs` | Per phase from each `dbt-dqm run`'s `dqm_workflow_metrics.json`, read after that invocation |
+| `runner_metrics_missing` | Invocations that wrote no fresh metrics file. Their installation time is not attributed |
+
+Columns overlap, so do not add them together. The seed is in both fixture setup and the dbt
+subprocess totals, installation is inside the dbt and runner totals, and cases that run concurrent
+work can sum above their wall time. `runner_sql_calls` and `runner_query_jobs` are null when the
+engine reported none, which means unknown rather than zero. Fixture setup and installation are the
+most a merge can save per absorbed case. They do not show that two scenarios can share state.
+
+### What the smoke pilot can justify
+
+The pilot measures only the cases it selects, and it is one run on one engine. The 0.2.5 receipts
+give per-case totals without phases, so they cannot fill the gap. A consolidation needs measured
+fixture and installation time for **every** case it merges.
+
+| Proposed consolidation | Cases in smoke | Smoke pilot can justify it |
+| --- | --- | --- |
+| Apply fencing | Both | Yes |
+| Collation | Both | Yes |
+| Batch rollback and `--empty` | Retained case only; `empty_changes_no_tracking_table` is not | No |
+| Capture integrity, recurrence payloads, maintenance faults, maintenance cleanup and health, stages and retention, annotation staging, upgrades, install and migration leases, app audit and browsing | None | No |
+
+The rows marked No need a measurement of the `full` selection, or stay separate. The per-case cost
+of a case outside the smoke selection must not be inferred from a smoke case.
+
 ## 0.2.4 development measurements
 
 | Check | Environment | Result | Duration |
