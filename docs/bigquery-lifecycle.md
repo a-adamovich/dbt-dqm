@@ -178,8 +178,12 @@ permitted to do; it is not a security boundary between steps of that job. Any co
 the job, such as a compromised dependency, could act as the provisioner, which can create
 datasets, run billed queries and read or delete the datasets it owns, but cannot read the shared
 QA dataset. The job turns off automatic credential exports and passes each identity explicitly,
-which prevents accidental use but not deliberate misuse. Running the provisioner in a separate
-job would remove this, but the test needs it before and after the restricted steps.
+which prevents accidental use but not deliberate misuse. Moving provisioning into a separate job
+would not remove this on its own: the restricted job's federated identity would still be allowed
+to impersonate the provisioner. It would help only with a separate trust path, for example a
+provisioner binding limited to a different job's token subject, so the restricted job could not
+obtain provisioner credentials at all. This limitation is open for maintainer review; it has not
+been accepted.
 
 ```bash
 for name in dbt-dqm-ci-runner dbt-dqm-ci-reviewer; do
