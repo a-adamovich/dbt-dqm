@@ -35,8 +35,7 @@ def command(*args):
 BIGQUERY_SMOKE_TESTS = frozenset({
     "test_default_maintenance_shortcuts_keep_retention_fence_and_health",
     "test_bigquery_batch_rollback_lost_response_and_empty",
-    "test_bigquery_stale_generation_annotations_and_abandoned_runner",
-    "test_bigquery_overlapping_applies",
+    "test_bigquery_apply_fencing_overlap_stale_generation_and_abandoned_runner",
     "test_bigquery_dedicated_limits_full_refresh_and_complex_payloads",
     "test_run_changes_sorted_results_and_collection_limits",
     "test_generic_and_singular_lifecycle",

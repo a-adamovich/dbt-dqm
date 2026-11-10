@@ -135,3 +135,15 @@ def test_other_errors_do_not_fall_back(modules, monkeypatch):
     assert metrics.job_metrics('private-project', 'opaque-run', NOW, NOW) == {
         'status': 'unavailable', 'reason': 'ValueError'}
     assert len(queries) == 1
+
+
+def test_failure_keeps_the_structured_reason_but_never_the_message(monkeypatch):
+    from google.api_core.exceptions import BadRequest
+    metrics = importlib.import_module('query_metrics')
+    error = BadRequest('private-project was mentioned here',
+                       errors=[{'reason': 'invalidQuery', 'message': 'private-project was mentioned here'}])
+    view_clients(monkeypatch, {'JOBS_BY_PROJECT': error, 'JOBS_BY_USER': error})
+    result = metrics.job_metrics('private-project', 'opaque-run', NOW, NOW)
+    assert result == {'status': 'unavailable', 'reason': 'BadRequest', 'view': 'JOBS_BY_PROJECT',
+                      'error_code': 'invalidQuery'}
+    assert 'private-project' not in str(result)

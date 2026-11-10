@@ -99,17 +99,58 @@ most a merge can save per absorbed case. They do not show that two scenarios can
 
 The pilot measures only the cases it selects, and it is one run on one engine. The 0.2.5 receipts
 give per-case totals without phases, so they cannot fill the gap. A consolidation needs measured
-fixture and installation time for **every** case it merges.
+fixture and installation time for **every** case it merges, and the scenarios must be able to share
+state.
 
-| Proposed consolidation | Cases in smoke | Smoke pilot can justify it |
+| Proposed consolidation | Cases in smoke | Outcome |
 | --- | --- | --- |
-| Apply fencing | Both | Yes |
-| Collation | Both | Yes |
-| Batch rollback and `--empty` | Retained case only; `empty_changes_no_tracking_table` is not | No |
-| Capture integrity, recurrence payloads, maintenance faults, maintenance cleanup and health, stages and retention, annotation staging, upgrades, install and migration leases, app audit and browsing | None | No |
+| Apply fencing | Both | Merged: about 109 s saved |
+| Collation | Both | Stays separate: about 10 s to save, and the scenarios cannot share state |
+| Batch rollback and `--empty` | Retained case only; `empty_changes_no_tracking_table` is not | Not justified by smoke |
+| Capture integrity, recurrence payloads, maintenance faults, maintenance cleanup and health, stages and retention, annotation staging, upgrades, install and migration leases, app audit and browsing | None | Not justified by smoke |
 
-The rows marked No need a measurement of the `full` selection, or stay separate. The per-case cost
-of a case outside the smoke selection must not be inferred from a smoke case.
+The rows not justified by smoke need a measurement of the `full` selection, or stay separate. The
+cost of a case outside the smoke selection must not be inferred from a smoke case.
+
+Collation cannot share state in either order. The refusal scenario must create its collated
+`dqm_install` in a dataset with no tracking tables, and the lifecycle scenario asserts exact counts
+from a clean installation. In the refusal case, initialization and the full refresh are the behavior
+under test, so only its fixture setup could be saved.
+
+### Assertion map
+
+| Retained case | Absorbed case | Where its assertions are |
+| --- | --- | --- |
+| `test_bigquery_apply_fencing_overlap_stale_generation_and_abandoned_runner` | `test_bigquery_overlapping_applies` | Unchanged, as the first half. It needs the clean installation |
+| same | `test_bigquery_stale_generation_annotations_and_abandoned_runner` | Unchanged, as the second half, after the overlap leaves the same seven occurrences |
+
+In a merged case, the first failure hides any later ones.
+
+### Smoke pilot, 2026-11-10
+
+Candidate `7b72db75`, dbt 2.0.11, six workers, ten cases before the merge above: 10 passed in
+1,038.6 s (17m19s). Case time summed to 5,364 s, an effective parallelism of 5.2, and the log has no
+rate-limit, quota or concurrent-update messages. It compares with 6,133 s for the same ten cases in
+the four-worker 0.2.5 receipt. That is one run on each side, and 15 cases now skip post-capture
+maintenance, so the difference is not attributed to any single change.
+
+| Share of case time | Seconds | % |
+| --- | --- | --- |
+| Fixture setup (dataset, project, seed) | 104 | 2 |
+| First installation (upper bound, includes reconciliation in 9 of 10 cases) | 1,465 | 27 |
+| Teardown | 8 | under 1 |
+| Scenario, including 372 s of repeated `initialize_dqm` | 3,787 | 71 |
+
+Runner query jobs were null on dbt 2.0.11, and SQL calls were reported. Spend was not measured:
+the metadata query failed with `BadRequest`. The cause is unknown because that run kept only the
+error class. `query_metrics.py` now also records the view and BigQuery's structured error code.
+
+## BigQuery tiers
+
+Full acceptance runs on dbt 2 and the exact `BIGQUERY_SMOKE_TESTS` selection runs on Core. Before
+merging a change to macros, models, BigQuery adapter or SQL behavior, `warehouse.py`, browsing or
+the CLI runner, run the smoke selection on dbt 2 once, with maintainer authorization. The 1 GiB
+qualifications in the measurement record above apply to every tier.
 
 ## 0.2.4 development measurements
 

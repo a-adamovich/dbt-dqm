@@ -20,17 +20,26 @@ def job_metrics(project, validation_id, started, finished, *, permissions=False)
         from google.api_core.exceptions import Forbidden
     except ImportError as error:
         return {"status": "unavailable", "reason": type(error).__name__}
-    failure = None
+    failure, failed_view = None, None
     for view, scope, scope_note in JOB_VIEWS:
         try:
             return _measure(project, location, view, scope, scope_note, validation_id, started, finished,
                             permissions)
         except Forbidden as error:  # Try the narrower view; a denial must never read as zero usage.
-            failure = error
+            failure, failed_view = error, view
         except Exception as error:  # noqa: BLE001 - optional metrics must report unavailable, never zero
-            failure = error
+            failure, failed_view = error, view
             break
-    return {"status": "unavailable", "reason": type(failure).__name__}
+    result = {"status": "unavailable", "reason": type(failure).__name__}
+    code = _error_code(failure)
+    return {**result, "view": failed_view, "error_code": code} if code else result
+
+
+def _error_code(error):
+    """Return BigQuery's structured reason such as invalidQuery. Messages can name private resources."""
+    details = getattr(error, "errors", None)
+    code = details[0].get("reason") if details and isinstance(details[0], dict) else None
+    return code if isinstance(code, str) and re.fullmatch(r"[A-Za-z]+", code) else None
 
 
 def _measure(project, location, view, scope, scope_note, validation_id, started, finished, permissions):

@@ -26,6 +26,9 @@ restricted-permissions test, a serial cross-engine historical-recovery scenario,
 GitHub platform validation. Identity signature contracts are checked with both real engines,
 including Unicode; migration 0008 is exercised on populated history. Local results are
 maintainer-attested and cannot certify live WIF. See the [current release checklist](release-checklist.md).
+Later releases run the full BigQuery set on dbt 2 and the smoke selection on Core; Core stays
+fully covered on real Postgres and by offline BigQuery rendering, so a Core-only BigQuery adapter
+bug outside the smoke selection can slip through. See [CI tiers](ci-measurements.md#bigquery-tiers).
 Historical results below cannot substitute for fresh evidence. Native Windows checks cover
 unprivileged project projection and large literal payloads on real engines without warehouse access.
 

@@ -261,8 +261,41 @@ def test_bigquery_batch_rollback_lost_response_and_empty(demo):
 
 
 @pytest.mark.bigquery_smoke
-def test_bigquery_stale_generation_annotations_and_abandoned_runner(demo):
+def test_bigquery_apply_fencing_overlap_stale_generation_and_abandoned_runner(demo):
+    # One installation for both scenarios; see the assertion map in docs/ci-measurements.md.
+    # The overlap goes first because its exact row counts need a clean installation.
     demo.maintenance = False
+    demo.capture("initial")
+    first = demo.freeze()
+    demo.sql(
+        "update @dataset.dqm_reconciliation_runs` set started_at=timestamp_sub(current_timestamp(),interval 2 hour) where status='started'"
+    )
+    second = demo.freeze()
+    with ThreadPoolExecutor(2) as pool:
+        tasks = [
+            pool.submit(demo.apply, run, target=f"target-{i}")
+            for i, run in enumerate((first, second))
+        ]
+        successes = 0
+        for task in tasks:
+            try:
+                task.result()
+                successes += 1
+            except AssertionError:
+                pass
+    assert successes <= 1
+    rows = demo.snapshot()
+    assert len({row["occurrence_id"] for row in rows}) == len(rows)
+    assert len(rows) in (0, 7)
+    # Interrupted clients are fenced before a clean retry, even if both competing jobs aborted.
+    demo.sql(
+        "update @dataset.dqm_reconciliation_runs` set started_at=timestamp_sub(current_timestamp(),interval 2 hour) where status='started'"
+    )
+    demo.dbt("run-operation", "dqm_abandon_runs")
+    demo.dbt("run", "--select", "dqm_reconcile")
+    assert len(demo.snapshot()) == 7
+
+    # A stale generation and an abandoned runner, continuing on the same occurrences.
     demo.capture("initial")
     demo.dbt("build", "--select", "package:dbt_dqm")
     demo.capture("passed")
@@ -297,40 +330,6 @@ def test_bigquery_stale_generation_annotations_and_abandoned_runner(demo):
     assert demo.snapshot() == before
     demo.dbt("run", "--select", "dqm_reconcile")
     assert len(demo.sql("select * from @dataset.dqm_all_issues`")) == 10
-
-
-@pytest.mark.bigquery_smoke
-def test_bigquery_overlapping_applies(demo):
-    demo.maintenance = False
-    demo.capture("initial")
-    first = demo.freeze()
-    demo.sql(
-        "update @dataset.dqm_reconciliation_runs` set started_at=timestamp_sub(current_timestamp(),interval 2 hour) where status='started'"
-    )
-    second = demo.freeze()
-    with ThreadPoolExecutor(2) as pool:
-        tasks = [
-            pool.submit(demo.apply, run, target=f"target-{i}")
-            for i, run in enumerate((first, second))
-        ]
-        successes = 0
-        for task in tasks:
-            try:
-                task.result()
-                successes += 1
-            except AssertionError:
-                pass
-    assert successes <= 1
-    rows = demo.snapshot()
-    assert len({row["occurrence_id"] for row in rows}) == len(rows)
-    assert len(rows) in (0, 7)
-    # Interrupted clients are fenced before a clean retry, even if both competing jobs aborted.
-    demo.sql(
-        "update @dataset.dqm_reconciliation_runs` set started_at=timestamp_sub(current_timestamp(),interval 2 hour) where status='started'"
-    )
-    demo.dbt("run-operation", "dqm_abandon_runs")
-    demo.dbt("run", "--select", "dqm_reconcile")
-    assert len(demo.snapshot()) == 7
 
 
 def test_bigquery_concurrent_install_and_interrupted_migration(demo):
@@ -1198,7 +1197,7 @@ def test_bigquery_orphan_stage_from_a_stale_runner_expires_and_never_blocks_main
     """The bounded fallback for a stage created after its run was pruned (a stale runner).
 
     A runner resuming after that would still be fenced from applying lifecycle changes
-    (test_bigquery_stale_generation_annotations_and_abandoned_runner); its scratch stage has no
+    (test_bigquery_apply_fencing_overlap_stale_generation_and_abandoned_runner); its scratch stage has no
     run row, so maintenance never drops it, and BigQuery expires it within 24 hours.
     """
     demo.capture("initial")
