@@ -144,9 +144,32 @@ maintenance, so the difference is not attributed to any single change.
 Runner query jobs were null on dbt 2.0.11, and SQL calls were reported. Spend was not measured:
 the metadata query failed with `BadRequest`. A later run recorded `invalidQuery`, and a dry run
 traced it to a correlated subquery reading another table. `query_metrics.py` no longer uses that
-form and also records the view and BigQuery's structured error code. A dry run accepts the
-corrected query, but it has not yet returned real figures. The view it falls back to covers only
-the querying identity.
+form and also records the view and BigQuery's structured error code.
+
+## BigQuery spend, 0.2.5 and the reduced selection, 2026-11-10
+
+Read after the runs from `INFORMATION_SCHEMA.JOBS_BY_USER` with the corrected `job_metrics` query.
+Both sides use the same identity scope and attribution rules, and each run's own validation ID and
+time window. The project-wide view is denied, so jobs run by any other identity are not included.
+The GCP billing report is the only complete figure.
+
+Only stages that passed are compared. 0.2.5 ran all 34 cases on both engines. The reduced selection
+runs 33 cases on dbt 2.0.11 and 9 on Core 1.12.6, so most of the saving comes from running fewer
+Core cases and does not mean Core is cheaper per case.
+
+| Stage | 0.2.5 cases, jobs, billed, slot hours | Reduced cases, jobs, billed, slot hours |
+|---|---|---|
+| Full on dbt 2.0.11 | 34, 12,749, 82.3 GiB, 7.2 | 33, 11,977, 79.2 GiB, 9.1 |
+| Core 1.12.6 | 34, 12,320, 79.0 GiB, 6.9 | 9, 3,912, 26.5 GiB, 2.9 |
+| Cross-engine upgrade | 1, 800, 5.8 GiB, 0.7 | 1, 800, 5.8 GiB, 0.6 |
+| Total | 25,869, 167.1 GiB, 14.8 | 16,689, 111.5 GiB, 12.6 |
+
+Billed bytes fell 33%, almost entirely on Core. Excluded from the comparison: one failed Core smoke
+attempt on the reduced selection (3,749 jobs, 25.5 GiB) that stopped on a BigQuery 500 error, the
+smoke pilot, the 0.2.5 restricted-permissions run and earlier 0.2.5 attempts. Each labelled total
+is an exact multiple of 10 MiB, BigQuery's minimum charge per query, so the number of queries
+appears to drive billed bytes. Totals count reported statistics only, and up to a few dozen jobs
+per run reported no billed bytes.
 
 ## BigQuery tiers
 
