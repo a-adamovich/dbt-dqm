@@ -78,3 +78,60 @@ def test_empty_attribution_is_unavailable(modules, monkeypatch):
     monkeypatch.setattr(bigquery, 'Client', lambda **kwargs: SimpleNamespace(
         query=lambda *args, **kwargs: SimpleNamespace(result=list)))
     assert metrics.job_metrics('private-project', 'opaque-run', NOW, NOW)['status'] == 'unavailable'
+
+
+def view_clients(monkeypatch, answers):
+    """Route each query to an answer chosen by the metadata view it reads."""
+    from types import SimpleNamespace
+
+    from google.cloud import bigquery
+
+    queries = []
+    def query(sql, job_config):
+        queries.append(sql)
+        view = next(name for name in answers if name in sql)
+        def result():
+            if isinstance(answers[view], Exception):
+                raise answers[view]
+            return answers[view]
+        return SimpleNamespace(result=result)
+    monkeypatch.setattr(bigquery, 'Client', lambda **kwargs: SimpleNamespace(query=query))
+    return queries
+
+
+def test_project_view_reports_its_scope(modules, monkeypatch):
+    metrics, _ = modules
+    queries = view_clients(monkeypatch, {'JOBS_BY_PROJECT': [{'category': 'labelled', 'jobs': 1}]})
+    result = metrics.job_metrics('private-project', 'opaque-run', NOW, NOW)
+    assert result['scope'] == 'project'
+    assert len(queries) == 1
+
+
+def test_denied_project_view_falls_back_to_the_querying_identity(modules, monkeypatch):
+    from google.api_core.exceptions import Forbidden
+
+    metrics, _ = modules
+    queries = view_clients(monkeypatch, {'JOBS_BY_PROJECT': Forbidden('private details'),
+                                         'JOBS_BY_USER': [{'category': 'labelled', 'jobs': 4}]})
+    result = metrics.job_metrics('private-project', 'opaque-run', NOW, NOW)
+    assert result['status'] == 'measured' and result['scope'] == 'querying_identity'
+    assert 'other identities' in result['scope_note']
+    assert len(queries) == 2
+
+
+def test_both_views_denied_is_unavailable_instead_of_zero(modules, monkeypatch):
+    from google.api_core.exceptions import Forbidden
+
+    metrics, _ = modules
+    view_clients(monkeypatch, {'JOBS_BY_PROJECT': Forbidden('a'), 'JOBS_BY_USER': Forbidden('b')})
+    assert metrics.job_metrics('private-project', 'opaque-run', NOW, NOW) == {
+        'status': 'unavailable', 'reason': 'Forbidden'}
+
+
+def test_other_errors_do_not_fall_back(modules, monkeypatch):
+    metrics, _ = modules
+    queries = view_clients(monkeypatch, {'JOBS_BY_PROJECT': ValueError('bad'),
+                                         'JOBS_BY_USER': [{'category': 'labelled', 'jobs': 4}]})
+    assert metrics.job_metrics('private-project', 'opaque-run', NOW, NOW) == {
+        'status': 'unavailable', 'reason': 'ValueError'}
+    assert len(queries) == 1

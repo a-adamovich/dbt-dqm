@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 import yaml
 from google.cloud import bigquery
+from phase_timing import timed
 
 from dbt_dqm_app.dbt_cli import resolve_dbt_executable
 
@@ -26,6 +27,7 @@ PROJECT = os.environ.get("DBT_DQM_BIGQUERY_TEST_PROJECT")
 pytestmark = pytest.mark.skipif(not PROJECT, reason="Credentialed BigQuery release gate")
 
 
+@pytest.mark.bigquery_smoke
 def test_default_maintenance_shortcuts_keep_retention_fence_and_health(demo):
     # Remove this disposable fixture's fault overrides so the package defaults are exercised.
     (demo.path / "macros/acceptance_protocol.sql").unlink()
@@ -58,6 +60,8 @@ class Demo:
     def __init__(self, path, profiles, dataset, client):
         self.path, self.profiles, self.dataset, self.client = path, profiles, dataset, client
         self.has_captured = False
+        # Cases that neither test nor depend on the post-capture hook turn this off to save a dbt run.
+        self.maintenance = True
 
     def dbt(self, *args, variables=None, success=True, target="target"):
         command = [
@@ -76,12 +80,13 @@ class Demo:
         # A reconcile is two BigQuery scripts of ~40 statements; each script took 85-126 s in
         # the 2026-10-07 runs, so one dbt command can approach 300 s without anything hanging.
         # dbt v2's BigQuery seed driver opens seed files relative to the process cwd.
-        result = subprocess.run(command, capture_output=True, text=True, timeout=600, check=False,
-                                cwd=self.path)
+        with timed("dbt", " ".join(args[:3])):
+            result = subprocess.run(command, capture_output=True, text=True, timeout=600, check=False,
+                                    cwd=self.path)
         if args[0] in ("test", "build", "run"):
             from explicit_capture import collect
 
-            result = collect(command, result, self.path / target)
+            result = collect(command, result, self.path / target, maintenance=self.maintenance)
         self.last_output = result.stdout + result.stderr
         if success:
             assert result.returncode == 0, result.stdout + result.stderr
@@ -93,7 +98,8 @@ class Demo:
 
     def sql(self, sql):
         sql = sql.replace("@dataset", f"`{PROJECT}.{self.dataset}")
-        return [dict(row.items()) for row in self.client.query(sql).result()]
+        with timed("query"):
+            return [dict(row.items()) for row in self.client.query(sql).result()]
 
     def capture(self, scenario, **extra):
         variables = {"demo_scenario": scenario, **extra}
@@ -138,7 +144,8 @@ def demo(tmp_path, acceptance_run_id, request):
     if getattr(request, 'param', None):
         value = bigquery.Dataset.from_api_repr(
             {**value.to_api_repr(), 'defaultCollation': request.param})
-    client.create_dataset(value)
+    with timed("fixture", "create dataset"):
+        client.create_dataset(value)
     path = tmp_path / "project"
     shutil.copytree(
         ROOT / "integration_tests/demo_bigquery",
@@ -211,11 +218,14 @@ values ('tamper-row', 'tamper@example.com', 'tampered');
         result.dbt("seed")
         yield result
     finally:
-        for name in (dataset, dataset + "_dbt_test__audit"):
-            client.delete_dataset(f"{PROJECT}.{name}", delete_contents=True, not_found_ok=True)
+        with timed("fixture", "delete datasets"):
+            for name in (dataset, dataset + "_dbt_test__audit"):
+                client.delete_dataset(f"{PROJECT}.{name}", delete_contents=True, not_found_ok=True)
 
 
+@pytest.mark.bigquery_smoke
 def test_bigquery_batch_rollback_lost_response_and_empty(demo):
+    demo.maintenance = False
     for scenario in ("initial", "passed", "recurrence"):
         demo.capture(scenario)
     frozen = demo.freeze()
@@ -247,7 +257,9 @@ def test_bigquery_batch_rollback_lost_response_and_empty(demo):
         assert demo.sql("select count(*) n from @dataset.dqm_all_issues`")[0]["n"] == len(before)
 
 
+@pytest.mark.bigquery_smoke
 def test_bigquery_stale_generation_annotations_and_abandoned_runner(demo):
+    demo.maintenance = False
     demo.capture("initial")
     demo.dbt("build", "--select", "package:dbt_dqm")
     demo.capture("passed")
@@ -284,7 +296,9 @@ def test_bigquery_stale_generation_annotations_and_abandoned_runner(demo):
     assert len(demo.sql("select * from @dataset.dqm_all_issues`")) == 10
 
 
+@pytest.mark.bigquery_smoke
 def test_bigquery_overlapping_applies(demo):
+    demo.maintenance = False
     demo.capture("initial")
     first = demo.freeze()
     demo.sql(
@@ -317,6 +331,7 @@ def test_bigquery_overlapping_applies(demo):
 
 
 def test_bigquery_concurrent_install_and_interrupted_migration(demo):
+    demo.maintenance = False
     with ThreadPoolExecutor(2) as pool:
         tasks = [
             pool.submit(demo.dbt, "run-operation", "acceptance_setup", target=f"target-init-{i}")
@@ -357,6 +372,7 @@ def test_bigquery_concurrent_install_and_interrupted_migration(demo):
 
 
 def test_bigquery_skip_invalidates_frozen_inputs(demo):
+    demo.maintenance = False
     demo.capture("initial")
     demo.dbt("build", "--select", "package:dbt_dqm")
     frozen = demo.freeze()
@@ -389,6 +405,7 @@ def test_bigquery_skip_invalidates_frozen_inputs(demo):
 
 
 def test_bigquery_app_audit_missed_retry_and_health(demo):
+    demo.maintenance = False
     from dbt_dqm_app.config import load_config
     from dbt_dqm_app.store import Patch
     from dbt_dqm_app.warehouse import apply_patches, fetch_health, insert_missed_issue
@@ -531,6 +548,7 @@ def _latest_execution(demo, test_name):
 
 
 def test_bigquery_capture_rejects_failure_tables_changed_before_capture(demo):
+    demo.maintenance = False
     customer = "demo_customer_email_invalid"
     demo.capture("initial")
     demo.dbt("run", "--select", "dqm_reconcile")
@@ -567,6 +585,7 @@ def test_bigquery_capture_rejects_failure_tables_changed_before_capture(demo):
 
 
 def test_bigquery_event_payload_changed_columns_and_digests(demo):
+    demo.maintenance = False
     demo.capture("initial")
     demo.dbt("run", "--select", "dqm_reconcile")
     demo.capture("recurrence")  # Continuing failures with changed payloads.
@@ -587,6 +606,7 @@ def test_bigquery_event_payload_changed_columns_and_digests(demo):
 
 
 def test_bigquery_stale_migration_owner_cannot_finish_after_takeover(demo):
+    demo.maintenance = False
     future = {"acceptance_future": True}
     demo.capture("initial")
     demo.dbt("run", "--select", "dqm_reconcile")
@@ -655,6 +675,7 @@ def _tracking_fingerprints(demo):
 
 
 def test_bigquery_warehouse_browsing_search_ceiling_and_generation_changes(demo):
+    demo.maintenance = False
     from dataclasses import replace
 
     from browse_checks import check_browsing, check_page_edit
@@ -685,6 +706,7 @@ def test_bigquery_warehouse_browsing_search_ceiling_and_generation_changes(demo)
 
 
 def test_bigquery_empty_changes_no_tracking_table(demo):
+    demo.maintenance = False
     from dbt_dqm_app.config import load_config
     from dbt_dqm_app.store import Patch
     from dbt_dqm_app.warehouse import apply_patches, insert_missed_issue
@@ -740,6 +762,7 @@ def test_bigquery_empty_changes_no_tracking_table(demo):
 
 
 def test_bigquery_0002_upgrades_populated_schema_after_interruption(demo):
+    demo.maintenance = False
     demo.capture("initial")
     demo.dbt("build", "--select", "package:dbt_dqm")
     demo.capture("passed")
@@ -789,6 +812,7 @@ def test_bigquery_0002_upgrades_populated_schema_after_interruption(demo):
 
 
 def test_bigquery_0004_preserves_history_and_bounds_legacy_staging(demo):
+    demo.maintenance = False
     from dbt_dqm_app.config import load_config
     from dbt_dqm_app.store import Patch
     from dbt_dqm_app.warehouse import apply_patches
@@ -826,6 +850,7 @@ def test_bigquery_0004_preserves_history_and_bounds_legacy_staging(demo):
 
 
 def test_bigquery_annotation_attempts_rollback_expiry_and_retries(demo, monkeypatch):
+    demo.maintenance = False
     from google.cloud import bigquery
 
     from dbt_dqm_app import warehouse
@@ -880,6 +905,7 @@ def test_bigquery_annotation_attempts_rollback_expiry_and_retries(demo, monkeypa
 
 
 def test_bigquery_annotation_concurrent_retries_and_independent_batches(demo):
+    demo.maintenance = False
     from google.api_core.exceptions import GoogleAPICallError
 
     from dbt_dqm_app.config import load_config
@@ -1277,11 +1303,13 @@ def dedicated(demo, *options, variables=None, code=0, confirm=True):
         command.append("--yes")
     if variables:
         command += ["--vars", json.dumps(variables)]
-    result = subprocess.run(command, text=True, capture_output=True, timeout=900, check=False)
+    with timed("dbt-dqm", " ".join(options[:2])):
+        result = subprocess.run(command, text=True, capture_output=True, timeout=900, check=False)
     assert result.returncode == code, result.stdout + result.stderr
     return result
 
 
+@pytest.mark.bigquery_smoke
 def test_bigquery_dedicated_limits_full_refresh_and_complex_payloads(demo):
     from dbt_dqm_app.config import load_config
     from dbt_dqm_app.errors import AppError
@@ -1343,12 +1371,14 @@ def test_two_developer_namespaces_are_isolated(demo):
     check_namespace_isolation(demo, dedicated)
 
 
+@pytest.mark.bigquery_smoke
 def test_run_changes_sorted_results_and_collection_limits(demo):
     from reporting_checks import check_run_reporting
 
     check_run_reporting(demo, dedicated)
 
 
+@pytest.mark.bigquery_smoke
 @pytest.mark.parametrize('demo', ['und:ci'], indirect=True)
 def test_bigquery_collated_dataset_lifecycle_and_case_sensitive_changes(demo):
     from dbt_dqm_app.config import load_config
@@ -1423,6 +1453,7 @@ select countif(actual != expected) as mismatches from (
     demo.dbt('run-operation', 'collation_truth')
 
 
+@pytest.mark.bigquery_smoke
 @pytest.mark.parametrize('demo', ['und:ci'], indirect=True)
 def test_bigquery_collated_tracking_refuses_writes_and_explicit_refresh_recovers(demo):
     demo.sql("create table @dataset.dqm_install` (marker string) default collate 'und:ci'")
@@ -1444,12 +1475,14 @@ def test_bigquery_collated_tracking_refuses_writes_and_explicit_refresh_recovers
     assert demo.client.get_dataset(f'{PROJECT}.{demo.dataset}').to_api_repr()['defaultCollation'] == 'und:ci'
 
 
+@pytest.mark.bigquery_smoke
 def test_generic_and_singular_lifecycle(demo):
     from generic_checks import check_generic_lifecycle
 
     check_generic_lifecycle(demo, dedicated)
 
 
+@pytest.mark.bigquery_smoke
 def test_bigquery_identity_signature_migration_preserves_continuity(demo):
     from identity_contract import exercise_identity_migration
 

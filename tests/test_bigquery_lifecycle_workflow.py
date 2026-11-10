@@ -33,5 +33,7 @@ def test_runs_only_from_main_when_enabled():
 def test_runs_the_parallel_suite_sweeps_and_checks_qa_is_unreachable():
     runs = "\n".join(step.get("run", "") for step in WORKFLOW["jobs"]["lifecycle"]["steps"])
     assert "-n 6 --dist load integration_tests/acceptance/test_bigquery.py" in runs
+    assert 'if [[ "${{ matrix.engine }}" == dbt1 ]]; then selection=(-m bigquery_smoke); fi' in runs
+    assert 'test_bigquery.py "${selection[@]}"' in runs
     assert "bigquery_datasets.py" in runs
     assert "dbt_dqm_qa" in runs and "no access" in runs

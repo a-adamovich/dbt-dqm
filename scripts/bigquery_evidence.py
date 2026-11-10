@@ -25,18 +25,19 @@ def record(junit, output, engine, executable):
         raise ValueError('BigQuery release validation requires Python 3.14')
     cases = list(ET.parse(junit).getroot().iter('testcase'))
     names = [case.attrib['name'] for case in cases]
-    if (len(names) != 34 or len(set(names)) != 34
-            or set(names) != release_evidence.source_names('test_bigquery.py')
+    suite, selection = release_evidence.bigquery_selection(engine)
+    count = len(selection)
+    if (len(names) != count or len(set(names)) != count or set(names) != selection
             or any(case.attrib.get('classname', '').split('.')[-1] != 'test_bigquery'
                    for case in cases)
             or any(any(case.find(tag) is not None for tag in ('skipped', 'failure', 'error'))
                    for case in cases)):
-        raise ValueError('BigQuery evidence requires exactly 34 passing acceptance cases')
+        raise ValueError(f'BigQuery evidence requires exactly {count} passing {suite} cases')
     version_output = command(executable, '--version')
     if not re.search(r'(?:installed:\s*|\bdbt\s+)' + re.escape(expected) + r'(?:\s|$)', version_output):
         raise ValueError('Unexpected dbt engine version')
     freeze = command('uv', 'pip', 'freeze', '--python', os.environ['DBT_DQM_ENGINE_PYTHON'])
-    data = {'schema_version': 1, 'scope': 'bigquery', 'suite': 'bigquery-full',
+    data = {'schema_version': 1, 'scope': 'bigquery', 'suite': suite,
             'repository': os.environ['GITHUB_REPOSITORY'], 'run_id': os.environ['GITHUB_RUN_ID'],
             'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'sha': command('git', 'rev-parse', 'HEAD'),
             'tree': command('git', 'rev-parse', 'HEAD^{tree}'),
@@ -44,7 +45,7 @@ def record(junit, output, engine, executable):
             'matrix': {'engine': engine, 'version': expected, 'python': '3.14'},
             'installed': {'python': python, 'dbt': expected},
             'dependency_digest': hashlib.sha256(freeze.encode()).hexdigest(),
-            'counts': {'collected': 34, 'passed': 34, 'failed': 0, 'errors': 0, 'skipped': 0},
+            'counts': {'collected': count, 'passed': count, 'failed': 0, 'errors': 0, 'skipped': 0},
             'started_at': next((suite.attrib['timestamp'] for suite in ET.parse(junit).getroot().iter('testsuite')
                                 if 'timestamp' in suite.attrib), None),
             'finished_at': datetime.now(UTC).isoformat()}
