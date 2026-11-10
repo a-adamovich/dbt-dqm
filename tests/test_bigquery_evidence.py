@@ -88,6 +88,93 @@ def test_verifier_rejects_mismatched_bigquery_evidence(monkeypatch, problem):
         assert module.bigquery_report('owner/repo', run, 'report', tree, 'dbt2') == record
 
 
+def gate_junit(tmp_path, module_name, names):
+    root = ET.Element('testsuites')
+    suite = ET.SubElement(root, 'testsuite', timestamp='2026-11-08T12:00:00Z')
+    for name in names:
+        ET.SubElement(suite, 'testcase', name=name, classname='integration_tests.acceptance.' + module_name)
+    junit = tmp_path / 'junit.xml'
+    ET.ElementTree(root).write(junit)
+    return junit
+
+
+def gate_environment(monkeypatch, core='1.12.6'):
+    monkeypatch.setattr(evidence.platform, 'python_version', lambda: '3.14.6')
+    for key, value in {'GITHUB_REPOSITORY': 'owner/repo', 'GITHUB_RUN_ID': '42', 'GITHUB_RUN_ATTEMPT': '1',
+                       'DBT_DQM_ENGINE_PYTHON': '/v2/python', 'DBT_DQM_CORE_ENGINE_PYTHON': '/core/python'}.items():
+        monkeypatch.setenv(key, value)
+    frozen = []
+    def command(*args):
+        if '--version' in args:
+            return f'Core:\n  - installed: {core}\n' if args[0] == '/core/dbt' else 'dbt 2.0.11'
+        if args[:3] == ('git', 'status', '--porcelain'):
+            return ''
+        if args[:3] == ('uv', 'pip', 'freeze'):
+            frozen.append(args[-1])
+            return 'pkg==1'
+        return 'a' * 40
+    monkeypatch.setattr(evidence, 'command', command)
+    return frozen
+
+
+def test_upgrade_record_identifies_both_engines(tmp_path, monkeypatch):
+    frozen = gate_environment(monkeypatch)
+    names = sorted(evidence.release_evidence.source_names('test_identity_upgrade.py'))
+    output = tmp_path / 'evidence.json'
+    evidence.record(gate_junit(tmp_path, 'test_identity_upgrade', names), output, 'dbt2', '/v2/dbt',
+                    'upgrade', '/core/dbt')
+    data = json.loads(output.read_text())
+    assert data['suite'] == 'bigquery-upgrade' and data['installed']['core'] == '1.12.6'
+    assert frozen == ['/v2/python', '/core/python']
+
+
+@pytest.mark.parametrize('core_executable', [None, 'wrong'])
+def test_upgrade_record_rejects_a_missing_or_wrong_core_engine(tmp_path, monkeypatch, core_executable):
+    gate_environment(monkeypatch, core='1.11.0')
+    names = sorted(evidence.release_evidence.source_names('test_identity_upgrade.py'))
+    with pytest.raises(ValueError):
+        evidence.record(gate_junit(tmp_path, 'test_identity_upgrade', names), tmp_path / 'e.json', 'dbt2',
+                        '/v2/dbt', 'upgrade', core_executable and '/core/dbt')
+
+
+def test_permissions_record_uses_its_own_test_file(tmp_path, monkeypatch):
+    gate_environment(monkeypatch)
+    names = sorted(evidence.release_evidence.source_names('test_bigquery_permissions.py'))
+    output = tmp_path / 'evidence.json'
+    with pytest.raises(ValueError, match='Core engine'):
+        evidence.record(gate_junit(tmp_path, 'test_bigquery_permissions', names), output, 'dbt2', '/v2/dbt', 'permissions')
+    with pytest.raises(ValueError, match='exactly'):
+        evidence.record(gate_junit(tmp_path, 'test_bigquery', names), output, 'dbt1', '/core/dbt', 'permissions')
+
+
+@pytest.mark.parametrize('problem', [None, 'core', 'wrong_suite'])
+def test_gate_rejects_upgrade_evidence_without_both_engines(monkeypatch, problem):
+    module = evidence.release_evidence
+    tree, sha = 'a' * 40, 'b' * 40
+    names = sorted(module.source_names('test_identity_upgrade.py'))
+    root = ET.Element('testsuite')
+    for name in names:
+        ET.SubElement(root, 'testcase', name=name, classname='acceptance.test_identity_upgrade')
+    record = {'schema_version': 1, 'scope': 'bigquery', 'suite': 'bigquery-upgrade', 'repository': 'owner/repo',
+              'run_id': '42', 'run_attempt': '1', 'sha': sha, 'tree': tree, 'worktree_dirty': False,
+              'matrix': {'engine': 'dbt2', 'version': '2.0.11', 'python': '3.14'},
+              'installed': {'dbt': '2.0.11', 'python': '3.14.6', 'core': '1.12.6'}, 'dependency_digest': 'c' * 64,
+              'counts': {'collected': len(names), 'passed': len(names), 'failed': 0, 'errors': 0, 'skipped': 0}}
+    if problem == 'core':
+        del record['installed']['core']
+    if problem == 'wrong_suite':
+        record['suite'] = 'bigquery-full'
+    monkeypatch.setattr(module, 'commit_tree', lambda *args: tree)
+    monkeypatch.setattr(module, 'artifact_files', lambda *args: {
+        'evidence.json': json.dumps(record), 'junit.xml': ET.tostring(root, encoding='unicode')})
+    run = {'id': 42, 'run_attempt': 1, 'head_sha': sha}
+    if problem:
+        with pytest.raises(ValueError):
+            module.bigquery_report('owner/repo', run, 'report', tree, 'dbt2', upgrade=True)
+    else:
+        assert module.bigquery_report('owner/repo', run, 'report', tree, 'dbt2', upgrade=True) == record
+
+
 def test_smoke_marker_matches_the_exact_selection():
     module = evidence.release_evidence
     source = ast.parse((Path(__file__).resolve().parents[1]

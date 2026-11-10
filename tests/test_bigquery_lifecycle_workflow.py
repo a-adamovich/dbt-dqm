@@ -39,3 +39,41 @@ def test_runs_the_parallel_suite_sweeps_and_checks_qa_is_unreachable():
     assert 'test_bigquery.py "${selection[@]}"' in runs
     assert "bigquery_datasets.py" in runs
     assert "dbt_dqm_qa" in runs and "no access" in runs
+
+
+def job_auth(job):
+    return [step for step in WORKFLOW["jobs"][job]["steps"] if "google-github-actions/auth" in step.get("uses", "")]
+
+
+def test_gate_jobs_run_serially_after_the_matrix_and_only_from_main():
+    jobs = WORKFLOW["jobs"]
+    assert jobs["cross-engine-upgrade"]["needs"] == "lifecycle"
+    assert jobs["restricted-permissions"]["needs"] == "cross-engine-upgrade"
+    for name in ("cross-engine-upgrade", "restricted-permissions"):
+        assert jobs[name]["if"] == jobs["lifecycle"]["if"]
+        assert all("-n " not in step.get("run", "") for step in jobs[name]["steps"])
+    assert {step["with"]["name"] for step in jobs["restricted-permissions"]["steps"] if "upload-artifact" in step.get("uses", "")} == {"restricted-bigquery-results"}
+    assert {step["with"]["name"] for step in jobs["cross-engine-upgrade"]["steps"] if "upload-artifact" in step.get("uses", "")} == {"cross-engine-bigquery-results"}
+
+
+def test_upgrade_job_can_read_history_and_records_both_engines():
+    steps = WORKFLOW["jobs"]["cross-engine-upgrade"]["steps"]
+    assert steps[0]["with"]["fetch-depth"] == 0
+    runs = "\n".join(step.get("run", "") for step in steps)
+    assert "DBT_DQM_UPGRADE_CORE_EXECUTABLE=" in runs and "DBT_DQM_UPGRADE_V2_EXECUTABLE=" in runs
+    assert "--kind upgrade --engine dbt2" in runs and "--core-executable" in runs
+
+
+def test_restricted_job_keeps_three_keyless_identities_separate():
+    auths = job_auth("restricted-permissions")
+    assert [step["id"] for step in auths] == ["provisioner", "runner", "reviewer"]
+    assert [step["with"]["service_account"] for step in auths] == [
+        "${{ vars.GCP_CI_SERVICE_ACCOUNT }}", "${{ vars.GCP_CI_RUNNER_SERVICE_ACCOUNT }}",
+        "${{ vars.GCP_CI_REVIEWER_SERVICE_ACCOUNT }}"]
+    for step in auths:
+        assert set(step["with"]) == {"workload_identity_provider", "service_account"}
+    test = next(step for step in WORKFLOW["jobs"]["restricted-permissions"]["steps"]
+                if step.get("name") == "Restricted runner and reviewer on a disposable dataset")
+    for role in ("provisioner", "runner", "reviewer"):
+        assert test["env"][f"DBT_DQM_BIGQUERY_{role.upper()}_CREDENTIALS"] == (
+            "${{ steps." + role + ".outputs.credentials_file_path }}")

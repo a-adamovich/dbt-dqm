@@ -117,3 +117,123 @@ jobs:
           name: scheduled-bigquery-${{ matrix.engine }}-results
           path: acceptance-results/
           if-no-files-found: ignore
+
+  cross-engine-upgrade:
+    needs: lifecycle
+    if: vars.BIGQUERY_LIFECYCLE_ENABLED == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      DBT_DQM_BIGQUERY_PROJECT: ${{ vars.DBT_DQM_BIGQUERY_PROJECT }}
+      DBT_DQM_BIGQUERY_TEST_PROJECT: ${{ vars.DBT_DQM_BIGQUERY_PROJECT }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # The test archives the historical 0.2.4 commit.
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: uv sync --locked --all-groups --extra bigquery
+      - name: Install both isolated engines
+        run: |
+          uv venv /tmp/dbt-dqm-v2-engine --python 3.14
+          uv pip install --python /tmp/dbt-dqm-v2-engine/bin/python dbt==2.0.11
+          {
+            echo "DBT_DQM_UPGRADE_CORE_EXECUTABLE=$GITHUB_WORKSPACE/.venv/bin/dbt"
+            echo "DBT_DQM_UPGRADE_V2_EXECUTABLE=/tmp/dbt-dqm-v2-engine/bin/dbt"
+            echo "DBT_DQM_CORE_ENGINE_PYTHON=$GITHUB_WORKSPACE/.venv/bin/python"
+            echo "DBT_DQM_ENGINE_PYTHON=/tmp/dbt-dqm-v2-engine/bin/python"
+          } >> "$GITHUB_ENV"
+      - name: Serial cross-engine upgrade on a disposable dataset
+        shell: bash
+        run: |
+          mkdir -p acceptance-results
+          set -o pipefail
+          uv run --group dbt1 pytest -q -rA integration_tests/acceptance/test_identity_upgrade.py \
+            --junitxml=acceptance-results/junit.xml 2>&1 | tee acceptance-results/bigquery.log
+      - name: Record complete upgrade evidence
+        run: |
+          uv run --group dbt1 python scripts/bigquery_evidence.py --junit acceptance-results/junit.xml \
+            --output acceptance-results/evidence.json --kind upgrade --engine dbt2 \
+            --executable "$DBT_DQM_UPGRADE_V2_EXECUTABLE" --core-executable "$DBT_DQM_UPGRADE_CORE_EXECUTABLE"
+      - name: Sweep stale acceptance datasets
+        if: always()
+        run: uv run --group dbt1 python integration_tests/acceptance/bigquery_datasets.py --project "$DBT_DQM_BIGQUERY_PROJECT" --older-than-hours 6
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cross-engine-bigquery-results
+          path: acceptance-results/
+          if-no-files-found: ignore
+
+  restricted-permissions:
+    needs: cross-engine-upgrade
+    if: vars.BIGQUERY_LIFECYCLE_ENABLED == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      DBT_DQM_BIGQUERY_PROJECT: ${{ vars.DBT_DQM_BIGQUERY_PROJECT }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Authenticate the provisioner
+        id: provisioner
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
+      - name: Authenticate the restricted runner
+        id: runner
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_RUNNER_SERVICE_ACCOUNT }}
+      - name: Authenticate the restricted reviewer
+        id: reviewer
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_REVIEWER_SERVICE_ACCOUNT }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: uv sync --locked --all-groups --extra bigquery
+      - name: Restricted runner and reviewer on a disposable dataset
+        shell: bash
+        env:
+          DBT_DQM_BIGQUERY_PROVISIONER_CREDENTIALS: ${{ steps.provisioner.outputs.credentials_file_path }}
+          DBT_DQM_BIGQUERY_RUNNER_CREDENTIALS: ${{ steps.runner.outputs.credentials_file_path }}
+          DBT_DQM_BIGQUERY_REVIEWER_CREDENTIALS: ${{ steps.reviewer.outputs.credentials_file_path }}
+          DBT_DQM_BIGQUERY_RUNNER_IDENTITY: ${{ vars.GCP_CI_RUNNER_SERVICE_ACCOUNT }}
+          DBT_DQM_BIGQUERY_REVIEWER_IDENTITY: ${{ vars.GCP_CI_REVIEWER_SERVICE_ACCOUNT }}
+        run: |
+          mkdir -p acceptance-results
+          set -o pipefail
+          uv run --group dbt1 pytest -q -rA integration_tests/acceptance/test_bigquery_permissions.py \
+            --junitxml=acceptance-results/junit.xml 2>&1 | tee acceptance-results/bigquery.log
+      - name: Record complete permissions evidence
+        env:
+          DBT_DQM_ENGINE_PYTHON: ${{ github.workspace }}/.venv/bin/python
+        run: |
+          uv run --group dbt1 python scripts/bigquery_evidence.py --junit acceptance-results/junit.xml \
+            --output acceptance-results/evidence.json --kind permissions --engine dbt1 \
+            --executable "$GITHUB_WORKSPACE/.venv/bin/dbt"
+      - name: Sweep stale acceptance datasets
+        if: always()
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.provisioner.outputs.credentials_file_path }}
+        run: uv run --group dbt1 python integration_tests/acceptance/bigquery_datasets.py --project "$DBT_DQM_BIGQUERY_PROJECT" --older-than-hours 6
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: restricted-bigquery-results
+          path: acceptance-results/
+          if-no-files-found: ignore

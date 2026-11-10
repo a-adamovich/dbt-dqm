@@ -50,9 +50,10 @@ def normal_gate():
         sha=sha, tree=tree, run_id=str(full['id']), run_attempt=str(full['run_attempt']),
         repository=repository)
     cloud, _ = successful_run(repository, 'bigquery-lifecycle.yml', sha,
-        {'lifecycle (dbt1)', 'lifecycle (dbt2)', 'restricted-permissions'}, tree)
+        {'lifecycle (dbt1)', 'lifecycle (dbt2)', 'cross-engine-upgrade', 'restricted-permissions'}, tree)
     for engine in ('dbt1', 'dbt2'):
         bigquery_report(repository, cloud, f'scheduled-bigquery-{engine}-results', tree, engine)
+    bigquery_report(repository, cloud, 'cross-engine-bigquery-results', tree, 'dbt2', upgrade=True)
     bigquery_report(repository, cloud, 'restricted-bigquery-results', tree, 'dbt1', permissions=True)
 
 

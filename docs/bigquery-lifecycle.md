@@ -13,12 +13,15 @@ When started from `main`, `.github/workflows/bigquery-lifecycle.yml`:
 3. runs the acceptance suite in parallel, with a disposable, labelled `dqm_acceptance_*`
    dataset for each test; and
 4. sweeps labelled acceptance datasets older than six hours. Do not run other acceptance
-   tests that need those old datasets at the same time.
+   tests that need those old datasets at the same time;
+5. after both engines pass, runs the serial `cross-engine-upgrade` job from Core 1.12.6 to
+   dbt 2.0.11 on a disposable dataset; and
+6. then runs the serial `restricted-permissions` job on another disposable dataset.
 
-Results are uploaded as `scheduled-bigquery-dbt1-results` and
-`scheduled-bigquery-dbt2-results` artifacts. Both matrix jobs must pass on the exact candidate
-commit before the 0.2.2 release; see the [compatibility gate](dbt-2-compatibility.md#release-gate).
-A failure opens or updates an issue labelled `scheduled-bigquery`.
+Results are uploaded as `scheduled-bigquery-dbt1-results`, `scheduled-bigquery-dbt2-results`,
+`cross-engine-bigquery-results` and `restricted-bigquery-results` artifacts. All four jobs must
+pass on the exact candidate commit before a release; see the
+[release checklist](release-checklist.md).
 
 ## How the connection works
 
@@ -144,6 +147,39 @@ echo "projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/pro
 If a command reports a permission error, have a project administrator review it rather than
 using a more powerful service-account key. If an API is disabled, the administrator may also
 need to enable it for the project.
+
+## Add the restricted runner and reviewer
+
+The `restricted-permissions` job uses three separate identities. The CI service account above is
+the only provisioner: it creates the disposable dataset, installs the package, issues grants and
+deletes the dataset. Two more identities run the checks and hold only the following:
+
+| Identity | Project role | Disposable dataset | Tables |
+| --- | --- | --- | --- |
+| `dbt-dqm-ci-runner` | `roles/bigquery.jobUser` | Writer, on the dataset and its audit twin | None |
+| `dbt-dqm-ci-reviewer` | `roles/bigquery.jobUser` | Reader | `dataEditor` on the four reviewer tables |
+
+The dataset and table grants are made per run by the provisioner, so neither identity has standing
+data access. Don't reuse `dbt-dqm-runner` or `dbt-dqm-reviewer`: they have access to the shared QA
+dataset, and the test fails if a CI identity can read it.
+
+```bash
+for name in dbt-dqm-ci-runner dbt-dqm-ci-reviewer; do
+  gcloud iam service-accounts create "$name" --project="$PROJECT_ID"
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" --condition=None \
+    --member="serviceAccount:$name@$PROJECT_ID.iam.gserviceaccount.com" \
+    --role=roles/bigquery.jobUser
+  gcloud iam service-accounts add-iam-policy-binding \
+    "$name@$PROJECT_ID.iam.gserviceaccount.com" --project="$PROJECT_ID" \
+    --role=roles/iam.workloadIdentityUser \
+    --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/a-adamovich/dbt-dqm"
+done
+
+gh variable set GCP_CI_RUNNER_SERVICE_ACCOUNT --repo a-adamovich/dbt-dqm \
+  --body "dbt-dqm-ci-runner@$PROJECT_ID.iam.gserviceaccount.com"
+gh variable set GCP_CI_REVIEWER_SERVICE_ACCOUNT --repo a-adamovich/dbt-dqm \
+  --body "dbt-dqm-ci-reviewer@$PROJECT_ID.iam.gserviceaccount.com"
+```
 
 ## Configure GitHub repository variables
 

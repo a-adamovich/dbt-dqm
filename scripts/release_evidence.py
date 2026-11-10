@@ -45,6 +45,9 @@ BIGQUERY_SMOKE_TESTS = frozenset({
 })
 
 
+CROSS_ENGINE_CORE_VERSION = "1.12.6"
+
+
 def source_names(filename):
     """Derive checked-in cases without importing warehouse clients or executing tests."""
     source = ast.parse((ROOT / "integration_tests/acceptance" / filename).read_text())
@@ -71,6 +74,22 @@ def bigquery_selection(engine):
             raise ValueError("BigQuery smoke selection names a case that does not exist")
         return "bigquery-smoke", set(BIGQUERY_SMOKE_TESTS)
     raise ValueError("Unknown BigQuery engine")
+
+
+def bigquery_suite(kind, engine):
+    """Return the evidence suite, test file and exact case names for one gate job."""
+    if kind == "acceptance":
+        suite, names = bigquery_selection(engine)
+        return suite, "test_bigquery.py", names
+    if kind == "permissions":
+        if engine != "dbt1":
+            raise ValueError("Restricted permissions requires the Core engine")
+        return "bigquery-permissions", "test_bigquery_permissions.py", source_names("test_bigquery_permissions.py")
+    if kind == "upgrade":
+        if engine != "dbt2":
+            raise ValueError("The cross-engine upgrade is recorded on dbt 2")
+        return "bigquery-upgrade", "test_identity_upgrade.py", source_names("test_identity_upgrade.py")
+    raise ValueError("Unknown BigQuery evidence kind")
 
 
 def commit_tree(repository, sha):
@@ -186,7 +205,7 @@ def warehouse_report(repository, run, name, tree, *, core=False):
 
 
 
-def bigquery_report(repository, run, name, tree, engine, *, permissions=False):
+def bigquery_report(repository, run, name, tree, engine, *, permissions=False, upgrade=False):
     """Require fresh, same-attempt evidence and the exact BigQuery selection for the engine."""
     files = artifact_files(repository, run, name)
     records = [json.loads(value) for path, value in files.items() if Path(path).name == "evidence.json"]
@@ -195,13 +214,11 @@ def bigquery_report(repository, run, name, tree, engine, *, permissions=False):
         raise ValueError("Missing BigQuery evidence or JUnit report")
     record = records[0]
     version = {"dbt1": "1.12.6", "dbt2": "2.0.11"}[engine]
-    filename = 'test_bigquery_permissions.py' if permissions else 'test_bigquery.py'
-    if permissions and engine != 'dbt1':
-        raise ValueError('Restricted permissions requires the Core engine')
-    suite, expected = (('bigquery-permissions', source_names(filename)) if permissions
-                       else bigquery_selection(engine))
-    count = 1 if permissions else len(expected)
-    if (record.get("schema_version") != 1 or record.get("scope") != "bigquery"
+    kind = 'permissions' if permissions else 'upgrade' if upgrade else 'acceptance'
+    suite, filename, expected = bigquery_suite(kind, engine)
+    count = len(expected)
+    if (upgrade and record.get("installed", {}).get("core") != CROSS_ENGINE_CORE_VERSION) or (
+            record.get("schema_version") != 1 or record.get("scope") != "bigquery"
             or record.get("suite") != suite or record.get("repository") != repository
             or record.get("run_id") != str(run["id"])
             or record.get("run_attempt") != str(run["run_attempt"])
