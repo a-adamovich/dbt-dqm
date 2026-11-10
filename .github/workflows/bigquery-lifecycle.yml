@@ -98,7 +98,9 @@ jobs:
           set -o pipefail
           selection=()
           if [[ "${{ matrix.engine }}" == dbt1 ]]; then selection=(-m bigquery_smoke); fi
-          uv run --group dbt1 pytest -q -rA -n 6 --dist load integration_tests/acceptance/test_bigquery.py "${selection[@]}" \
+          workers=6
+          if [[ "${{ matrix.engine }}" == dbt1 ]]; then workers=4; fi
+          uv run --group dbt1 pytest -q -rA -n "$workers" --dist load integration_tests/acceptance/test_bigquery.py "${selection[@]}" \
             --junitxml=acceptance-results/junit.xml 2>&1 | tee acceptance-results/bigquery.log
       - name: Record complete acceptance evidence
         run: |

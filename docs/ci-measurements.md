@@ -164,7 +164,10 @@ Core cases and does not mean Core is cheaper per case.
 | Cross-engine upgrade | 1, 800, 5.8 GiB, 0.7 | 1, 800, 5.8 GiB, 0.6 |
 | Total | 25,869, 167.1 GiB, 14.8 | 16,689, 111.5 GiB, 12.6 |
 
-Billed bytes fell 33%, almost entirely on Core. Excluded from the comparison: one failed Core smoke
+Billed bytes fell 33%, almost entirely on Core. The dbt 2 stage billed 3.1 GiB less, which is an
+observed difference between two runs and is not attributed to any single change: they also differ
+in the merged apply-fencing case, the cases that skip `maintain_dqm`, and worker count. Excluded
+from the comparison: one failed Core smoke
 attempt on the reduced selection (3,749 jobs, 25.5 GiB) that stopped on a BigQuery 500 error, the
 smoke pilot, the 0.2.5 restricted-permissions run and earlier 0.2.5 attempts. Each labelled total
 is an exact multiple of 10 MiB, BigQuery's minimum charge per query, so the number of queries
@@ -173,7 +176,8 @@ per run reported no billed bytes.
 
 ## BigQuery tiers
 
-Full acceptance runs on dbt 2 and the exact `BIGQUERY_SMOKE_TESTS` selection runs on Core. Before
+Full acceptance runs on dbt 2 and the exact `BIGQUERY_SMOKE_TESTS` selection runs on Core, with six workers on dbt 2 and four on Core, matching the validated runs.
+Before
 merging a change to macros, models, BigQuery adapter or SQL behavior, `warehouse.py`, browsing or
 the CLI runner, run the smoke selection on dbt 2 once, with maintainer authorization. The 1 GiB
 qualifications in the measurement record above apply to every tier.
