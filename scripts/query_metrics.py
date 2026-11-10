@@ -58,6 +58,10 @@ def _measure(project, location, view, scope, scope_note, validation_id, started,
         ), datasets as (
           select distinct r.dataset_id from window_jobs j,unnest(j.referenced_tables) r
           where j.job_id in (select job_id from tagged) or j.parent_job_id in (select job_id from tagged)
+        ), touched as (  -- A CTE because BigQuery rejects a correlated subquery that reads another table.
+          select distinct j.job_id from window_jobs j,unnest(j.referenced_tables) r
+          where r.dataset_id in (select dataset_id from datasets)
+             or (@permissions and r.dataset_id='dbt_dqm_qa')
         )
         select if(job_id in (select job_id from tagged) or parent_job_id in (select job_id from tagged),
                   'labelled','unlabelled_app_or_other_activity') as category,
@@ -68,9 +72,7 @@ def _measure(project, location, view, scope, scope_note, validation_id, started,
         from window_jobs
         where statement_type is distinct from 'SCRIPT'
           and (job_id in (select job_id from tagged) or parent_job_id in (select job_id from tagged)
-               or exists(select 1 from unnest(referenced_tables) r
-                         where r.dataset_id in (select dataset_id from datasets)
-                            or (@permissions and r.dataset_id='dbt_dqm_qa')))
+               or job_id in (select job_id from touched))
         group by category
         """
     config = bigquery.QueryJobConfig(maximum_bytes_billed=1024 ** 3, query_parameters=[

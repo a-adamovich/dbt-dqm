@@ -36,6 +36,16 @@ def test_cost_metrics_exclude_parent_scripts_and_report_unlabelled_queries(modul
     assert queries[0][1].maximum_bytes_billed == 1024 ** 3
 
 
+def test_dataset_attribution_avoids_a_correlated_subquery(modules, monkeypatch):
+    metrics, _ = modules
+    queries = view_clients(monkeypatch, {'JOBS_BY_PROJECT': [{'category': 'labelled', 'jobs': 1}]})
+    metrics.job_metrics('private-project', 'opaque-run', NOW, NOW)
+    # BigQuery rejected this form with invalidQuery, so spend was never measured.
+    assert 'exists(select 1 from unnest(referenced_tables)' not in queries[0]
+    assert 'job_id in (select job_id from touched)' in queries[0]
+    assert "r.dataset_id='dbt_dqm_qa'" in queries[0]
+
+
 def test_denied_metrics_are_unavailable_instead_of_zero(modules, monkeypatch):
     from google.api_core.exceptions import Forbidden
     from google.cloud import bigquery

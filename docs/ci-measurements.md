@@ -142,8 +142,11 @@ maintenance, so the difference is not attributed to any single change.
 | Scenario, including 372 s of repeated `initialize_dqm` | 3,787 | 71 |
 
 Runner query jobs were null on dbt 2.0.11, and SQL calls were reported. Spend was not measured:
-the metadata query failed with `BadRequest`. The cause is unknown because that run kept only the
-error class. `query_metrics.py` now also records the view and BigQuery's structured error code.
+the metadata query failed with `BadRequest`. A later run recorded `invalidQuery`, and a dry run
+traced it to a correlated subquery reading another table. `query_metrics.py` no longer uses that
+form and also records the view and BigQuery's structured error code. A dry run accepts the
+corrected query, but it has not yet returned real figures. The view it falls back to covers only
+the querying identity.
 
 ## BigQuery tiers
 
