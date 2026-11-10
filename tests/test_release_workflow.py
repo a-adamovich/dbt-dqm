@@ -222,7 +222,6 @@ def _create_release(tmp_path, tag):
         "import json, os, sys\n"
         "from pathlib import Path\n"
         "Path(os.environ['RELEASE_LOG']).write_text(json.dumps(sys.argv[1:]))\n"
-        "if sys.argv[1:3] == ['release', 'view']: print(os.environ.get('DRAFT_RELEASE', 'true'))\n"
     )
     gh.chmod(0o755)
     script = tmp_path / "release.sh"
@@ -262,9 +261,6 @@ def test_only_pre_release_tags_create_a_github_pre_release(tmp_path):
     candidate = _create_release(tmp_path, "v0.2.3")
     assert "--prerelease" not in candidate
     assert "--generate-notes" in candidate
-    release = _create_release(tmp_path, "v0.2.5")
-    assert "edit" in release and "--draft=false" in release
-    assert "--notes-file" not in release
     assert "--generate-notes" in _create_release(tmp_path, "v0.2.6")
 
 
@@ -280,29 +276,34 @@ def test_alpha_version_is_accepted_by_python_and_dbt():
     Project.validate(yaml.safe_load((ROOT / "dbt_project.yml").read_text()))
 
 
-@pytest.mark.parametrize('event,ref,verify,preflight,publishes', [
-    ('push', 'refs/tags/v0.2.5', False, 'skipped', False),
-    ('push', 'refs/tags/v0.2.6', False, 'skipped', False),
-    ('push', 'refs/tags/v0.2.6', False, 'success', True),
-    ('workflow_dispatch', 'refs/heads/main', True, 'success', False),
-    ('workflow_dispatch', 'refs/tags/v0.2.5', False, 'failure', False),
-    ('workflow_dispatch', 'refs/tags/v0.2.5', False, 'success', True),
-    ('workflow_dispatch', 'refs/tags/v0.2.6', False, 'success', False),
-])
-def test_only_attested_release_can_request_publication(event, ref, verify, preflight, publishes):
+def test_tag_push_is_the_only_trigger_and_gate_failure_blocks_publication():
     flow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())
-    job = flow['jobs']['release']
-    assert job['needs'] == 'preflight'
-    expression = job['if']
-    for key, value in {'always()': True, 'github.event_name': event, 'github.ref': ref,
-                       'inputs.verify_only': verify, 'needs.preflight.result': preflight}.items():
-        expression = expression.replace(key, repr(value))
-    expression = expression.replace('&&', ' and ').replace('||', ' or ').replace('!', 'not ')
-    expression = expression.replace('not =', '!=')
-    assert bool(eval(expression, {'__builtins__': {}})) is publishes
-    verifier = flow['jobs']['preflight']
+    # PyYAML interprets the YAML 1.1 key "on" as True.
+    assert flow.get('on', flow.get(True)) == {'push': {'tags': ['v*']}}
+    assert set(flow['jobs']) == {'preflight', 'release'}
+    job, verifier = flow['jobs']['release'], flow['jobs']['preflight']
+    # A conditional using always() could continue after a failed gate.
+    assert job['needs'] == 'preflight' and 'if' not in job and 'if' not in verifier
     assert 'environment' not in verifier
     assert verifier['permissions'] == {'contents': 'read', 'actions': 'read'}
     assert all('uv publish' not in step.get('run', '') for step in verifier['steps'])
-    retrieval = flow['jobs']['fetch-evidence']
-    assert 'environment' not in retrieval and 'id-token' not in retrieval['permissions']
+    for steps, name in ((verifier['steps'], 'Verify normal credentialed evidence before approval'),
+                        (job['steps'], 'Require credentialed BigQuery verification for both engines')):
+        gate = next(step for step in steps if step.get('name') == name)
+        assert 'if' not in gate and gate['run'].endswith('python scripts/check_bigquery_release_gate.py')
+
+
+def test_removing_the_attestation_path_kept_publication_protections():
+    text = (ROOT / '.github/workflows/release.yml').read_text()
+    for removed in ('workflow_dispatch', 'local_bigquery_attested', 'evidence_digest', 'download_release_evidence',
+                    'local-validation', 'v0.2.5', '--attest'):
+        assert removed not in text
+    job = yaml.safe_load(text)['jobs']['release']
+    assert job['environment'] == 'pypi'
+    assert job['permissions']['id-token'] == 'write' and job['permissions']['attestations'] == 'write'
+    assert 'secrets.' not in text  # Trusted publishing; no stored PyPI token.
+    names = [step.get('name') for step in job['steps']]
+    assert names.index('Require credentialed BigQuery verification for both engines') < names.index(
+        'Attest distribution provenance') < names.index('Verify distribution provenance') < names.index(
+        'Publish to PyPI through trusted publishing')
+    assert any('actions/attest-build-provenance' in step.get('uses', '') for step in job['steps'])
