@@ -69,7 +69,7 @@ def validate(local, path, value):
 
 def test_complete_local_selection_passes(modules, tmp_path):
     local, _ = modules
-    assert len(local.expected_names("bigquery-dbt2")) == 34
+    assert len(local.expected_names("bigquery-dbt2")) == 33
     assert validate(local, tmp_path / "bundle.json", evidence(local))
 
 

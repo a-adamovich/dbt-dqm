@@ -71,6 +71,117 @@ accept the profile/label configuration. dbt 2.0.11 did not enforce this profile 
 App search retains its own configured limit; other app queries and the restricted-permissions
 fixture are not covered by this test cap. This is not a total-suite spending ceiling.
 
+## BigQuery development measurements
+
+`scripts/bigquery_measure.py` runs a BigQuery selection once and writes `measurement.json` to a
+private directory outside the repository. Its output is marked as a development measurement and
+can never count as release evidence. Each case reports:
+
+| Field | Meaning |
+| --- | --- |
+| `case_seconds` | Whole case from JUnit: setup, call and teardown |
+| `fixture_setup_seconds` | Pytest setup stage: `fixture_dataset_seconds`, `fixture_project_seconds` and `fixture_seed_seconds` |
+| `installation_seconds` | The case's first `initialize_dqm` plus its first deployment of the package models |
+| `installation_steps` | The steps counted as installation, in order |
+| `installation_includes_reconcile` | The first deployment also reconciled captured evidence, so its time is an upper bound on installing |
+| `initialize_repeat_seconds` | Later, idempotent `initialize_dqm` calls. Not installation |
+| `scenario_seconds` | `case_seconds` minus fixture setup, installation and teardown |
+| `runner_phase_seconds`, `runner_sql_calls`, `runner_query_jobs` | Per phase from each `dbt-dqm run`'s `dqm_workflow_metrics.json`, read after that invocation |
+| `runner_metrics_missing` | Invocations that wrote no fresh metrics file. Their installation time is not attributed |
+
+Columns overlap, so do not add them together. The seed is in both fixture setup and the dbt
+subprocess totals, installation is inside the dbt and runner totals, and cases that run concurrent
+work can sum above their wall time. `runner_sql_calls` and `runner_query_jobs` are null when the
+engine reported none, which means unknown rather than zero. Fixture setup and installation are the
+most a merge can save per absorbed case. They do not show that two scenarios can share state.
+
+### What the smoke pilot can justify
+
+The pilot measures only the cases it selects, and it is one run on one engine. The 0.2.5 receipts
+give per-case totals without phases, so they cannot fill the gap. A consolidation needs measured
+fixture and installation time for **every** case it merges, and the scenarios must be able to share
+state.
+
+| Proposed consolidation | Cases in smoke | Outcome |
+| --- | --- | --- |
+| Apply fencing | Both | Merged: about 109 s saved |
+| Collation | Both | Stays separate: about 10 s to save, and the scenarios cannot share state |
+| Batch rollback and `--empty` | Retained case only; `empty_changes_no_tracking_table` is not | Not justified by smoke |
+| Capture integrity, recurrence payloads, maintenance faults, maintenance cleanup and health, stages and retention, annotation staging, upgrades, install and migration leases, app audit and browsing | None | Not justified by smoke |
+
+The rows not justified by smoke need a measurement of the `full` selection, or stay separate. The
+cost of a case outside the smoke selection must not be inferred from a smoke case.
+
+Collation cannot share state in either order. The refusal scenario must create its collated
+`dqm_install` in a dataset with no tracking tables, and the lifecycle scenario asserts exact counts
+from a clean installation. In the refusal case, initialization and the full refresh are the behavior
+under test, so only its fixture setup could be saved.
+
+### Assertion map
+
+| Retained case | Absorbed case | Where its assertions are |
+| --- | --- | --- |
+| `test_bigquery_apply_fencing_overlap_stale_generation_and_abandoned_runner` | `test_bigquery_overlapping_applies` | Unchanged, as the first half. It needs the clean installation |
+| same | `test_bigquery_stale_generation_annotations_and_abandoned_runner` | Unchanged, as the second half, after the overlap leaves the same seven occurrences |
+
+In a merged case, the first failure hides any later ones.
+
+### Smoke pilot, 2026-11-10
+
+Candidate `7b72db75`, dbt 2.0.11, six workers, ten cases before the merge above: 10 passed in
+1,038.6 s (17m19s). Case time summed to 5,364 s, an effective parallelism of 5.2, and the log has no
+rate-limit, quota or concurrent-update messages. It compares with 6,133 s for the same ten cases in
+the four-worker 0.2.5 receipt. That is one run on each side, and 15 cases now skip post-capture
+maintenance, so the difference is not attributed to any single change.
+
+| Share of case time | Seconds | % |
+| --- | --- | --- |
+| Fixture setup (dataset, project, seed) | 104 | 2 |
+| First installation (upper bound, includes reconciliation in 9 of 10 cases) | 1,465 | 27 |
+| Teardown | 8 | under 1 |
+| Scenario, including 372 s of repeated `initialize_dqm` | 3,787 | 71 |
+
+Runner query jobs were null on dbt 2.0.11, and SQL calls were reported. Spend was not measured:
+the metadata query failed with `BadRequest`. A later run recorded `invalidQuery`, and a dry run
+traced it to a correlated subquery reading another table. `query_metrics.py` no longer uses that
+form and also records the view and BigQuery's structured error code.
+
+## BigQuery spend, 0.2.5 and the reduced selection, 2026-11-10
+
+Read after the runs from `INFORMATION_SCHEMA.JOBS_BY_USER` with the corrected `job_metrics` query.
+Both sides use the same identity scope and attribution rules, and each run's own validation ID and
+time window. The project-wide view is denied, so jobs run by any other identity are not included.
+The GCP billing report is the only complete figure.
+
+Only stages that passed are compared. 0.2.5 ran all 34 cases on both engines. The reduced selection
+runs 33 cases on dbt 2.0.11 and 9 on Core 1.12.6, so most of the saving comes from running fewer
+Core cases and does not mean Core is cheaper per case.
+
+| Stage | 0.2.5 cases, jobs, billed, slot hours | Reduced cases, jobs, billed, slot hours |
+|---|---|---|
+| Full on dbt 2.0.11 | 34, 12,749, 82.3 GiB, 7.2 | 33, 11,977, 79.2 GiB, 9.1 |
+| Core 1.12.6 | 34, 12,320, 79.0 GiB, 6.9 | 9, 3,912, 26.5 GiB, 2.9 |
+| Cross-engine upgrade | 1, 800, 5.8 GiB, 0.7 | 1, 800, 5.8 GiB, 0.6 |
+| Total | 25,869, 167.1 GiB, 14.8 | 16,689, 111.5 GiB, 12.6 |
+
+Billed bytes fell 33%, almost entirely on Core. The dbt 2 stage billed 3.1 GiB less, which is an
+observed difference between two runs and is not attributed to any single change: they also differ
+in the merged apply-fencing case, the cases that skip `maintain_dqm`, and worker count. Excluded
+from the comparison: one failed Core smoke
+attempt on the reduced selection (3,749 jobs, 25.5 GiB) that stopped on a BigQuery 500 error, the
+smoke pilot, the 0.2.5 restricted-permissions run and earlier 0.2.5 attempts. Each labelled total
+is an exact multiple of 10 MiB, BigQuery's minimum charge per query, so the number of queries
+appears to drive billed bytes. Totals count reported statistics only, and up to a few dozen jobs
+per run reported no billed bytes.
+
+## BigQuery tiers
+
+Full acceptance runs on dbt 2 and the exact `BIGQUERY_SMOKE_TESTS` selection runs on Core, with six workers on dbt 2 and four on Core, matching the validated runs.
+Before
+merging a change to macros, models, BigQuery adapter or SQL behavior, `warehouse.py`, browsing or
+the CLI runner, run the smoke selection on dbt 2 once, with maintainer authorization. The 1 GiB
+qualifications in the measurement record above apply to every tier.
+
 ## 0.2.4 development measurements
 
 | Check | Environment | Result | Duration |

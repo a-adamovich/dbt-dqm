@@ -31,6 +31,20 @@ def command(*args):
     return subprocess.run(args, cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
 
 
+# Exact BigQuery smoke selection: Core runs only these; dbt 2 runs the whole module.
+BIGQUERY_SMOKE_TESTS = frozenset({
+    "test_default_maintenance_shortcuts_keep_retention_fence_and_health",
+    "test_bigquery_batch_rollback_lost_response_and_empty",
+    "test_bigquery_apply_fencing_overlap_stale_generation_and_abandoned_runner",
+    "test_bigquery_dedicated_limits_full_refresh_and_complex_payloads",
+    "test_run_changes_sorted_results_and_collection_limits",
+    "test_generic_and_singular_lifecycle",
+    "test_bigquery_identity_signature_migration_preserves_continuity",
+    "test_bigquery_collated_dataset_lifecycle_and_case_sensitive_changes[und:ci]",
+    "test_bigquery_collated_tracking_refuses_writes_and_explicit_refresh_recovers[und:ci]",
+})
+
+
 def source_names(filename):
     """Derive checked-in cases without importing warehouse clients or executing tests."""
     source = ast.parse((ROOT / "integration_tests/acceptance" / filename).read_text())
@@ -45,6 +59,18 @@ def source_names(filename):
                 suffixes = [f"[{value}]" for value in values]
         names.update(node.name + suffix for suffix in suffixes)
     return names
+
+
+def bigquery_selection(engine):
+    """Return the evidence suite and exact case names required for one engine."""
+    names = source_names("test_bigquery.py")
+    if engine == "dbt2":
+        return "bigquery-full", names
+    if engine == "dbt1":
+        if not BIGQUERY_SMOKE_TESTS <= names:
+            raise ValueError("BigQuery smoke selection names a case that does not exist")
+        return "bigquery-smoke", set(BIGQUERY_SMOKE_TESTS)
+    raise ValueError("Unknown BigQuery engine")
 
 
 def commit_tree(repository, sha):
@@ -161,7 +187,7 @@ def warehouse_report(repository, run, name, tree, *, core=False):
 
 
 def bigquery_report(repository, run, name, tree, engine, *, permissions=False):
-    """Require fresh, same-attempt evidence and every BigQuery acceptance case."""
+    """Require fresh, same-attempt evidence and the exact BigQuery selection for the engine."""
     files = artifact_files(repository, run, name)
     records = [json.loads(value) for path, value in files.items() if Path(path).name == "evidence.json"]
     reports = [value for path, value in files.items() if Path(path).name == "junit.xml"]
@@ -169,11 +195,12 @@ def bigquery_report(repository, run, name, tree, engine, *, permissions=False):
         raise ValueError("Missing BigQuery evidence or JUnit report")
     record = records[0]
     version = {"dbt1": "1.12.6", "dbt2": "2.0.11"}[engine]
-    suite = 'bigquery-permissions' if permissions else 'bigquery-full'
     filename = 'test_bigquery_permissions.py' if permissions else 'test_bigquery.py'
-    count = 1 if permissions else 34
     if permissions and engine != 'dbt1':
         raise ValueError('Restricted permissions requires the Core engine')
+    suite, expected = (('bigquery-permissions', source_names(filename)) if permissions
+                       else bigquery_selection(engine))
+    count = 1 if permissions else len(expected)
     if (record.get("schema_version") != 1 or record.get("scope") != "bigquery"
             or record.get("suite") != suite or record.get("repository") != repository
             or record.get("run_id") != str(run["id"])
@@ -188,7 +215,7 @@ def bigquery_report(repository, run, name, tree, engine, *, permissions=False):
         raise ValueError("Mismatched BigQuery evidence")
     cases = list(ET.fromstring(reports[0]).iter("testcase"))
     names = [case.attrib["name"] for case in cases]
-    if (len(names) != count or len(set(names)) != count or set(names) != source_names(filename)
+    if (len(names) != count or len(set(names)) != count or set(names) != expected
             or any(case.attrib.get("classname", "").split(".")[-1] != filename[:-3] for case in cases)
             or any(any(case.find(tag) is not None for tag in ("failure", "error", "skipped"))
                    for case in cases)

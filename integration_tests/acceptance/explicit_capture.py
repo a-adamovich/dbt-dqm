@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 import subprocess
 
+from phase_timing import timed
+
 
 def collect(command, result, target, *, maintenance=True):
     artifact = target / "run_results.json"
@@ -40,8 +42,9 @@ def collect(command, result, target, *, maintenance=True):
                           "_dbt_dqm_maintenance_invocation_id": data["metadata"]["invocation_id"]})]
         if args is not None:
             invocation += ["--args", json.dumps(args)]
-        phase = subprocess.run(invocation, capture_output=True, text=True, timeout=600, check=False,
-                               cwd=options[options.index("--project-dir") + 1])
+        with timed("dbt", macro):
+            phase = subprocess.run(invocation, capture_output=True, text=True, timeout=600, check=False,
+                                   cwd=options[options.index("--project-dir") + 1])
         result.stdout += phase.stdout
         result.stderr += phase.stderr
         if phase.returncode:

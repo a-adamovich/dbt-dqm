@@ -72,7 +72,10 @@ packages = ["src/dbt_dqm_app"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-markers = ["core: required real-warehouse issue-integrity checks for pull requests"]
+markers = [
+  "core: required real-warehouse issue-integrity checks for pull requests",
+  "bigquery_smoke: exact BigQuery selection run on Core and for day-to-day BigQuery changes",
+]
 
 [tool.ruff]
 line-length = 100

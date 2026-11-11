@@ -21,8 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION = "0.2.5"
 REPOSITORY = "a-adamovich/dbt-dqm"
 SUITES = {
-    "bigquery-dbt2": ("test_bigquery.py", "2.0.11", 4, 34),
-    "bigquery-dbt1": ("test_bigquery.py", "1.12.6", 2, 34),
+    "bigquery-dbt2": ("test_bigquery.py", "2.0.11", 4, 33),
+    "bigquery-dbt1": ("test_bigquery.py", "1.12.6", 2, 33),
     "bigquery-permissions": ("test_bigquery_permissions.py", "1.12.6", 0, 1),
     "bigquery-upgrade": ("test_identity_upgrade.py", "1.12.6", 0, 1),
 }
