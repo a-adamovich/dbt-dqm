@@ -1,6 +1,6 @@
 # Release checklist
 
-For 0.2.5, use the fresh local-evidence procedure below. Other releases require the normal credentialed gate, whose restricted-identity execution still needs maintainer setup.
+Every release requires the normal credentialed gate. Its cloud identities and workflow still need maintainer setup and a first successful run; until then a release tag stops at verification and cannot publish.
 
 This is the single current list of what must pass before a release tag is pushed. Dated records of
 earlier verification are kept as history (see [Historical records](#historical-records)); they
@@ -17,7 +17,7 @@ documentation, invalidates that candidate's evidence. Store generated receipts o
 | --- | --- | --- |
 | 1 | Fast CI passes on the candidate | The `required` check covers units on Python 3.11–3.14, packaging/security floors, representative native portability, real dbt 2 parse/compile, offline BigQuery compile and eight real Postgres core cases |
 | 2 | Manual full Postgres/platform validation passes | Run `Full validation` on the candidate. Its `validated` check requires the complete Postgres 14/16 and Python 3.11–3.14 matrix, Core 1.11.0, full packaging/portability/compile matrices and candidate QA; warehouse counts and exact-run evidence must pass |
-| 3 | Credentialed BigQuery acceptance, **one full run per engine** on the candidate | After 0.2.5, require every case in `test_bigquery.py` on dbt 2 and the exact `BIGQUERY_SMOKE_TESTS` selection on Core, with zero skips/failures/errors. Version 0.2.5 required all 34 cases on each engine. For 0.2.5, run locally after the candidate/cost checkpoint using the receipt collector. |
+| 3 | Credentialed BigQuery acceptance, **one full run per engine** on the candidate | Require every case in `test_bigquery.py` on dbt 2 and the exact `BIGQUERY_SMOKE_TESTS` selection on Core, with zero skips/failures/errors. |
 | 4 | Restricted runner/reviewer permissions gate, run serially after 3 | `DBT_DQM_BIGQUERY_RUNNER_CREDENTIALS=… DBT_DQM_BIGQUERY_REVIEWER_CREDENTIALS=… uv run --group dbt1 --extra bigquery pytest integration_tests/acceptance/test_bigquery_permissions.py` against the shared QA dataset. The normal gate instead requires the `cross-engine-upgrade` and `restricted-permissions` jobs in `bigquery-lifecycle.yml`, both serial and on disposable datasets; see [On-demand BigQuery verification](bigquery-lifecycle.md) |
 | 5 | Browser QA of the review app, when the app or its dependencies changed | Sync, edit and Apply, the "busy" message under a held lock, the Health tab including Maintenance; in warehouse mode (`--browse warehouse`) paging, filters, search (including a refusal), an edit applied from a later page, and the offline view |
 | 6 | Cache-boundary memory, when runtime code or dependencies changed | `integration_tests/scale/cache_boundary.py` at 50,000 issues; record it in [scale](scale.md) |
@@ -30,33 +30,7 @@ Tagging and publishing remain the maintainer's decision after every gate passes.
 
 The `validated` result covers Postgres and platforms only. Automated cloud PR smoke and broader evidence reuse remain unavailable. See [CI tiers and measurements](ci-measurements.md).
 
-## 0.2.5 publication procedure
-
-1. Finish all tracked code, notes and version metadata, then freeze the candidate SHA/tree.
-2. Require fast CI and one complete full-validation run, including audits, on that source.
-3. Present the BigQuery checkpoint with commands, workers, cost uncertainty, uncovered query
-   paths and a redaction sample. Obtain authorization before credentialed execution.
-4. In a Python 3.14 app environment, run `scripts/local_release_evidence.py run` for
-   `bigquery-dbt2` (2.0.11, four workers), then `bigquery-dbt1` (1.12.6, two), then
-   `bigquery-upgrade` serially with both engine executable variables, followed by
-   `bigquery-permissions` serially. Use existing identities only. Keep originals outside Git.
-   Set `DBT_DQM_UPGRADE_CORE_EXECUTABLE` to Core 1.12.6 and
-   `DBT_DQM_UPGRADE_V2_EXECUTABLE` to dbt 2.0.11 for the upgrade receipt. It requires both
-   Python 3.14 engine inventories and the second engine's dependency digest. It pins the old
-   0.2.4 source to reproduce the defect, not to reuse old warehouse results.
-5. Retain failed attempts and diagnoses. Bundle redacted receipts with the helper's `bundle`
-   command. Reports must contain 34/34/1/1 passing selections, dependency digests and matching
-   source identities. The bundle is maintainer-attested, not independent proof of local execution.
-6. Exercise verification-only execution against the actual evidence. Draft retrieval uses checked
-   numeric release/asset IDs and SHA256. Synthetic checks cannot authorize publication.
-7. Verify the tested and merged trees are identical and merged-main CI passes. Any tracked
-   change invalidates the evidence. Historical reports cannot substitute for fresh validation.
-8. Push the immutable tag only after validation. Its automatic release run skips publication.
-   Prepare the draft release and attach `local-validation-0.2.5.json` and retained diagnostics.
-9. Obtain release-specific maintainer attestation and dispatch on the exact tag with the bundle
-   digest and CI/full-validation run IDs. The protected `pypi` environment remains human-approved.
-10. Verify public artifacts, provenance, installations and dbt dependencies; preserve reviewed
-    draft notes when finalizing. Open the exception-removal issue immediately after shipping.
+## Audits and query limits
 
 Pinned pip-audit checks block full validation and publishing on unaccepted findings or service
 failures. Only the five recorded sqlparse advisories are accepted in the isolated Core 1.11.0
@@ -65,7 +39,13 @@ that limitation is explicit, and third-party skipped dependencies are failures.
 
 App search has its own byte ceiling. The test profile cap is not enforced by dbt 2.0.11 on
 known paths, does not cover every app/permissions query, and is not a whole-suite budget.
-No WIF certification, cloud setup, quota change or shared-QA reset is authorized by this path.
+
+### Historical 0.2.5 publication
+
+Version 0.2.5 was published once through maintainer-attested local BigQuery evidence, as a recorded
+exception. That path has been removed and cannot authorize a later version. The redacted bundle and
+diagnostics remain attached to the [v0.2.5 release](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.5),
+and its [release notes](release-notes-0.2.5.md) describe the evidence.
 
 ### Historical 0.2.0a1 authentication and publication criteria
 

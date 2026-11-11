@@ -43,7 +43,7 @@ unexpected skips, duplicate reports, or fewer than 42 passing warehouse cases fa
 Reports are retained for 30 days; this is retention, not permission to reuse them for release.
 
 Stage 1 certifies **Postgres and platforms only**. A passing result does not replace the
-BigQuery release gate. Version 0.2.5 has a separately scoped, fresh local-evidence exception; older reports cannot satisfy it. The maintainer must configure `required` as a required status and require up-to-date PRs;
+BigQuery release gate. The maintainer must configure `required` as a required status and require up-to-date PRs;
 adding a workflow alone does not enforce branch protection.
 
 ## Measurement record

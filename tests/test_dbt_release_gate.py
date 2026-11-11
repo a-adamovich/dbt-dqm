@@ -38,3 +38,16 @@ def test_gate_requires_exact_revision(monkeypatch, revision):
         with pytest.raises(ValueError, match='exact-commit'):
             gate.successful_run('owner/repo', 'bigquery-lifecycle.yml', 'candidate', {'both'}, 'tree')
         assert not called
+
+
+def test_gate_has_no_attestation_mode_and_fails_closed(monkeypatch):
+    monkeypatch.syspath_prepend(str(SCRIPT.parent))
+    import importlib
+    gate = importlib.import_module("check_bigquery_release_gate")
+    assert not hasattr(gate, "local_gate") and "local_release_evidence" not in SCRIPT.read_text()
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setattr(gate, "commit_tree", lambda *args: "tree")
+    monkeypatch.setattr(gate, "gh", lambda *args: [])
+    with pytest.raises(ValueError, match="exact-commit"):
+        gate.normal_gate()

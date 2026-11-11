@@ -21,12 +21,13 @@ not replace the credentialed release gate below.
 
 ## Release gate
 
-Version 0.2.5 requires fresh local 34-case suites on dbt 2.0.11 and Core 1.12.6, the serial
-restricted-permissions test, a serial cross-engine historical-recovery scenario, and complete
-GitHub platform validation. Identity signature contracts are checked with both real engines,
-including Unicode; migration 0008 is exercised on populated history. Local results are
-maintainer-attested and cannot certify live WIF. See the [current release checklist](release-checklist.md).
-Later releases run the full BigQuery set on dbt 2 and the smoke selection on Core; Core stays
+Version 0.2.5 was validated with fresh local 34-case suites on dbt 2.0.11 and Core 1.12.6, the
+serial restricted-permissions test, a serial cross-engine historical-recovery scenario, and
+complete GitHub platform validation. Identity signature contracts were checked with both real
+engines, including Unicode; migration 0008 was exercised on populated history. Those local results
+were a one-time maintainer attestation and did not certify live WIF. See the
+[current release checklist](release-checklist.md). Later releases must pass the credentialed
+GitHub gate, which runs the full BigQuery set on dbt 2 and the smoke selection on Core; Core stays
 fully covered on real Postgres and by offline BigQuery rendering, so a Core-only BigQuery adapter
 bug outside the smoke selection can slip through. See [CI tiers](ci-measurements.md#bigquery-tiers).
 Historical results below cannot substitute for fresh evidence. Native Windows checks cover
