@@ -268,6 +268,60 @@ selected branch is `main`. Authentication errors may indicate an incorrect provi
 token that does not satisfy the condition, missing bindings, or a disabled API. The old
 `DBT_DQM_BIGQUERY_KEYFILE_JSON` secret is not used by this workflow.
 
+## Proof runs, 2026-11-11
+
+The maintainer approved these runs as infrastructure proofs, using the existing federation. They
+are not release evidence: a release needs a passing run on its exact candidate commit.
+
+| Run | Commit | Result |
+| --- | --- | --- |
+| [42951220351](https://github.com/a-adamovich/dbt-dqm/actions/runs/42951220351) | `3304ef3` | Failed: `reset_demo_dqm` ran against dedicated datasets that did not exist. Fixed by #113, which creates or verifies them first |
+| [42957053520](https://github.com/a-adamovich/dbt-dqm/actions/runs/42957053520) | `39bc20e` | Both engine suites and the upgrade passed; `restricted-permissions` failed (diagnosis below). Fixed by #114 |
+| [42969267595](https://github.com/a-adamovich/dbt-dqm/actions/runs/42969267595) | `0ada4e1` | All four jobs passed in attempt 1 |
+
+**Diagnosis of 42957053520.** The failure occurred in the provisioner's `_install`, before the
+runner or reviewer ran anything. Its `dbt build --select package:dbt_dqm` also selected the demo's
+`assert_scenario_outcomes`, whose only parent is the package model `dqm_all_issues`. That assertion
+expects the walkthrough's issues, so on the fresh disposable dataset it returned 3 mismatches
+(`PASS=20 ERROR=1`). The install path had been added in #111 and had not run before. #114 excludes
+that one node, as the runner's own package test already did; offline `dbt ls` shows the exclusion
+removes exactly that node. Its three passing artifacts verified for `39bc20e`, attempt 1.
+
+**Successful run 42969267595.** Python 3.14.4 throughout; the whole run took 1h39m.
+
+| Job | Engine | Tests | Job duration |
+| --- | --- | --- | --- |
+| `lifecycle (dbt2)` | dbt 2.0.11 | 33/33 | 1h06m |
+| `lifecycle (dbt1)` | Core 1.12.6 | 9/9, the `BIGQUERY_SMOKE_TESTS` selection | 38m |
+| `cross-engine-upgrade` | Core 1.12.6 to dbt 2.0.11 | 1/1 | 22m |
+| `restricted-permissions` | Core 1.12.6 | 1/1 | 11m |
+
+The release gate's own `successful_run` and `bigquery_report` (in
+`scripts/check_bigquery_release_gate.py` and `scripts/release_evidence.py`) accepted the run and
+all four artifacts for `0ada4e1`, attempt 1, each with a clean worktree.
+
+Afterwards:
+
+- every sweep reported `Deleted 0`;
+- no `dqm_acceptance_*` dataset remained;
+- `dbt_dqm_scheduled_dbt1` and `dbt_dqm_scheduled_dbt2` remained, CI their only explicit owner, in
+  US;
+- no BigQuery jobs were pending or running; and
+- `BIGQUERY_LIFECYCLE_ENABLED` read back as `false`.
+
+**What this proves.**
+
+- Federated authentication works for all three identities, each kept separate.
+- Credentials lasted through the hour-long dbt 2 suite.
+- The CI identities cannot read the shared QA dataset.
+- Evidence upload and verification work end to end.
+
+**What it does not prove.**
+
+- How often a run fails intermittently: this is one successful run.
+- Full Core coverage: Core runs the smoke selection only.
+- That the [residual limitation](#identities-and-roles) above is acceptable: it remains open.
+
 ## Rollback
 
 Choose the case that applies. Both use the shell variables from [Before you begin](#before-you-begin).

@@ -110,6 +110,8 @@ for its controls and limits.
 
 ## More guidance
 
+- [Pilot walkthrough](docs/pilot-walkthrough.md): track one existing test, review its first
+  issue, and see it pass and recur.
 - [Configure tests and run DQM](docs/using-dbt-dqm.md): identity, ownership, collection limits,
   CLI options, lifecycle, and owner summaries.
 - [Operate and upgrade](docs/operations.md): installation details, naming, authentication,

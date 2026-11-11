@@ -174,6 +174,44 @@ is an exact multiple of 10 MiB, BigQuery's minimum charge per query, so the numb
 appears to drive billed bytes. Totals count reported statistics only, and up to a few dozen jobs
 per run reported no billed bytes.
 
+## Outcome of #103, 2026-11-11
+
+[#103](https://github.com/a-adamovich/dbt-dqm/issues/103) asked for the same 33 + 33 + 1 selections
+to run faster. The maintainer instead accepted a coverage tradeoff in #110, which replaced that
+equal-count target:
+
+- Core now runs only the nine `BIGQUERY_SMOKE_TESTS` cases.
+- dbt 2 runs the full suite, now 33 cases, down from 34, because the two apply-fencing cases were
+  merged.
+
+**Like-for-like local timing.** Both sides are local runs, one run each:
+
+| Stage | 0.2.5 receipts | Reduced selection (#110) |
+| --- | --- | --- |
+| dbt 2.0.11 | 34 cases, 4 workers, 77m52s | 33 cases, 6 workers, 61m11s |
+| Core 1.12.6 | 34 cases, 2 workers, 2h15m | 9 cases, 4 workers, 23m18s |
+| Cross-engine upgrade | 1 case, serial, 20m11s | 1 case, serial, 19m11s |
+
+The Core reduction comes mostly from running fewer cases. The dbt 2 difference is not attributed to
+any single change. The reduced-selection run also differs in worker count, the merged case and the
+cases that skip `maintain_dqm`.
+
+**Billed bytes.** The same stages fell from 167.1 GiB to 111.5 GiB, which is 33% less. This counts
+the measured identity only (see the spend section above).
+
+**GitHub proof run, not comparable.** The
+[keyless proof run](bigquery-lifecycle.md#proof-runs-2026-11-11) on `0ada4e1` took 1h39m in total.
+It does not compare with the table above for three reasons:
+
+- it used GitHub runners;
+- it ran both engines at the same time; and
+- it included the restricted-permissions job.
+
+**Accepted risks of the tradeoff.**
+
+- A Core-only BigQuery adapter bug outside the smoke selection can slip through.
+- A failure in the merged apply-fencing case hides its later scenarios.
+
 ## BigQuery tiers
 
 Full acceptance runs on dbt 2 and the exact `BIGQUERY_SMOKE_TESTS` selection runs on Core, with six workers on dbt 2 and four on Core, matching the validated runs.
