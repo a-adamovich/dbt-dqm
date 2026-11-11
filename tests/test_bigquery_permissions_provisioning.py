@@ -23,13 +23,16 @@ def gate(monkeypatch):
 
 
 class Provisioner:
-    def __init__(self, identity=PROVISIONER):
+    def __init__(self, identity=PROVISIONER, existing=()):
         self.identity, self.created, self.deleted = identity, {}, []
+        self.existing = set(existing)  # names whose create_dataset call fails
 
     def query(self, sql):
         return SimpleNamespace(result=lambda: [SimpleNamespace(identity=self.identity)])
 
     def create_dataset(self, value):
+        if value.dataset_id in self.existing or "*" in self.existing:
+            raise AssertionError(f"create failed for {value.dataset_id}")
         self.created[value.dataset_id] = value
         return value
 
@@ -57,7 +60,7 @@ def test_only_the_provisioner_builds_the_disposable_datasets(gate, monkeypatch, 
         assert ("WRITER", REVIEWER) not in entries(client.created[dataset])
         assert entries(client.created[audit]) == {("WRITER", RUNNER)}
         assert client.created[dataset].labels["dbt_dqm_run"] == "run-id"
-    assert client.deleted == [dataset, audit]
+    assert client.deleted == [audit, dataset]  # the twin first, so it stays findable by its parent
 
 
 @pytest.mark.parametrize("identity", [RUNNER, REVIEWER])
@@ -129,3 +132,26 @@ def test_only_provisioning_code_passes_provisioner_credentials():
     removed = {node.args[0].value for node in ast.walk(body)
                if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "delenv"}
     assert removed == {"DBT_DQM_BIGQUERY_PROVISIONER_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS"}
+
+
+def test_a_failed_create_never_deletes_a_dataset_this_context_did_not_create(gate, monkeypatch, tmp_path):
+    class Twin(Provisioner):
+        def create_dataset(self, value):
+            if value.dataset_id.endswith("_dbt_test__audit"):
+                raise AssertionError("Already Exists")  # e.g. a pre-existing dataset of that name
+            return super().create_dataset(value)
+
+    client = Twin()
+    monkeypatch.setattr(gate, "_client", lambda path: client)
+    monkeypatch.setattr(gate, "_install", lambda dataset, directory: pytest.fail("must not install"))
+    with pytest.raises(AssertionError, match="Already Exists"), gate._provisioned_dataset(tmp_path, "run-id"):
+        pass
+    assert client.deleted == list(client.created)  # only the parent it created; never the twin
+
+
+def test_a_failed_first_create_deletes_nothing(gate, monkeypatch, tmp_path):
+    client = Provisioner(existing={"*"})
+    monkeypatch.setattr(gate, "_client", lambda path: client)
+    with pytest.raises(AssertionError, match="create failed"), gate._provisioned_dataset(tmp_path, "run-id"):
+        pass
+    assert client.deleted == []

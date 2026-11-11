@@ -128,6 +128,7 @@ def _provisioned_dataset(directory, run_id):
     assert identity not in (RUNNER, REVIEWER), f"Provisioner must be separate: {identity}"
     dataset = PREFIX + "permissions_" + uuid.uuid4().hex[:12]
     audit = dataset + "_dbt_test__audit"  # The runner cannot create the store-failures dataset.
+    created_names = []  # Only datasets this context created are ever deleted.
     try:
         for name, readers, tagged in ((dataset, [REVIEWER], True), (audit, [], False)):
             value = bigquery.Dataset(f"{PROJECT}.{name}")
@@ -135,6 +136,7 @@ def _provisioned_dataset(directory, run_id):
             if tagged:  # The sweep removes the audit twin along with its labelled parent.
                 value.labels = labels(run_id)
             created = provisioner.create_dataset(value)
+            created_names.append(name)
             created.access_entries = [
                 *created.access_entries,
                 bigquery.AccessEntry("WRITER", "userByEmail", RUNNER),
@@ -144,7 +146,8 @@ def _provisioned_dataset(directory, run_id):
         _install(dataset, directory)
         yield dataset
     finally:
-        for name in (dataset, audit):
+        # The twin first, so a failed deletion leaves it findable through its labelled parent.
+        for name in reversed(created_names):
             provisioner.delete_dataset(f"{PROJECT}.{name}", delete_contents=True, not_found_ok=True)
 
 

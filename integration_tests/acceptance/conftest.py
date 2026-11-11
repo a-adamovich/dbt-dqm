@@ -44,14 +44,14 @@ def pytest_sessionfinish(session):
         from google.cloud import bigquery
 
         location = os.environ.get("DBT_DQM_BIGQUERY_TEST_LOCATION", "US")
-        deleted = sweep(
-            bigquery.Client(project=project, location=location),
-            project,
-            run_id=session.config.dqm_run_id,
-            older_than_hours=None,
-        )
+        client = bigquery.Client(project=project, location=location)
+        # Delete only what this session's own identity owns; anything else is reported and kept.
+        owner = next(iter(client.query("select session_user() as identity").result())).identity
+        deleted = sweep(client, project, owner, run_id=session.config.dqm_run_id, older_than_hours=None)
     except Exception as error:  # noqa: BLE001 - cleanup is best effort and never fails a run
         print(f"\nAcceptance dataset cleanup skipped: {type(error).__name__}")
         return
     if deleted:
         print(f"\nRemoved {len(deleted)} leftover acceptance dataset(s): {', '.join(deleted)}")
+    for name, reason in deleted.skipped:
+        print(f"\nKept acceptance dataset {name}: {reason}")

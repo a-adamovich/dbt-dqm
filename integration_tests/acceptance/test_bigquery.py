@@ -126,6 +126,27 @@ class Demo:
         )
 
 
+def _delete_fixture_datasets(client, created, dataset):
+    """Delete the audit twin dbt made for this fixture, then the fixture's own dataset.
+
+    The twin goes first so a failed deletion leaves it findable through its labelled parent. It is
+    deleted only if it was created after this fixture's dataset, so it cannot predate this test.
+    """
+    from google.api_core.exceptions import NotFound
+
+    twin = dataset + "_dbt_test__audit"
+    try:
+        existing = client.get_dataset(f"{PROJECT}.{twin}")
+    except NotFound:
+        existing = None
+    if existing is not None:
+        if existing.created is not None and created.created is not None and existing.created >= created.created:
+            client.delete_dataset(f"{PROJECT}.{twin}", delete_contents=True, not_found_ok=True)
+        else:
+            print(f"Kept {twin}: it was not created after this fixture's dataset")
+    client.delete_dataset(f"{PROJECT}.{dataset}", delete_contents=True, not_found_ok=True)
+
+
 @pytest.fixture
 def demo(tmp_path, acceptance_run_id, request):
     from bigquery_datasets import PREFIX, labels
@@ -146,7 +167,7 @@ def demo(tmp_path, acceptance_run_id, request):
         value = bigquery.Dataset.from_api_repr(
             {**value.to_api_repr(), 'defaultCollation': request.param})
     with timed("fixture", "create dataset"):
-        client.create_dataset(value)
+        created = client.create_dataset(value)  # raises before teardown exists, so nothing is deleted
     preparing = time.monotonic()
     path = tmp_path / "project"
     shutil.copytree(
@@ -222,8 +243,7 @@ values ('tamper-row', 'tamper@example.com', 'tampered');
         yield result
     finally:
         with timed("fixture", "delete datasets"):
-            for name in (dataset, dataset + "_dbt_test__audit"):
-                client.delete_dataset(f"{PROJECT}.{name}", delete_contents=True, not_found_ok=True)
+            _delete_fixture_datasets(client, created, dataset)
 
 
 @pytest.mark.bigquery_smoke
