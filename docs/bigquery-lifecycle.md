@@ -9,14 +9,24 @@ When started from `main`, `.github/workflows/bigquery-lifecycle.yml`:
 
 1. checks that the CI identity **cannot** read the shared QA dataset (`dbt_dqm_qa`);
 2. runs the demo lifecycle for dbt Core 1.12.6 and dbt 2.0.11 in separate
-   `dbt_dqm_scheduled_dbt1` and `dbt_dqm_scheduled_dbt2` datasets;
-3. runs the acceptance suite in parallel, with a disposable, labelled `dqm_acceptance_*`
+   `dbt_dqm_scheduled_dbt1` and `dbt_dqm_scheduled_dbt2` datasets in the US multi-region. The
+   CI identity creates each one on its first run, so it owns them, and reuses them afterwards.
+   Before the demo resets a dataset, the job confirms that the active credentials are the CI
+   identity, that the CI identity is the dataset's only explicit owner (and its audit twin's, if
+   one exists), and that it is in US. Otherwise the job stops without touching it: inspect the
+   dataset, and if it is not CI's, leave it alone and investigate how the name was taken;
+3. stops if the demo modified any tracked file, since the evidence recorder would reject the
+   run after the suite;
+4. runs the acceptance suite in parallel, with a disposable, labelled `dqm_acceptance_*`
    dataset for each test; and
-4. sweeps labelled acceptance datasets older than six hours. Do not run other acceptance
-   tests that need those old datasets at the same time;
-5. after both engines pass, runs the serial `cross-engine-upgrade` job from Core 1.12.6 to
+5. sweeps labelled acceptance datasets older than six hours, and audit twins left behind after
+   their parent was deleted. Each dataset and twin is deleted only if the CI identity is its only
+   explicit owner; anything else is reported and kept. A twin goes before its parent, so a failed
+   deletion stays findable. Do not run other acceptance tests that need those old datasets at
+   the same time;
+6. after both engines pass, runs the serial `cross-engine-upgrade` job from Core 1.12.6 to
    dbt 2.0.11 on a disposable dataset; and
-6. then runs the serial `restricted-permissions` job on another disposable dataset.
+7. then runs the serial `restricted-permissions` job on another disposable dataset.
 
 Results are uploaded as `scheduled-bigquery-dbt1-results`, `scheduled-bigquery-dbt2-results`,
 `cross-engine-bigquery-results` and `restricted-bigquery-results` artifacts. All four jobs must

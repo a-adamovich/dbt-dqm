@@ -24,6 +24,7 @@ jobs:
     env:
       DBT_DQM_BIGQUERY_PROJECT: ${{ vars.DBT_DQM_BIGQUERY_PROJECT }}
       DBT_DQM_BIGQUERY_TEST_PROJECT: ${{ vars.DBT_DQM_BIGQUERY_PROJECT }}
+      DBT_DQM_CI_IDENTITY: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Authenticate to Google Cloud (Workload Identity Federation)
@@ -83,6 +84,13 @@ jobs:
           else:
               raise SystemExit("The CI service account can read dbt_dqm_qa; narrow its roles.")
           PY
+      - name: Create or verify the dedicated dataset
+        # reset_demo_dqm drops tables here, so an existing dataset is reused only if the CI identity
+        # is its only explicit owner and it is in US. Creating it makes the CI identity the owner.
+        run: |
+          uv run --group dbt1 python integration_tests/acceptance/bigquery_dedicated_dataset.py \
+            --project "$DBT_DQM_BIGQUERY_PROJECT" --dataset "dbt_dqm_scheduled_${{ matrix.engine }}" \
+            --owner "$DBT_DQM_CI_IDENTITY" --location US
       - name: Full credentialed lifecycle (dedicated dataset)
         working-directory: integration_tests/demo_bigquery
         run: |
@@ -95,6 +103,16 @@ jobs:
             uv run --group dbt1 dbt-dqm run --vars "{demo_scenario: $scenario}"
             "$DBT_DQM_DBT_EXECUTABLE" test --select assert_scenario_outcomes --vars "{demo_scenario: $scenario, dqm_enabled: true}"
           done
+      - name: The checkout is still clean before the acceptance suite
+        # The evidence recorder rejects a modified tracked file; fail now instead of after the suite.
+        run: |
+          changes=$(git status --porcelain --untracked-files=no)
+          if [ -n "$changes" ]; then
+            printf '%s\n' "$changes"
+            git diff
+            echo "::error::The demo lifecycle modified tracked files; acceptance evidence would be rejected."
+            exit 1
+          fi
       - name: Credentialed acceptance suite (parallel, disposable datasets)
         shell: bash
         run: |
@@ -113,7 +131,7 @@ jobs:
             --executable "$DBT_DQM_DBT_EXECUTABLE"
       - name: Sweep stale acceptance datasets
         if: always()
-        run: uv run --group dbt1 python integration_tests/acceptance/bigquery_datasets.py --project "$DBT_DQM_BIGQUERY_PROJECT" --older-than-hours 6
+        run: uv run --group dbt1 python integration_tests/acceptance/bigquery_datasets.py --project "$DBT_DQM_BIGQUERY_PROJECT" --owner "$DBT_DQM_CI_IDENTITY" --older-than-hours 6
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -129,6 +147,7 @@ jobs:
     env:
       DBT_DQM_BIGQUERY_PROJECT: ${{ vars.DBT_DQM_BIGQUERY_PROJECT }}
       DBT_DQM_BIGQUERY_TEST_PROJECT: ${{ vars.DBT_DQM_BIGQUERY_PROJECT }}
+      DBT_DQM_CI_IDENTITY: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -172,7 +191,7 @@ jobs:
             --executable "$DBT_DQM_UPGRADE_V2_EXECUTABLE" --core-executable "$DBT_DQM_UPGRADE_CORE_EXECUTABLE"
       - name: Sweep stale acceptance datasets
         if: always()
-        run: uv run --group dbt1 python integration_tests/acceptance/bigquery_datasets.py --project "$DBT_DQM_BIGQUERY_PROJECT" --older-than-hours 6
+        run: uv run --group dbt1 python integration_tests/acceptance/bigquery_datasets.py --project "$DBT_DQM_BIGQUERY_PROJECT" --owner "$DBT_DQM_CI_IDENTITY" --older-than-hours 6
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -187,6 +206,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DBT_DQM_BIGQUERY_PROJECT: ${{ vars.DBT_DQM_BIGQUERY_PROJECT }}
+      DBT_DQM_CI_IDENTITY: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Authenticate the provisioner
@@ -240,7 +260,7 @@ jobs:
         if: always()
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.provisioner.outputs.credentials_file_path }}
-        run: uv run --group dbt1 python integration_tests/acceptance/bigquery_datasets.py --project "$DBT_DQM_BIGQUERY_PROJECT" --older-than-hours 6
+        run: uv run --group dbt1 python integration_tests/acceptance/bigquery_datasets.py --project "$DBT_DQM_BIGQUERY_PROJECT" --owner "$DBT_DQM_CI_IDENTITY" --older-than-hours 6
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

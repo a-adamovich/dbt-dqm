@@ -41,6 +41,45 @@ def test_runs_the_parallel_suite_sweeps_and_checks_qa_is_unreachable():
     assert "dbt_dqm_qa" in runs and "no access" in runs
 
 
+def test_dedicated_dataset_is_verified_as_ci_owned_before_reset():
+    steps = WORKFLOW["jobs"]["lifecycle"]["steps"]
+    names = [step.get("name") for step in steps]
+    guard = names.index("Create or verify the dedicated dataset")
+    # The first proof run failed because reset_demo_dqm ran against a dataset that did not exist.
+    assert names.index("The CI identity cannot read the shared QA dataset") < guard
+    assert guard < names.index("Full credentialed lifecycle (dedicated dataset)")
+    run = steps[guard]["run"]
+    assert "integration_tests/acceptance/bigquery_dedicated_dataset.py" in run
+    assert '--dataset "dbt_dqm_scheduled_${{ matrix.engine }}"' in run
+    assert '--owner "$DBT_DQM_CI_IDENTITY"' in run and "--location US" in run
+    assert "GOOGLE_APPLICATION_CREDENTIALS" not in steps[guard].get("env", {})  # the CI identity selected earlier
+
+
+def test_a_dirty_checkout_stops_the_job_before_the_acceptance_suite():
+    steps = WORKFLOW["jobs"]["lifecycle"]["steps"]
+    names = [step.get("name") for step in steps]
+    check = names.index("The checkout is still clean before the acceptance suite")
+    assert names.index("Full credentialed lifecycle (dedicated dataset)") < check
+    assert check < names.index("Credentialed acceptance suite (parallel, disposable datasets)")
+    # The same test the evidence recorder applies, so a rejected record can't surface an hour later.
+    assert "git status --porcelain --untracked-files=no" in steps[check]["run"]
+    assert "exit 1" in steps[check]["run"] and "if:" not in str(steps[check])
+
+
+def test_every_sweep_deletes_only_what_the_ci_identity_owns():
+    for name, job in WORKFLOW["jobs"].items():
+        assert job["env"]["DBT_DQM_CI_IDENTITY"] == "${{ vars.GCP_CI_SERVICE_ACCOUNT }}"
+        sweeps = [step for step in job["steps"] if "bigquery_datasets.py" in step.get("run", "")]
+        assert len(sweeps) == 1, name
+        assert '--owner "$DBT_DQM_CI_IDENTITY"' in sweeps[0]["run"]
+
+
+def test_the_demo_lock_file_is_in_the_format_both_engines_keep():
+    # dbt 2.0.11 rewrites the Core-style indentation, which dirtied the checkout; both keep this form.
+    lock = (ROOT / "integration_tests/demo_bigquery/package-lock.yml").read_text()
+    assert lock.startswith("packages:\n- local: ../..\n  name: dbt_dqm\nsha1_hash: ")
+
+
 def job_auth(job):
     return [step for step in WORKFLOW["jobs"][job]["steps"] if "google-github-actions/auth" in step.get("uses", "")]
 
