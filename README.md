@@ -83,8 +83,26 @@ The examples below install the published release. A local checkout can also be u
    ```
 
    The test is disabled during ordinary dbt commands. `dbt-dqm run` enables metadata-marked DQM
-   tests for its own workflow. You can also configure generic tests and assign owners from a
-   failure-row column; see [test configuration](docs/using-dbt-dqm.md#configure-tests).
+   tests for its own workflow. You can also assign owners from a failure-row column; see
+   [test configuration](docs/using-dbt-dqm.md#configure-tests).
+
+   To track an existing generic test, put the same configuration under its `config:`. **The
+   `enabled` line turns the test off in ordinary `dbt test` and `dbt build` runs.** If it must keep
+   running there, leave it unchanged and add a separately named copy for DQM:
+
+   ```yaml
+   columns:
+     - name: email
+       data_tests:
+         - not_null                  # the existing test, unchanged
+         - not_null:
+             name: dqm_email_not_null
+             config:
+               enabled: "{{ var('dqm_enabled', false) }}"
+               store_failures: true
+               limit: 100
+               meta: {dbt_dqm: {granularity: ['customer_id'], owner: customer_data}}
+   ```
 
 4. Build the upstream models as you normally would, then run the DQM workflow:
 
@@ -99,6 +117,18 @@ The examples below install the published release. A local checkout can also be u
    limit. Add `--summary` to see changes and active issues by owner. See
    [running DQM](docs/using-dbt-dqm.md#run-and-interpret-results) for selection, deferral,
    summaries, and limit behavior.
+
+5. See an issue pass and recur. In a development target, use a synthetic row you control and the
+   same selector on every run, so the summary counts come from that test alone:
+
+   ```bash
+   dbt-dqm run --select dqm_email_not_null --summary   # bad row present: OPENED (NEW) 1, exit 1
+   dbt-dqm run --select dqm_email_not_null --summary   # row fixed and rebuilt: ARCHIVED 1, exit 0
+   dbt-dqm run --select dqm_email_not_null --summary   # row restored and rebuilt: RECURRING 1, exit 1
+   ```
+
+   The recurrence is a new occurrence of the same record, and the earlier review is shown with it.
+   The [pilot walkthrough](docs/pilot-walkthrough.md) has the complete steps, including review.
 
 ## Review the results
 
