@@ -9,7 +9,8 @@ When started from `main`, `.github/workflows/bigquery-lifecycle.yml`:
 
 1. checks that the CI identity **cannot** read the shared QA dataset (`dbt_dqm_qa`);
 2. runs the demo lifecycle for dbt Core 1.12.6 and dbt 2.0.11 in separate
-   `dbt_dqm_scheduled_dbt1` and `dbt_dqm_scheduled_dbt2` datasets;
+   `dbt_dqm_scheduled_dbt1` and `dbt_dqm_scheduled_dbt2` datasets in the US multi-region. The
+   CI identity creates each one on its first run, so it owns them, and reuses them afterwards;
 3. runs the acceptance suite in parallel, with a disposable, labelled `dqm_acceptance_*`
    dataset for each test; and
 4. sweeps labelled acceptance datasets older than six hours. Do not run other acceptance

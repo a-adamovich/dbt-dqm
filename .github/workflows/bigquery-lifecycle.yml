@@ -83,6 +83,22 @@ jobs:
           else:
               raise SystemExit("The CI service account can read dbt_dqm_qa; narrow its roles.")
           PY
+      - name: Create the dedicated dataset if it is missing
+        # reset_demo_dqm fails when the dataset itself is absent. Creating it here makes the
+        # CI identity its owner, which is how the rollback guide recognises CI's datasets.
+        run: |
+          uv run --group dbt1 python - <<'PY'
+          import os
+          from google.cloud import bigquery
+          project = os.environ["DBT_DQM_BIGQUERY_PROJECT"]
+          name = f"{project}.dbt_dqm_scheduled_${{ matrix.engine }}"
+          wanted = bigquery.Dataset(name)
+          wanted.location = "US"
+          dataset = bigquery.Client(project=project).create_dataset(wanted, exists_ok=True)
+          if dataset.location != "US":
+              raise SystemExit(f"The dedicated dataset is in {dataset.location}, not US.")
+          print("The dedicated dataset is ready in US.")
+          PY
       - name: Full credentialed lifecycle (dedicated dataset)
         working-directory: integration_tests/demo_bigquery
         run: |

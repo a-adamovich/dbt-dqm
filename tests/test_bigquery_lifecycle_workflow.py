@@ -41,6 +41,20 @@ def test_runs_the_parallel_suite_sweeps_and_checks_qa_is_unreachable():
     assert "dbt_dqm_qa" in runs and "no access" in runs
 
 
+def test_dedicated_dataset_is_created_by_the_ci_identity_before_reset():
+    steps = WORKFLOW["jobs"]["lifecycle"]["steps"]
+    names = [step.get("name") for step in steps]
+    create = names.index("Create the dedicated dataset if it is missing")
+    # The first proof run failed because reset_demo_dqm ran against a dataset that did not exist.
+    assert names.index("The CI identity cannot read the shared QA dataset") < create
+    assert create < names.index("Full credentialed lifecycle (dedicated dataset)")
+    run = steps[create]["run"]
+    assert "dbt_dqm_scheduled_${{ matrix.engine }}" in run and "exists_ok=True" in run
+    assert 'wanted.location = "US"' in run and 'dataset.location != "US"' in run
+    assert "GOOGLE_APPLICATION_CREDENTIALS" not in steps[create].get("env", {})  # the CI identity selected earlier
+    assert "drop" not in run.lower() and "delete" not in run.lower()
+
+
 def job_auth(job):
     return [step for step in WORKFLOW["jobs"][job]["steps"] if "google-github-actions/auth" in step.get("uses", "")]
 
