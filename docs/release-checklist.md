@@ -44,7 +44,7 @@ known paths, does not cover every app/permissions query, and is not a whole-suit
 
 Version 0.2.5 was published once through maintainer-attested local BigQuery evidence, as a recorded
 exception. That path has been removed and cannot authorize a later version. The redacted bundle and
-diagnostics remain on the immutable [v0.2.5 release](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.5),
+diagnostics remain attached to the [v0.2.5 release](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.5),
 and its [release notes](release-notes-0.2.5.md) describe the evidence.
 
 ### Historical 0.2.0a1 authentication and publication criteria
