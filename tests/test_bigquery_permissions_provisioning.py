@@ -91,6 +91,11 @@ def test_install_uses_provisioner_credentials_and_exact_reviewer_grants(gate, mo
     monkeypatch.setattr(gate.subprocess, "run", run)
     gate._install("disposable", tmp_path / "install")
     assert [command[1] for command, _ in calls] == ["run-operation", "build"]
+    # Proof run 42957053520 failed here: the demo walkthrough assertion found 3 mismatches on the
+    # fresh dataset. It is excluded exactly as the runner's own package test excludes it.
+    build = calls[1][0]
+    assert build[build.index("--select") + 1] == "package:dbt_dqm"
+    assert build[build.index("--exclude") + 1] == "assert_scenario_outcomes"
     for command, env in calls:
         assert env["GOOGLE_APPLICATION_CREDENTIALS"] == "/federated/provisioner.json"
         grants = json.loads(command[command.index("--vars") + 1])["dbt_dqm_table_grants"]
