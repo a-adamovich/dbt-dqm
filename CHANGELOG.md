@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.5 (unreleased)
+## 0.2.5
 
 - Fix #105: use engine-independent identity metadata and migrate historical Core/dbt 2
   signatures without changing issue hashes or display order.
@@ -8,6 +8,8 @@
   by record field order. Report structural closures separately from confirmed passes.
 - Add an explicit, preview-first incident recovery utility; see
   [the recovery guide](docs/identity-105-recovery.md) for its scope and verification status.
+- Parse already-canonical identity signatures safely during BigQuery migration retries (#108);
+  malformed or contradictory metadata still aborts the migration.
 
 ## 0.2.4
 
