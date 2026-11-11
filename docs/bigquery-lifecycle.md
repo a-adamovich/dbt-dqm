@@ -311,21 +311,36 @@ account is deleted, its ownership entries no longer show which datasets it creat
    bq ls -j -a -n 1000 --project_id="$PROJECT_ID" --filter="states:pending,running"
    ```
 
-2. Identify the datasets the run created. Only these belong to this workflow: the fixed
-   `dbt_dqm_scheduled_dbt1` and `dbt_dqm_scheduled_dbt2` datasets and their `_dbt_test__audit`
-   twins, if their explicit owner is `dbt-dqm-ci`; and `dqm_acceptance_*` datasets whose explicit
-   owner is `dbt-dqm-ci` and whose creation time is after the first run started. Local acceptance
-   runs use the same prefix and label, so the label alone does not prove a dataset is CI's. The
-   project-owners group is an owner of every dataset and does not count. Leave anything else alone
-   until its ownership is clear.
+2. Identify the datasets the run created. List by name prefix, then check every candidate. A
+   dataset belongs to this workflow only if all of these hold:
+   - It is `dbt_dqm_scheduled_dbt1` or `dbt_dqm_scheduled_dbt2`, or a `dqm_acceptance_*` dataset
+     carrying the `dbt_dqm_run` label, or the `_dbt_test__audit` twin of a qualifying dataset.
+   - Its explicit owner is `dbt-dqm-ci`. The project-owners group is an owner of every dataset and
+     does not count.
+   - It was created after the first run started.
+
+   Local acceptance runs use the same prefix and label, so the label alone does not prove a
+   dataset is CI's. Errors are printed, never hidden: a failed listing or metadata read means the
+   inventory is incomplete, not empty. Leave anything you cannot confirm alone.
 
    ```bash
-   for ds in dbt_dqm_scheduled_dbt1 dbt_dqm_scheduled_dbt2 dbt_dqm_scheduled_dbt1_dbt_test__audit dbt_dqm_scheduled_dbt2_dbt_test__audit \
-       $(bq ls --project_id="$PROJECT_ID" --max_results=1000 --filter="labels.dbt_dqm_run" --format=prettyjson | jq -r '.[].datasetReference.datasetId'); do
-     echo "== $ds"
-     bq show --format=prettyjson "$PROJECT_ID:$ds" 2>/dev/null \
-       | jq -c '{creationTime, owners: [.access[] | select(.role=="OWNER") | (.userByEmail // .specialGroup)]}'
-   done
+   if listing=$(bq ls --project_id="$PROJECT_ID" --max_results=10000 --format=prettyjson); then
+     candidates=$(printf '%s' "$listing" | jq -r '.[].datasetReference.datasetId
+       | select(startswith("dqm_acceptance_") or startswith("dbt_dqm_scheduled_"))')
+     echo "Candidates: ${candidates:-none}"
+     printf '%s\n' "$candidates" | while IFS= read -r ds; do
+       [ -n "$ds" ] || continue
+       echo "== $ds"
+       if metadata=$(bq show --format=prettyjson "$PROJECT_ID:$ds"); then
+         printf '%s' "$metadata" | jq -c '{creationTime, labels,
+           owners: [.access[] | select(.role=="OWNER") | (.userByEmail // .specialGroup)]}'
+       else
+         echo "Metadata read FAILED for $ds: resolve before deciding." >&2
+       fi
+     done
+   else
+     echo "Dataset listing FAILED: this is not an empty inventory." >&2
+   fi
    ```
 
 3. Delete each confirmed dataset, one by one.

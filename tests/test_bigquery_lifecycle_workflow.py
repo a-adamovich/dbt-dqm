@@ -124,4 +124,9 @@ def test_documented_roles_are_minimal_and_rollback_covers_runs():
     assert rollback.index('--filter="states:pending,running"') < rollback.index("bq rm -r -f -d")
     assert rollback.index("bq rm -r -f -d") < rollback.index("4. Undo the setup with case A")
     assert "### Optional: disable STS" in rollback
+    discovery = rollback[rollback.index("2. Identify the datasets"):rollback.index("3. Delete each")]
+    assert "/dev/null" not in discovery and "labels.dbt_dqm_run" not in discovery  # errors stay visible
+    assert 'startswith("dqm_acceptance_")' in discovery and 'startswith("dbt_dqm_scheduled_")' in discovery
+    assert "not an empty inventory" in discovery and "FAILED for" in discovery
+    assert all(field in discovery for field in ("creationTime", "labels", 'select(.role=="OWNER")'))
     assert "Residual limitation, for maintainer review" in guide
