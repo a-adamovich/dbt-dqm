@@ -8,6 +8,8 @@
   by record field order. Report structural closures separately from confirmed passes.
 - Add an explicit, preview-first incident recovery utility; see
   [the recovery guide](docs/identity-105-recovery.md) for its scope and verification status.
+- Parse already-canonical identity signatures safely during BigQuery migration retries (#108);
+  malformed or contradictory metadata still aborts the migration.
 
 ## 0.2.4
 
