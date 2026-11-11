@@ -109,7 +109,10 @@ def _install(dataset, directory):
     variables = json.dumps({"dqm_enabled": True,
                             "dbt_dqm_table_grants": dict.fromkeys(REVIEWER_WRITE_TABLES, grants)})
     environment = _identity_environment(PROVISIONER_FILE)
-    for step in (["run-operation", "dbt_dqm.initialize_dqm"], ["build", "--select", "package:dbt_dqm"]):
+    # The demo's walkthrough assertion selects through dqm_all_issues but expects walkthrough data, so
+    # it fails on a fresh dataset; the runner's own package test excludes it for the same reason.
+    build = ["build", "--select", "package:dbt_dqm", "--exclude", "assert_scenario_outcomes"]
+    for step in (["run-operation", "dbt_dqm.initialize_dqm"], build):
         result = subprocess.run(
             [str(Path(sys.executable).with_name("dbt")), *step, "--project-dir", str(project),
              "--profiles-dir", str(profiles), "--vars", variables],
