@@ -108,5 +108,20 @@ def test_documented_trust_is_pinned_to_ids_this_workflow_and_manual_dispatch():
                    'WORKFLOW_REF="a-adamovich/dbt-dqm/.github/workflows/bigquery-lifecycle.yml@refs/heads/main"'):
         assert clause in guide
     assert "attribute.repository/" not in guide
-    assert guide.count("attribute.repository_id/$REPOSITORY_ID") == 2
+    assert guide.count("attribute.repository_id/$REPOSITORY_ID") == 1  # one loop binds all three accounts
+    assert "POOL=dbt-dqm-lifecycle" in guide and "workload-identity-pools create github" not in guide
+
+
+def test_documented_roles_are_minimal_and_rollback_covers_runs():
+    guide = (ROOT / "docs/bigquery-lifecycle.md").read_text()
+    setup = guide[guide.index("### 4. Grant the minimum project roles"):guide.index("### 5.")]
+    assert setup.count("--role=roles/bigquery.user") == 1 and setup.count("--role=roles/bigquery.jobUser") == 1
+    assert setup.index("dbt-dqm-ci@") < setup.index("--role=roles/bigquery.jobUser")  # jobUser only for runner and reviewer
+    for role in ("dataViewer", "dataEditor", "dataOwner", "roles/bigquery.admin"):
+        assert role not in setup
+    rollback = guide[guide.index("## Rollback"):]
+    assert "### A. Undo setup before any run" in rollback and "### B. Clean up after a run" in rollback
+    assert rollback.index('--filter="states:pending,running"') < rollback.index("bq rm -r -f -d")
+    assert rollback.index("bq rm -r -f -d") < rollback.index("4. Undo the setup with case A")
+    assert "### Optional: disable STS" in rollback
     assert "Residual limitation, for maintainer review" in guide
