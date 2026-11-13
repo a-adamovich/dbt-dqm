@@ -21,12 +21,15 @@ instructions take precedence. Preserve existing assertions and acceptance cases.
 - PR CI checks units on Python 3.11–3.14, endpoint Python wheel installations, representative
   Windows/macOS portability, offline BigQuery compilation, the real dbt 2 executable, and
   eight real Postgres core cases. All required jobs must succeed.
-- Full compatibility matrices, the demo walkthroughs, installed-wheel browser QA, and the
-  50,000-issue memory/export check belong to manual full validation.
-- Stage 1 full validation covers Postgres and platforms only. It cannot certify BigQuery or
-  authorize publication. The existing credentialed release gate stays in force.
-- Later stages add approved BigQuery PR smoke and complete release validation, then validated
-  result reuse. Do not report those stages as available before implementation and verification.
+- Manual Full validation covers Postgres and platforms, including the full matrices, demo
+  walkthroughs, installed-wheel browser QA, and 50,000-issue memory/export QA. It cannot
+  certify BigQuery or authorize publication.
+- The credentialed release gate requires passing CI from a push to `main`, Full validation
+  including candidate QA, and all four keyless BigQuery jobs from one run attempt. Those jobs
+  are the dbt 2 and Core lifecycle jobs, cross-engine upgrade, and restricted permissions.
+  Each workflow must pass on the exact release commit. Before publication, the release
+  workflow also verifies the built wheel and runs its own Postgres demo from the checkout.
+- The redesign's approved ADRs will define future validation tiers.
 - Report the command, location, candidate SHA, engine, selected test count, result, and duration.
   Compile-only or mocked checks are not warehouse runtime evidence.
 
