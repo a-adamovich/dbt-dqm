@@ -21,8 +21,7 @@ macros:
 
   - name: tracked_test
     description: >
-      Returns whether a manifest node is a data test selected for dbt-dqm collection. A tracked test
-      must have the configured tag and store_failures enabled.
+      Returns whether a manifest node is a data test marked with meta.dbt_dqm.
     arguments:
       - name: node
         type: any
@@ -151,18 +150,6 @@ macros:
       - name: insert_columns
         type: list[string]
         description: Columns to insert, in target-table order.
-
-  - name: ensure_unique_index
-    description: >
-      Postgres-only: creates the unique index insert_new_rows's ON CONFLICT requires, if missing.
-      A no-op on adapters (like BigQuery) that don't need one.
-    arguments:
-      - name: relation
-        type: any
-        description: Relation to index.
-      - name: columns
-        type: list[string]
-        description: Columns forming the unique constraint.
 
   - name: incremental_upsert_strategy
     description: >

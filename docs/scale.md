@@ -8,9 +8,9 @@ The figures to use today; everything below is the method and the dated measureme
   At that boundary the sync path's peak RSS varies widely between identical runs: **about
   435–585 MiB** on 2026-10-10, where the single 420.8 MiB figure from 2026-10-09 sits at the low
   end. A running Streamlit server adds its own baseline. See
-  [Repeated memory measurements](#repeated-memory-measurements-across-revisions-2026-10-10).
+  [Repeated memory measurements](https://github.com/a-adamovich/dbt-dqm/blob/3043befbf99b8b82519f79ce6081a2a0711232d5/docs/scale.md#repeated-memory-measurements-across-revisions-2026-10-10).
   Many runs reach the top of that range whichever PyArrow memory pool is used; the cause is not
-  identified ([allocator A/B](#allocator-ab-2026-10-10)).
+  identified ([allocator A/B](https://github.com/a-adamovich/dbt-dqm/blob/3043befbf99b8b82519f79ce6081a2a0711232d5/docs/scale.md#allocator-ab-2026-10-10)).
 - **Postgres reconciliation at 1M occurrences:** about 2.4 s steady and 19 s for a 100k mass pass;
   the occurrence lock is held for that time. See [Reconciliation](#reconciliation).
 - **BigQuery reconciliation at 1M occurrences:** about 1.5 GB processed steady and 1.8 GB for a
@@ -27,17 +27,15 @@ The figures to use today; everything below is the method and the dated measureme
 Two harnesses build a disposable consumer project, initialize the DQM schema through the
 package, bulk-load synthetic *processed* history (occurrences, executions, observations and
 receipts, all older than any real run), and then measure real dbt runs against it. Raw results
-are in [`scale-results/`](scale-results/).
+are in [`scale-results/`](https://github.com/a-adamovich/dbt-dqm/tree/3043befbf99b8b82519f79ce6081a2a0711232d5/docs/scale-results).
 
 ```bash
 # PostgreSQL: a disposable database
 DBT_DQM_TEST_DSN='host=... dbname=... user=... password=...' \
   uv run python integration_tests/scale/postgres_scale.py --payload-columns 8 --compare-planner
-
-# BigQuery: creates and deletes its own dataset (billable, small)
-GOOGLE_APPLICATION_CREDENTIALS=... DBT_DQM_BIGQUERY_TEST_PROJECT=... \
-  uv run python integration_tests/scale/bigquery_scale.py --label run-name
 ```
+
+The historical BigQuery figures were measured with the [archived BigQuery scale harness](https://github.com/a-adamovich/dbt-dqm/blob/3043befbf99b8b82519f79ce6081a2a0711232d5/integration_tests/scale/bigquery_scale.py).
 
 **Default volumes:** 200 tracked tests, 1,000,000 occurrences (100,000 Active), 50,000
 executions, 5,000,000 observations, history spread over two years. Payloads are the grain
@@ -77,18 +75,17 @@ fresh process: filter choices, the header summary (metrics and the filtered coun
 25 for the whole Active population and eight typical filters, ten deep pages of 200, each page
 stored in a page cache as the app does. Times are wall time per call through the app's functions
 (median of 5 on Postgres, 3 on BigQuery); BigQuery bytes are from the first call of each read
-(repeats hit the query cache, as they would in the app). Both harnesses accept `--browse`; the
+(repeats hit the query cache, as they would in the app). The Postgres harness and the archived BigQuery harness accept `--browse`; the
 synthetic history varies workflow status, priority, owner and tags so sorting and filters see
 realistic data, and has no recurrences.
 
 ```bash
 uv run python integration_tests/scale/postgres_scale.py --payload-columns 8 --browse --compare-index --skip-sync
-uv run python integration_tests/scale/bigquery_scale.py --browse --skip-sync --label browse
 ```
 
 Commit `ef2e406` (single-statement reads from #56 plus migration 0007), 1M occurrences / 100k
 Active, 8-column payloads. dbt-core 1.12.5; PostgreSQL 16.11 on the same laptop; BigQuery
-on-demand, US. Raw results and plans: [`scale-results/browse-2026-10-11/`](scale-results/browse-2026-10-11/).
+on-demand, US. Raw results and plans: [`scale-results/browse-2026-10-11/`](https://github.com/a-adamovich/dbt-dqm/tree/3043befbf99b8b82519f79ce6081a2a0711232d5/docs/scale-results/browse-2026-10-11).
 
 **Postgres** (seconds, median through the app):
 
@@ -222,60 +219,6 @@ The byte limit measures compact UTF-8 JSON, not resident memory: Python, pandas,
 and Streamlit add overhead, and one fetched row may temporarily exceed the budget before rejection.
 Pending replacement text is charged conservatively in addition to the cached JSON before overlay.
 
-### Safeguard boundary rerun (2026-10-09)
-
-The reproducible `integration_tests/scale/cache_boundary.py` harness measured the new real sync
-path on PostgreSQL 16.11 at exactly 50,000 Active issues, with synthetic processed history and
-408-byte captured payloads. It includes verified warehouse reads, atomic SQLite issue/Health
-replacement and the issue DataFrame. A fresh process measured **148.8 MiB baseline / 420.8 MiB
-peak RSS**, **2.17 s warehouse read / 5.90 s total**. Other acceptance suites were running on
-the same machine, so timings are indicative rather than a regression threshold. A running
-Streamlit server adds framework overhead; this is not an end-to-end server-memory guarantee.
-Raw results: [`cache-boundary-safeguards.json`](scale-results/cache-boundary-safeguards.json).
-
-### PyArrow 23 rerun (2026-10-10)
-
-The same harness at 50,000 issues compared PyArrow 19.0.1 and 23.0.1, with identical code and lock otherwise
-(dbt-core 1.11.15, pandas 2.3.3, Streamlit 1.65.0). Runs alternated on an otherwise idle machine:
-
-| PyArrow | Peak RSS (2 runs) | Mean peak | Mean baseline |
-| --- | --- | --- | --- |
-| 19.0.1 | 457.6 / 461.8 MiB | 459.7 MiB | 160.5 MiB |
-| 23.0.1 | 445.2 / 458.4 MiB | 451.8 MiB | 163.4 MiB |
-
-*Superseded by the repeated measurements below:* two runs per version were too few. The original
-conclusion ("PyArrow 23 changes peak RSS by about −8 MiB, within run-to-run variation; the rise above
-420.8 MiB comes from other changes") does not hold. Raw results:
-[`pyarrow-23-cache-boundary.json`](scale-results/pyarrow-23-cache-boundary.json).
-
-### Repeated memory measurements across revisions (2026-10-10)
-
-Same harness, workload and Postgres 16.11 server. Each revision ran in its own worktree with
-`uv sync --locked --all-groups`; runs alternated between revisions on an otherwise idle machine. The
-harness files are identical across these revisions.
-
-| Revision | Environment | Runs | Peak RSS median | Range |
-| --- | --- | ---: | ---: | --- |
-| `52d474f` (420.8 MiB recorded here) | dbt-core 1.11.11, PyArrow 19.0.1, Streamlit 1.61.1 | 5 | 453 MiB | 424–521 |
-| `29e14f6` | same | 5 | 486 MiB | 455–506 |
-| `956dc97` (#25) | dbt-core 1.11.15, PyArrow 19.0.1, Streamlit 1.65.0 | 11 | 465 MiB | 436–542 |
-| `0f08cff` (#32) | as #25, PyArrow 23.0.1 | 11 | **531 MiB** | 450–583 |
-| `0f08cff`, `ARROW_DEFAULT_MEMORY_POOL=system` | as #32 | 6 | 459 MiB | 435–513 |
-
-What this shows, and what it doesn't:
-- **Run-to-run variation is large.** The same revision spans up to about 100 MiB. The single
-  420.8 MiB figure sits at the low end of `52d474f`'s own range, so the earlier "+40 MiB" was mostly
-  noise.
-- **PyArrow 23 is the one interval with a pattern.** About half its runs land at 450–474 MiB, like
-  PyArrow 19, and half at 531–583 MiB, a level only one PyArrow 19 run reached (Mann-Whitney
-  U = 84/121, about p ≈ 0.12, so not statistically settled).
-- *Superseded:* six runs with the system pool suggested the default allocator (mimalloc) caused the
-  high cluster. The larger A/B below does not support that.
-- The cache ceilings are unchanged: they bound serialized data, not RSS. Plan for about 435–585 MiB
-  at the 50,000-issue boundary.
-
-Raw results: [`memory-interval-2026-10-10.json`](scale-results/memory-interval-2026-10-10.json).
-
 ### PyArrow 25 (2026-10-11)
 
 Same harness, pandas 3.0.6 with the app's object strings, 6 alternating rounds:
@@ -286,7 +229,7 @@ Same harness, pandas 3.0.6 with the app's object strings, 6 alternating rounds:
 | 25.0.1 | 547–583 MiB | 569 MiB |
 
 Equal or slightly lower, so the pin moved to 25.x. PyArrow 26.0.0 was one day old at the time and
-was not evaluated. Raw results: [`pyarrow-25-2026-10-11.json`](scale-results/pyarrow-25-2026-10-11.json).
+was not evaluated. Raw results: [`pyarrow-25-2026-10-11.json`](https://github.com/a-adamovich/dbt-dqm/blob/3043befbf99b8b82519f79ce6081a2a0711232d5/docs/scale-results/pyarrow-25-2026-10-11.json).
 
 ### pandas 3 (2026-10-11)
 
@@ -304,26 +247,7 @@ Same harness at 50,000 issues, alternating runs, 6 per variant:
 pandas 3 infers Arrow-backed strings by default, and that costs about 70 MiB at this boundary
 (Arrow higher in 33 of 36 pairs). The review app therefore keeps object strings
 (`dbt_dqm_app/frames.py`), which brings pandas 3 back in line with pandas 2 (20 of 36 pairs, no
-difference). Raw results: [`pandas-3-2026-10-11.json`](scale-results/pandas-3-2026-10-11.json).
-
-### Allocator A/B (2026-10-10)
-
-PyArrow 23.0.1, same harness and Postgres 16.11, 12 rounds alternating which pool ran first:
-
-| PyArrow memory pool | Runs | Peak RSS median | Mean | Runs at or above 520 MiB |
-| --- | ---: | ---: | ---: | ---: |
-| default (mimalloc) | 12 | 575 MiB | 536 MiB | 8 |
-| system (`ARROW_DEFAULT_MEMORY_POOL=system`) | 12 | 563 MiB | 536 MiB | 8 |
-
-No difference (Mann-Whitney z = 0.72). The high cluster is not caused by the allocator, so the app
-keeps PyArrow's default pool. Both pools show the same two levels (about 450–470 and 560–580 MiB);
-what selects between them is not identified. Raw results:
-[`allocator-ab-2026-10-10.json`](scale-results/allocator-ab-2026-10-10.json).
-
-```bash
-DBT_DQM_TEST_DSN='host=... port=... dbname=... user=... password=...' \
-uv run python integration_tests/scale/cache_boundary.py --output /tmp/cache-boundary.json
-```
+difference). Raw results: [`pandas-3-2026-10-11.json`](https://github.com/a-adamovich/dbt-dqm/blob/3043befbf99b8b82519f79ce6081a2a0711232d5/docs/scale-results/pandas-3-2026-10-11.json).
 
 ## BigQuery
 
@@ -370,109 +294,6 @@ occurrence clustering. See [Google's clustered-table guide](https://docs.cloud.g
 because the client downloads rows over the REST API. The same supported cache size as on
 Postgres applies.
 
-Plans and per-run JSON are in [`scale-results/`](scale-results/). The planner-comparison plan
+Plans and per-run JSON are in [`scale-results/`](https://github.com/a-adamovich/dbt-dqm/tree/3043befbf99b8b82519f79ce6081a2a0711232d5/docs/scale-results). The planner-comparison plan
 files are from the last run that completed each case. The nested-loop mass-pass plan is from the
 20,000-occurrence run, because the larger ones timed out.
-
-
-### Python 3.14 alpha candidate (2026-10-12)
-
-Candidate `708b6c2` for 0.2.0a2, Python 3.14.6, pandas 3.0.6 and PyArrow 25.0.1,
-with the existing 50,000-issue, eight-payload-column Postgres sync harness:
-
-| Issues | Mean payload | Baseline RSS | Peak RSS | Warehouse reads | Total sync |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 50,000 | 408 bytes | 162.3 MiB | 483.0 MiB | 1.99 s | 5.06 s |
-
-This single release-gate run fits the documented 435–585 MiB planning range. It is not an
-allocator comparison or evidence of a systematic memory improvement. Other acceptance suites
-were running concurrently. Serialized cache ceilings are unchanged.
-
-Raw result: [`candidate-708b6c2-cache-boundary.json`](scale-results/candidate-708b6c2-cache-boundary.json).
-
-
-### Windows compatibility alpha candidate (2026-10-13)
-
-Production candidate `4c36226` for 0.2.0a3, Python 3.14.6, pandas 3.0.6 and
-PyArrow 25.0.1, with the same 50,000-issue, eight-payload-column Postgres harness:
-
-| Issues | Mean payload | Baseline RSS | Peak RSS | Warehouse reads | Total sync |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 50,000 | 408 bytes | 184.4 MiB | 433.8 MiB | 2.27 s | 5.67 s |
-
-This single release-gate result stays within the supported boundary and below the previous
-alpha's measured peak. It does not establish a systematic allocator improvement. Other
-acceptance suites were running concurrently; serialized cache ceilings are unchanged.
-
-Raw result: [`candidate-4c36226-cache-boundary.json`](scale-results/candidate-4c36226-cache-boundary.json).
-
-### Dedicated workflow alpha candidate (2026-10-13)
-
-Production candidate `608ce23` for 0.2.0a4, Python 3.14.6, using the same real
-Postgres sync harness at the supported cache boundary:
-
-| Issues | Mean payload | Baseline RSS | Peak RSS | Warehouse reads | Total sync |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 50,000 | 408 bytes | 174.6 MiB | 317.9 MiB | 5.76 s | 15.61 s |
-
-This is one release-gate measurement with acceptance suites running concurrently.
-It does not establish a systematic performance improvement or change the serialized cache ceilings.
-
-Raw result: [`candidate-608ce23-cache-boundary.json`](scale-results/candidate-608ce23-cache-boundary.json).
-
-## 0.2.0a5 release cache boundary
-
-Candidate `6b5f0bd8ec84e42fd4f177159d14fae895da65bf`, installed wheel on Python 3.14.6,
-Postgres 16.11: 50,000 issues with 408-byte mean captured payload, 415.6 MiB peak RSS,
-3.23 seconds warehouse reads and 7.08 seconds total. The uniquely named synthetic test
-schema was removed. [Raw result](scale-results/candidate-6b5f0bd-cache-boundary.json).
-This is cache-boundary evidence, not a BigQuery workflow speedup claim.
-
-## 0.2.0a6 export-enabled cache boundary
-
-Production candidate `11afd083ba16fc1cf27eddc915738591795859bd`, installed wheel on Python 3.14.6,
-Postgres 16.11: 50,000 issues, 408-byte mean captured payload, 485.9 MiB peak RSS. Warehouse
-reads took 1.97 s; total sync/render/export measurement 22.24 s. CSV exported all 50,000 issues
-in 4.07 s (42,451,937 bytes); Excel exported all 50,000 in 13.28 s (21,231,705 bytes). These
-are synthetic processed-history export measurements, not workflow speedup claims.
-[Raw result](scale-results/candidate-11afd08-cache-boundary.json). The disposable test schema
-was removed. This is the final a6 measurement; preliminary unreleased-candidate results are omitted.
-
-### Alpha7 export-enabled verification (2026-10-15)
-
-Production candidate `fe629f1b6bd8b486f09cb3a15f3aaf8f4b3c54a8`, Python 3.14 installed wheel, real
-Postgres and 50,000 synthetic processed issues: peak RSS **448.9 MiB**, baseline 185.6 MiB.
-Warehouse read 6.02 s; complete probe 24.93 s. CSV exported all 50,000 rows (42,452,001 bytes,
-3.33 s); Excel exported all 50,000 rows (21,192,038 bytes, 12.58 s). Both formats stayed within
-the source/file limits. This is a capacity check, not a comparable speedup benchmark.
-[Raw measurements](scale-results/candidate-fe629f1-cache-boundary.json).
-
-### Alpha8 export-enabled verification (2026-10-15)
-
-Production candidate `55efa28b53ac6bf268076d17f5b76c47d17388d1`, Python 3.14.6 installed wheel,
-Postgres 16.11: 50,000 synthetic processed issues, 408-byte mean payload, baseline RSS 177.2 MiB
-and peak RSS **462.0 MiB**. Warehouse reads took 5.54 s; complete sync/render/export probe 27.93 s.
-CSV exported all 50,000 rows in 4.54 s (42,452,001 bytes); Excel exported all 50,000 rows in
-14.35 s (21,193,041 bytes). The disposable schemas were removed. This is a capacity gate with
-other acceptance checks running, not a comparable workflow benchmark or speedup claim.
-[Raw measurements](scale-results/candidate-55efa28-cache-boundary.json).
-
-### Stable 0.2.0 export-enabled verification (2026-10-15)
-
-Production candidate `955e6dc7d06b20d93eeefc50dd1495ed6e5c90b4`, Python 3.14 installed
-wheel on Linux with Postgres 16: 50,000 synthetic processed issues, 408-byte mean payload,
-206.7 MiB baseline RSS and 593.4 MiB peak RSS. Warehouse reads took 7.36 s and the complete
-probe 34.07 s. CSV exported all 50,000 rows in 3.99 s (42,452,001 bytes); Excel exported all
-50,000 rows in 19.47 s (21,193,772 bytes). The disposable schema was removed. This is a
-capacity check on a different host from the prior alpha figures, not a comparable speed or
-memory regression measurement. [Raw measurements](scale-results/candidate-955e6dc-cache-boundary.json).
-
-### 0.2.1 candidate verification (2026-10-19)
-
-The installed wheel from production candidate `7ce7e96` synced 50,000 synthetic saved issues
-with 408-byte mean payloads at **585.3 MiB peak RSS** (198.8 MiB baseline). Warehouse reads took
-7.74 seconds; the complete probe, including exports, took 35.13 seconds. Both CSV and Excel
-contained all 50,000 rows. This is a single measurement with the same scope and limitations as
-the earlier cache-boundary probes, not a whole-server memory guarantee.
-[Raw result](scale-results/candidate-7ce7e96-cache-boundary.json) and
-[candidate QA run](https://github.com/a-adamovich/dbt-dqm/actions/runs/39323083904).

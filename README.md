@@ -149,7 +149,5 @@ for its controls and limits.
 - [Try the demo projects](docs/operations.md#demo-projects) or inspect the
   [warehouse contract](docs/warehouse-interfaces.md) and [scale measurements](docs/scale.md).
 - [0.2.5 release notes](docs/release-notes-0.2.5.md) and [compatibility verification](docs/dbt-2-compatibility.md).
-- [Historical 0.2.1 release notes](docs/release-notes-0.2.1.md) and
-  [verification record](docs/release-0.2.1.md).
 
-dbt-dqm is Apache-2.0 open source. See the [roadmap](docs/roadmap.md) and [license](LICENSE.md).
+dbt-dqm is Apache-2.0 open source. See the [license](LICENSE.md).

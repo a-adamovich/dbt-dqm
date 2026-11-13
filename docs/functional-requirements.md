@@ -14,16 +14,16 @@
 
 ## Collection
 
-- dbt-dqm tracks data tests with the configured tag (`dqm` by default) and
-  `store_failures: true`.
-- The package captures conclusive test executions and configured stored-failure fields in an
+- A data test opts in through `meta.dbt_dqm`.
+- Tracked tests require `store_failures: true` and table failure storage.
+- The package captures conclusive test executions and stored failures in an
   explicit dedicated workflow. It never interprets an unselected, skipped, interrupted, or collection-error
   test as a pass.
 - `meta.dbt_dqm.granularity` is the only source of issue identity columns. It is mandatory for
   every tracked test (including passing tests), must be a non-empty list of distinct non-empty
   names after case folding, and every configured column must be returned by a failing test query.
-- Capture modes are `identity_only` (default), `allowlist` with `context_columns`, and explicit
-  `full`. Invalid capture metadata is a configuration error and never lifecycle evidence.
+- Capture is always full. It stores every attribute returned for each captured failing row.
+  The legacy `capture_mode` and `context_columns` settings are ignored.
 - Test tags are stored as a compact JSON string in manifest order.
 
 ## Issue identity and lifecycle
