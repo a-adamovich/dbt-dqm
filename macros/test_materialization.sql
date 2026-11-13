@@ -8,10 +8,6 @@
   {% endif %}
 {% endmaterialization %}
 
-{% materialization dqm_test, default %}
-  {{ return(dbt_dqm.execute_dqm_test()) }}
-{% endmaterialization %}
-
 {% macro execute_dqm_test() %}
   {% set limit=config.get('limit') %}
   {% set header=config.get('sql_header') %}

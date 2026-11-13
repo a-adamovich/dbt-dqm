@@ -151,18 +151,6 @@ macros:
         type: list[string]
         description: Columns to insert, in target-table order.
 
-  - name: ensure_unique_index
-    description: >
-      Postgres-only: creates the unique index insert_new_rows's ON CONFLICT requires, if missing.
-      A no-op on adapters (like BigQuery) that don't need one.
-    arguments:
-      - name: relation
-        type: any
-        description: Relation to index.
-      - name: columns
-        type: list[string]
-        description: Columns forming the unique constraint.
-
   - name: incremental_upsert_strategy
     description: >
       Returns the incremental_strategy dqm_reconcile and dqm_annotation_changes should use for the

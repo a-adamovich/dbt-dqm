@@ -129,7 +129,7 @@
    rows are left untouched (no update-on-match — every current caller only ever inserts
    immutable, invocation-scoped rows that are never revised in place). BigQuery has no unique/
    primary-key constraint concept, so it uses MERGE; Postgres uses INSERT ... ON CONFLICT, which
-   requires a matching unique index — ensure_unique_index() below sets that up once per table. #}
+   requires a matching unique index. app_table_finish() in schema_management.sql creates it. #}
 {% macro insert_new_rows(target_relation, source_sql, key_columns, insert_columns) %}
   {{ return(adapter.dispatch('insert_new_rows', 'dbt_dqm')(target_relation, source_sql, key_columns, insert_columns)) }}
 {% endmacro %}
@@ -157,44 +157,6 @@
   select {{ insert_columns | join(', ') }}
   from ({{ source_sql }}) s
   on conflict ({{ key_columns | join(', ') }}) do nothing
-{% endmacro %}
-
-{# Postgres-only: ON CONFLICT requires a unique index on exactly the conflict-target columns.
-   No-op on adapters (like BigQuery) that don't need one. Safe to call every invocation. #}
-{% macro ensure_unique_index(relation, columns) %}
-  {{ return(adapter.dispatch('ensure_unique_index', 'dbt_dqm')(relation, columns)) }}
-{% endmacro %}
-
-{# Postgres query-support indexes. BigQuery uses clustering instead, so the default is a no-op. #}
-{% macro ensure_index(relation, columns, suffix=none, where=none) %}
-  {{ return(adapter.dispatch('ensure_index', 'dbt_dqm')(relation, columns, suffix, where)) }}
-{% endmacro %}
-
-{% macro default__ensure_index(relation, columns, suffix=none, where=none) %}
-{% endmacro %}
-
-{% macro postgres__ensure_index(relation, columns, suffix=none, where=none) %}
-  {% if execute %}
-    {% set index_suffix = suffix or (columns | join('_')) %}
-    {% set index_name = (relation.identifier ~ '_' ~ index_suffix ~ '_idx') | lower %}
-    {% set statement = 'create index if not exists ' ~ index_name ~ ' on ' ~ relation
-      ~ ' (' ~ (columns | join(', ')) ~ ')' %}
-    {% if where is not none %}{% set statement = statement ~ ' where ' ~ where %}{% endif %}
-    {% do run_query(statement) %}
-  {% endif %}
-{% endmacro %}
-
-{% macro default__ensure_unique_index(relation, columns) %}
-{% endmacro %}
-
-{% macro postgres__ensure_unique_index(relation, columns) %}
-  {% if execute %}
-    {% set index_name = (relation.identifier ~ '_' ~ (columns | join('_')) ~ '_key') | lower %}
-    {% do run_query(
-      'create unique index if not exists ' ~ index_name ~ ' on ' ~ relation
-      ~ ' (' ~ (columns | join(', ')) ~ ')'
-    ) %}
-  {% endif %}
 {% endmacro %}
 
 {# The incremental strategy dqm_reconcile.sql and dqm_annotation_changes.sql should use per

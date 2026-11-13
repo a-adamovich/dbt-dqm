@@ -120,28 +120,3 @@ begin{% if target.type=='bigquery' %} transaction{% endif %};
     {% endif %}
   {% endif %}
 {% endmacro %}
-
-{#- Whether this invocation wrote a maintenance trigger: captured tracked-test results (capture
-    records every tracked result of dbt test/build) or completed a reconciliation. Only these
-    invocations advance the activity markers that dqm_maintenance_health compares outcomes to,
-    so other package models (public views, health views) never trigger maintenance. #}
-{% macro maintenance_triggered(results) %}
-  {% for result in (results or []) %}
-    {% if flags.WHICH in ['test','build'] and dbt_dqm.tracked_test(result.node) %}{{ return(true) }}{% endif %}
-    {% if result.node.unique_id == 'model.dbt_dqm.dqm_reconcile' and result.status == 'success' %}{{ return(true) }}{% endif %}
-  {% endfor %}
-  {{ return(false) }}
-{% endmacro %}
-
-{#- Optional maintenance after run/build/test, at most once per invocation (this on-run-end hook
-    runs once). It executes the steps itself and returns no SQL. See macros/maintenance.sql for
-    what it guarantees. #}
-{% macro retention_hook(results=none) %}
-  {% if not execute or dbt_dqm.empty_mode() or flags.WHICH not in ['run','build','test'] %}{{ return('') }}{% endif %}
-  {% if target.type!='bigquery' and var('dbt_dqm_retention_days',none) is none and var('dbt_dqm_event_retention_days',none) is none %}{{ return('') }}{% endif %}
-  {#- Both triggers (capture and reconciliation) ran setup earlier in this invocation, so the
-      maintenance tables exist; the steps and log writes are protected regardless. #}
-  {% if not dbt_dqm.maintenance_triggered(results) %}{{ return('') }}{% endif %}
-  {% do dbt_dqm.maintenance_run(dbt_dqm.maintenance_retention_days(), dbt_dqm.positive_integer_var('dbt_dqm_event_retention_days',none), 'automatic') %}
-  {{ return('') }}
-{% endmacro %}
