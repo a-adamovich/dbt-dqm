@@ -80,8 +80,7 @@ On Postgres, an administrator must create the `pgcrypto` extension once:
 often requires elevated privileges. For BigQuery authentication, use the existing dbt
 profile and credentials available to the command; the app uses the same profile.
 
-The [release checklist](release-checklist.md) describes release gates, and the
-[0.2.1 release record](release-0.2.1.md) records what was verified.
+The [release checklist](release-checklist.md) describes release gates.
 
 ## Project, target, and artifact resolution
 

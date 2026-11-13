@@ -21,8 +21,7 @@ macros:
 
   - name: tracked_test
     description: >
-      Returns whether a manifest node is a data test selected for dbt-dqm collection. A tracked test
-      must have the configured tag and store_failures enabled.
+      Returns whether a manifest node is a data test marked with meta.dbt_dqm.
     arguments:
       - name: node
         type: any

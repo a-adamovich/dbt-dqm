@@ -542,7 +542,7 @@ def _render_review_tools(workspace, config, page_rows, filters, pending_only,
 
 
 def _render_warehouse_issues(workspace, pending, config) -> None:
-    """Issues read from the warehouse one page at a time (design: docs/design/warehouse-browsing.md).
+    """Issues read from the warehouse one page at a time (design: docs/archive.md).
 
     Filters, search, counts and the sort run in the warehouse. Each loaded page is stored in the
     bounded local cache, so edits are staged against it exactly as in snapshot mode.
