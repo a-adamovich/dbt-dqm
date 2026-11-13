@@ -246,22 +246,19 @@ def _create_release(tmp_path, tag):
 
 
 def test_only_pre_release_tags_create_a_github_pre_release(tmp_path):
-    alpha = _create_release(tmp_path, "v0.2.0a1")
-    assert "--prerelease" in alpha
-    assert alpha[alpha.index("--title") + 1] == "dbt-dqm v0.2.0a1 (pre-release)"
-    notes = alpha[alpha.index("--notes") + 1]
-    assert "dbt-dqm[bigquery]==0.2.0a1" in notes and "Git revision v0.2.0a1" in notes
-    assert "spells the version 0.2.0-a1" in notes
-    stable = _create_release(tmp_path, "v0.2.0")
-    assert "--prerelease" not in stable and "--title" not in stable
-    assert stable[stable.index("--notes-file") + 1] == "docs/release-notes-0.2.0.md"
-    later_stable = _create_release(tmp_path, "v0.2.1")
-    assert "--prerelease" not in later_stable
-    assert later_stable[later_stable.index("--notes-file") + 1] == "docs/release-notes-0.2.1.md"
-    candidate = _create_release(tmp_path, "v0.2.3")
-    assert "--prerelease" not in candidate
-    assert "--generate-notes" in candidate
-    assert "--generate-notes" in _create_release(tmp_path, "v0.2.6")
+    workflow = (ROOT / ".github/workflows/release.yml").read_text()
+    assert "--notes-file" not in workflow
+    assert "0.2.0a8" not in workflow
+    expected_notes = "Pre-release. See README.md and CHANGELOG.md at this tag for supported versions and operating limits."
+    for tag in ("v0.2.0a1", "v0.3.0rc1"):
+        args = _create_release(tmp_path, tag)
+        assert {"--prerelease", "--generate-notes", "--verify-tag"} <= set(args), tag
+        assert args[args.index("--title") + 1] == f"dbt-dqm {tag} (pre-release)"
+        assert args[args.index("--notes") + 1] == expected_notes
+    for tag in ("v0.2.0", "v0.2.1", "v0.2.3", "v0.2.6"):
+        args = _create_release(tmp_path, tag)
+        assert {"--generate-notes", "--verify-tag"} <= set(args), tag
+        assert {"--notes-file", "--prerelease", "--title"}.isdisjoint(args), tag
 
 
 def test_alpha_version_is_accepted_by_python_and_dbt():

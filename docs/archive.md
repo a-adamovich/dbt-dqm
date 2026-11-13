@@ -10,6 +10,7 @@ Publication status was checked on GitHub and PyPI on 2026-11-12. Each verificati
 
 - Publication status — GitHub: [Published release](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.0). PyPI: [Published](https://pypi.org/project/dbt-dqm/0.2.0/).
 - Verification — `955e6dc7d06b20d93eeefc50dd1495ed6e5c90b4`. “Candidate verification includes Python/UI tests, native Windows and macOS CI, clean locked and fresh-installed dependency audits, an installed-wheel browser check in snapshot and warehouse modes, and complete CSV and Excel exports at 50,000 saved issues.”
+- [Curated release notes](https://github.com/a-adamovich/dbt-dqm/blob/3043befbf99b8b82519f79ce6081a2a0711232d5/docs/release-notes-0.2.0.md).
 
 ### [0.2.0a1](https://github.com/a-adamovich/dbt-dqm/blob/3043befbf99b8b82519f79ce6081a2a0711232d5/docs/release-0.2.0a1.md)
 
@@ -55,6 +56,7 @@ Publication status was checked on GitHub and PyPI on 2026-11-12. Each verificati
 
 - Publication status — GitHub: [Published release](https://github.com/a-adamovich/dbt-dqm/releases/tag/v0.2.1). PyPI: [Published](https://pypi.org/project/dbt-dqm/0.2.1/).
 - Verification — `7ce7e96d1502b1901878e1a9ddc71a6e0dda55c0`. “32 passed, zero skipped”
+- [Curated release notes](https://github.com/a-adamovich/dbt-dqm/blob/3043befbf99b8b82519f79ce6081a2a0711232d5/docs/release-notes-0.2.1.md).
 
 ### [0.2.2](https://github.com/a-adamovich/dbt-dqm/blob/3043befbf99b8b82519f79ce6081a2a0711232d5/docs/release-notes-0.2.2.md)
 

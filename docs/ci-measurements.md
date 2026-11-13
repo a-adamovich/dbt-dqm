@@ -1,9 +1,7 @@
-# CI tiers and measurements
+# CI tiers and validation
 
-The development policy has three stages. Stage 1 provides fast required PR checks and manual
-Postgres/platform validation. Stage 2 will add approved BigQuery smoke and full cloud checks;
-Stage 3 will add evidence reuse and simplify publication. Stages 2 and 3 are not implemented
-by the Stage 1 change.
+The current policy combines required PR checks, manual Postgres and platform validation, and a
+keyless BigQuery release gate. The redesign's approved ADRs will define future validation tiers.
 
 ## Automatic PR checks
 
@@ -42,9 +40,9 @@ installed versions, dependency digest, timestamps, and JUnit counts. Failures, m
 unexpected skips, duplicate reports, or fewer than 42 passing warehouse cases fail validation.
 Reports are retained for 30 days; this is retention, not permission to reuse them for release.
 
-Stage 1 certifies **Postgres and platforms only**. A passing result does not replace the
-BigQuery release gate. The maintainer must configure `required` as a required status and require up-to-date PRs;
-adding a workflow alone does not enforce branch protection.
+Full validation covers **Postgres and platforms only**. Publication requires the credentialed
+[release gate](release-checklist.md#gates). The maintainer must configure `required` as a required
+status and require up-to-date PRs.
 
 ## Measurement record
 
@@ -78,8 +76,27 @@ In a merged case, the first failure hides any later ones.
 
 ## BigQuery tiers
 
-Full acceptance runs on dbt 2 and the exact `BIGQUERY_SMOKE_TESTS` selection runs on Core, with six workers on dbt 2 and four on Core, matching the validated runs.
-Before
-merging a change to macros, models, BigQuery adapter or SQL behavior, `warehouse.py`, browsing or
-the CLI runner, run the smoke selection on dbt 2 once, with maintainer authorization. The 1 GiB
-qualifications in the measurement record above apply to every tier.
+- **Offline compilation** runs in automatic PR CI and manual Full validation without warehouse
+  access. It verifies compilation.
+- **Development smoke** runs the nine cases in `BIGQUERY_SMOKE_TESTS` on dbt 2.0.11. Before merging
+  a change to macros, models, BigQuery adapter or SQL behavior, `warehouse.py`, browsing, or the CLI
+  runner, obtain maintainer authorization for one run. Set up approved Application Default
+  Credentials for a test project where the fixture can create and tear down disposable datasets.
+  Set `DBT_DQM_BIGQUERY_TEST_LOCATION` to the approved location (the default is `US`).
+  From the repository root, run:
+
+  ```bash
+  DBT_DQM_BIGQUERY_TEST_PROJECT="approved-test-project" \
+    DBT_DQM_BIGQUERY_TEST_LOCATION="US" \
+    DBT_DQM_DBT_EXECUTABLE="/absolute/path/to/dbt-2.0.11" \
+    uv run --group dbt1 --extra bigquery pytest -q -rA -n 4 -m bigquery_smoke \
+    integration_tests/acceptance/test_bigquery.py
+  ```
+
+- **Release validation** runs the keyless lifecycle workflow on the exact release candidate on
+  `main`. The current selections in [`bigquery_suite()`](../scripts/release_evidence.py) are 33
+  full acceptance cases on dbt 2 (six workers) and the nine `BIGQUERY_SMOKE_TESTS` cases on Core
+  (four workers). The same attempt also supplies cross-engine upgrade and restricted-permissions
+  evidence. See the [release checklist](release-checklist.md#gates).
+
+The 1 GiB qualifications in the measurement record above apply to credentialed runs.

@@ -24,5 +24,5 @@ skips. Existing test assertions must not be weakened to shorten CI.
 PR CI provides the fast tier; full warehouse/platform matrices, browser QA and the 50,000-issue
 memory/export check are run deliberately using **Full validation** in GitHub Actions. Do not
 duplicate those long suites locally by default. Record a diagnosis before requesting a rerun.
-The staged [CI policy and measurements](docs/ci-measurements.md) explains the coverage and limits.
+[CI tiers and validation](docs/ci-measurements.md) explains the coverage and limits.
 Coding agents share [AGENTS.md](AGENTS.md); `CLAUDE.md` imports the same instructions.

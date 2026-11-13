@@ -2,6 +2,10 @@
 
 Describe the focused change and its user-visible behavior.
 
+## Approved CI scope
+
+State which checks the maintainer approved for this PR (for example, automatic PR `required` only).
+
 ## Verification
 
 - [ ] `ruff check .`
