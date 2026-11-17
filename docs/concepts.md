@@ -140,19 +140,26 @@ state is a separate dimension, described in the next section.
 ```mermaid
 stateDiagram-v2
     state "Active" as Active
-    state "Archived (Passed)" as Passed
-    state "Archived (IDENTITY_CHANGED or TEST_REMOVED)" as Structural
-    state "Active, next occurrence" as Next
+    state "Archived: Passed" as Passed
+    state "Archived: structural" as Structural
+    state "Next occurrence, Active" as Next
 
-    [*] --> Active: record starts failing (APPEARED)
-    Active --> Active: still failing (VALUES_CHANGED if values differ)
-    Active --> Active: limit reached, inconclusive result, collection error or test not selected
-    Active --> Passed: complete run without this record (DISAPPEARED)
-    Active --> Structural: granularity changed or test removed (CLOSED_STRUCTURAL)
-    Passed --> Next: record fails again (REAPPEARED)
-    Passed --> [*]
-    Structural --> [*]
+    [*] --> Active: first failure
+    Active --> Active: still failing, or no usable evidence
+    Active --> Passed: complete pass
+    Active --> Structural: grain changed or test removed
+    Passed --> Next: fails again
 ```
+
+| Transition | Event | Close reason |
+| --- | --- | --- |
+| First failure | `APPEARED` | |
+| Still failing | `VALUES_CHANGED` if values differ, otherwise none | |
+| No usable evidence (limit reached, inconclusive, collection error, not selected) | none | |
+| Complete pass | `DISAPPEARED` | `Passed` |
+| Grain changed | `CLOSED_STRUCTURAL` | `IDENTITY_CHANGED` |
+| Test removed | `CLOSED_STRUCTURAL` | `TEST_REMOVED` |
+| Fails again after `Passed` | `REAPPEARED` | |
 
 The rules behind the diagram:
 
