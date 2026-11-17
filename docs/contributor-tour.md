@@ -173,7 +173,9 @@ Tests: `tests/test_relations.py`, `tests/test_sync_and_errors.py`, `tests/test_a
 
 ## Where BigQuery and Postgres differ
 
-Most SQL is shared. The differences sit in a few known places:
+Issue identity, lifecycle transitions, and granularity rules should behave the same on
+BigQuery and Postgres. A difference in those results is a bug. Most SQL is shared, with
+adapter-specific implementations in a few places:
 
 - **Dispatched macros** in [`adapters.sql`](../macros/adapters.sql) and [`helpers.sql`](../macros/helpers.sql):
   string literals, SHA-256, JSON building, insert-if-missing, the high-water upsert and changed-key

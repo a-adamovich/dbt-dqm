@@ -12,7 +12,9 @@ and `dqm_issue_timeline` for occurrence intervals. Use `dqm_issue_events` for li
 - [SQL path for known misses](#sql-path-for-known-misses) documents how to insert a report with a
   stable caller-generated ID.
 
-0.2 requires a fresh `dbt_dqm_schema`. Recognizable 0.1 tables are rejected before an install marker is written. The package does not delete, baseline or migrate existing history. Keep that schema for historical queries and point the new package at another schema. Later upgrades use ordered, verified, idempotent migrations; columns are added and backfilled, never removed automatically. Identity remains `dqm-id-v1` and changes only through an explicit identity scheme version.
+Normal setup rejects recognizable 0.1 tables before writing an install marker. Use a
+new schema to keep the old history available for queries. See [upgrading](legacy.md#upgrading)
+for the explicit reset option, which discards that installation's DQM history. Later upgrades use ordered, verified, idempotent migrations; columns are added and backfilled, never removed automatically. Identity remains `dqm-id-v1` and changes only through an explicit identity scheme version.
 
 ## Relations and ownership
 

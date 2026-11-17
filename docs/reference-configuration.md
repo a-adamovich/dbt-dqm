@@ -28,7 +28,7 @@ where email is null
 
 | `meta.dbt_dqm` key | Accepted value and effect |
 | --- | --- |
-| `granularity` | Required nonempty list of output column names. Names must be nonblank and unique after trimming and case normalization. Rows at the same grain form one issue observation. A complete, conclusive execution can close omitted identities from an earlier grain as `IDENTITY_CHANGED`. |
+| `granularity` | Required nonempty list of output column names. Names must be nonblank and unique after trimming and case normalization. Rows with the same grain values form one issue observation, including when every grain value is null. Choose columns that identify records even when values are missing. A complete, conclusive execution can close omitted identities from an earlier grain as `IDENTITY_CHANGED`. |
 | `owner` | String, list of strings, or null. Initializes the owner when no usable row owner exists. |
 | `priority` | `critical`, `high`, `medium`, `low`, `unset`, or omitted. |
 | `criticality` | Optional string describing the business effect. |
@@ -91,7 +91,7 @@ Use your consumer project's profile name in place of `consumer`. The configurati
 token source must be accessible to both the command and app. Use the normal ADC environment
 path rather than an explicit credentials-file override for WIF. dbt-dqm does not create
 identity pools, providers, service accounts, IAM bindings, or credential files. Use an
-environment you trust. The local WIF smoke test uses simulated responses. The [keyless BigQuery workflow](bigquery-lifecycle.md)
+environment you trust. The offline WIF smoke test uses simulated responses. The [keyless BigQuery workflow](bigquery-lifecycle.md)
 describes CI federation and its live verification.
 
 ## Deprecated and obsolete settings

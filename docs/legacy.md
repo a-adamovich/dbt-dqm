@@ -28,7 +28,10 @@ verify the destinations before confirming. This starts isolated history for the 
 installation. Shared history stays in its original tables. See the [reset and confirmation
 rules](reference-cli.md#exit-codes-and-full-refresh).
 
-Use a fresh schema for 0.1. For older 0.2 alphas before a4, export annotations you need
+For 0.1, point `dbt_dqm_schema` at a new schema to keep the old history available for
+queries. To start over in the same schema, back up any history you need and explicitly confirm
+`dbt-dqm run --full-refresh` for that installation. The reset discards its old DQM history
+and starts a fresh installation. For older 0.2 alphas before a4, export annotations you need
 before a full refresh. Update tests to the [current configuration](reference-configuration.md#tracked-data-tests),
 remove obsolete settings, and set a [retention policy](operations.md#retention-and-maintenance).
 After an intentional reset, purge the obsolete local workspace before restarting the app.
@@ -83,7 +86,8 @@ and [`identity_migration.sql`](../macros/identity_migration.sql).
 Setup refuses to write in these cases. It never deletes or converts the old data:
 
 - **A 0.1 schema.** Tracking tables without a 0.2 install marker. Point `dbt_dqm_schema` at a new
-  schema and keep the old schema for historical queries.
+  schema to preserve the old history, or explicitly reset the existing installation with
+  `dbt-dqm run --full-refresh`. The reset discards the old DQM history. See [Upgrading](#upgrading).
 - **An incompatible marker.** `dqm_install` exists without `dqm-full-v1`.
 - **BigQuery collation from before 0.2.1.** Collated tracking columns broke case-sensitive identity.
   See [BigQuery collation recovery](operations.md#bigquery-dataset-collation) for reinstall options.

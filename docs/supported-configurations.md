@@ -8,6 +8,9 @@
 | dbt Core 1.11–1.12 | BigQuery | `dbt-bigquery`. CI uses 1.12.1 and the credentialed release tier runs a 9-of-33-case Core smoke selection. |
 | dbt 2 | BigQuery | Bundled adapter. The CLI accepts `>=2.0.9,<3`. Offline checks use 2.0.9 and 2.0.11. The live-validated pin is 2.0.11. |
 
+The Core smoke selection can miss bugs specific to the BigQuery adapter in cases it does
+not run.
+
 dbt 2 support is limited to BigQuery. DuckDB, ClickHouse, Snowflake, and Databricks are outside this release's support.
 
 The Python app supports 3.11–3.14. Use a Python version supported by the engine and adapter you install. CI includes Windows and macOS portability checks. On Windows, the runner uses private copies when symlink creation is denied. Large user-supplied argument lists still follow the platform's command-size limits. See [CI tiers](ci-measurements.md) and the [release checklist](release-checklist.md) for the coverage and gates.
@@ -33,7 +36,7 @@ See the [Postgres demo](quickstart-postgres.md), [BigQuery demo](quickstart-bigq
 
 - Serialize captures that share stored-failure tables. Equal counts alone cannot establish which invocation wrote those rows.
 - BigQuery allows one reconciliation per resolved DQM installation at a time. Overlaps are detected and fail rather than waiting in a queue.
-- Use a fresh schema when moving from 0.1 to 0.2. See [upgrading](legacy.md#upgrading) for later migrations.
+- Prefer a fresh schema when moving from 0.1 to 0.2. See [upgrading](legacy.md#upgrading) for reset and migration options.
 - Event payloads default to `full` with indefinite retention. Set a retention and event payload policy appropriate for the captured data.
 - App cache ceilings measure serialized data. Process memory can be higher. In auto mode, larger populations switch to warehouse browsing. On BigQuery, each 2,000-issue read and each summary is billed. See the [review app workflows](review-app.md) for browse modes and export limits.
 - Maintenance Health is a monitoring approximation. Automated suites do not exercise live interactive OAuth sign-in for the app. See [optional maintenance](warehouse-interfaces.md#optional-maintenance).

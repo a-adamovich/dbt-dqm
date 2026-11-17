@@ -22,6 +22,17 @@ uv pip install 'dbt-core==1.12.6' 'dbt-postgres==1.11.0' 'dbt-dqm[postgres]==0.2
 dbt deps
 ```
 
+Ask a database administrator to enable `pgcrypto` once in the target Postgres database
+before the first DQM run:
+
+```sql
+create extension if not exists pgcrypto;
+```
+
+dbt-dqm uses the extension's `digest()` function for issue identities. The package leaves
+extension setup to the administrator because creating extensions can require privileges
+the dbt role does not have.
+
 ### BigQuery with dbt 2
 
 **Inspected / needs authorized runtime verification.** In your app environment, install the
