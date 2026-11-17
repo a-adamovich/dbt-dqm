@@ -1,0 +1,105 @@
+# Legacy upgrade and recovery code
+
+dbt-dqm 0.2.x carries code whose only job is to upgrade older installations or to repair one past
+incident. It still runs and is still tested, but it's legacy: it is planned for removal in a later
+major version, so don't build anything new on it. This page explains what that code does, so its
+messages make sense when you meet them. To upgrade, follow [Upgrading](operations.md#upgrading).
+
+The recovery macros for late evidence, stuck runs and leftover stages aren't legacy. They handle
+normal runtime situations and are described in
+[How a run works](how-it-works.md#when-something-goes-wrong).
+
+## Setup and migrations run on every install
+
+Every run starts with setup (`initialize_dqm`, and again inside reconciliation). Setup checks the
+installation, then applies any migration it hasn't recorded yet, in order:
+
+| Migration | What it adds |
+| --- | --- |
+| `0001_initial` | The 0.2 tables. |
+| `0002_event_payload_mode` | Event payload mode, changed columns and digests. |
+| `0003_app_change_staging` | The BigQuery staging table for app edits. |
+| `0004_app_staging_safety` | Upload IDs and a 24-hour lifetime for staged edits. |
+| `0005_maintenance_log` | The maintenance outcome log. |
+| `0006_maintenance_attribution` | Which invocation triggered each maintenance outcome. |
+| `0007_browse_keyset_index` | An index for warehouse browsing (Postgres). |
+| `0008_canonical_identity_signature` | Engine-independent identity metadata (see [#105](#the-105-identity-repair)). |
+
+A **fresh** install also goes through this list: `0001` creates the tables, and the later steps
+find nothing to change. That's why the upgrade machinery can't simply be deleted today. Once an
+installation is at the latest migration, setup takes a fast path and does no DDL.
+
+Each migration is applied, backfilled where needed, verified, then recorded in
+`dqm_schema_migrations`. It also increases the generation, so a reconciliation frozen before the
+migration can't apply afterwards. `dqm_reconciliation_control.schema_version` holds the latest
+migration.
+
+**Why BigQuery needs a migration lease.** BigQuery can't run schema changes inside a transaction.
+A migration that stops halfway can't roll back, so the first run to start one claims a lease in the
+control row, valid for `dbt_dqm_reconcile_timeout_minutes`. Every later step checks it still owns
+the lease. Another run that arrives meanwhile gets "DQM migration is already running" and should
+retry later. On Postgres, migrations run in one transaction under a lock, so an interrupted one
+rolls back.
+
+**Why an older package refuses a newer schema.** If the warehouse is at a later migration than the
+installed package knows, setup stops with "DQM schema is newer than this package". Upgrade the
+package. Don't run an older writer against an upgraded installation.
+
+Source: `migrations` and `setup_sql` in [`schema_management.sql`](../macros/schema_management.sql),
+and [`identity_migration.sql`](../macros/identity_migration.sql).
+
+## Refusals that protect older data
+
+Setup refuses to write in these cases. It never deletes or converts the old data:
+
+- **A 0.1 schema.** Tracking tables without a 0.2 install marker. Point `dbt_dqm_schema` at a new
+  schema, or reset with `dbt-dqm run --full-refresh`. History from 0.1 isn't migrated.
+- **An incompatible marker.** `dqm_install` exists without `dqm-full-v1`.
+- **BigQuery collation from before 0.2.1.** Collated tracking columns broke case-sensitive identity.
+  The fix is a confirmed full refresh with the same target and naming variables.
+- **A newly prefixed namespace next to legacy shared tables.** Since 0.2.0a7, a prefixing alias
+  macro also prefixes the internal tables. If the old unprefixed tables still exist in that schema,
+  an ordinary run won't start a second installation beside them. It asks for an explicit
+  `--full-refresh` of the new, isolated installation.
+
+## Namespaces and separate history
+
+Changing `dbt_dqm_schema` or your naming macros points dbt-dqm at a different installation. The new
+one starts with empty history. Nothing is copied, split or deleted, and the old tables stay where
+they are. Local workspaces are separate too, because the workspace path includes the resolved
+namespace. Before you switch, apply or discard pending edits in the old app.
+
+## The #105 identity repair
+
+On 0.2.4 and earlier, switching between dbt Core and dbt 2 could close open issues as
+`IDENTITY_CHANGED`. The two engines wrote the identity metadata as JSON in different ways, so a
+switch looked like a granularity change. The issue hash itself was unchanged.
+
+Since 0.2.5, identity metadata uses a length-prefixed text format that doesn't depend on the
+engine. The pieces that deal with the old format are:
+
+- Migration `0008`, which decodes the old JSON signatures from either engine and rewrites them
+  once, stopping on anything malformed or contradictory.
+- The decoder in [`identity.py`](../src/dbt_dqm_app/identity.py).
+- `scripts/repair_identity_105.py`, a one-time BigQuery repair that moves reviewer state back onto
+  the original occurrences after an incident.
+- A CI job (`cross-engine-upgrade`) that reproduces the incident from the 0.2.4 code, migrates,
+  repairs and switches engines back and forth.
+
+[Engine switches and issue continuity](identity-105-recovery.md) has the procedure. Don't use a full
+refresh on an affected installation, because it removes the history the repair needs.
+
+## Smaller compatibility paths
+
+- The app upgrades older local workspaces in place (new columns, and old `test_status` edits renamed
+  to `workflow_status`).
+- `test_status` is a deprecated copy of `workflow_status`. Every workflow write also writes it.
+- Obsolete test settings get a warning (`capture_mode`, `context_columns`,
+  `dbt_dqm_capture_mode`, `dbt_dqm_reconcile_lookback_days`) or an error (`dbt_dqm_test_tag`,
+  `poc_responsible`, `owner_column`, `dqm_granularity`).
+- A newer app reports maintenance health as unavailable when the package predates migration
+  `0005`, instead of failing the sync.
+- On unprefixed Postgres installations, indexes keep the names they had before namespaces were
+  isolated, so an upgrade doesn't create duplicates.
+- `dqm_maintenance_health` treats log rows written before migration `0006` as unattributed and
+  reports them as `unknown` until a newer outcome replaces them.
