@@ -1,5 +1,16 @@
 # Warehouse interfaces for 0.2
 
+Read `dqm_current_issues` for active issues, `dqm_all_issues` for active and archived occurrences,
+and `dqm_issue_timeline` for occurrence intervals. Use `dqm_issue_events` for lifecycle events,
+`dqm_annotation_changes` for review history, and the Health views for operational reporting.
+
+- [Annotations and metadata](#annotations-and-metadata) defines the six editable fields, verdicts,
+  and audit guarantees.
+- [Recovery and retention](#recovery-and-retention) documents late evidence acknowledgement, stale
+  run abandonment, stage cleanup, and retention operations.
+- [SQL path for known misses](#sql-path-for-known-misses) documents how to insert a report with a
+  stable caller-generated ID.
+
 0.2 requires a fresh `dbt_dqm_schema`. Recognizable 0.1 tables are rejected before an install marker is written. The package does not delete, baseline or migrate existing history. Keep that schema for historical queries and point the new package at another schema. Later upgrades use ordered, verified, idempotent migrations; columns are added and backfilled, never removed automatically. Identity remains `dqm-id-v1` and changes only through an explicit identity scheme version.
 
 ## Relations and ownership

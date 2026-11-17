@@ -1,4 +1,4 @@
-# Review issues in the local app
+# Review app workflows
 
 The Python `dbt-dqm` installation includes a single-user local browser app for the issues
 captured by `dbt-dqm run`. Start it from the same dbt project and target used for the run:
@@ -15,10 +15,16 @@ switching namespace in an open session requires a restart.
 
 ## Review and apply
 
-Browse issue cards and filter by lifecycle, workflow status, owner, creation date, or text.
-Cards show the captured record, owner, review status, timestamps, and action fields. You can
-edit owner, workflow status, review verdict, call to action, ticket URL, and notes. Local
-edits are pending until **Apply and sync** submits them to the warehouse.
+1. Choose **Sync** to refresh saved issues. In **Issues**, filter by lifecycle, workflow status,
+   owner, creation date, or text. Include archived issues to see Passed closures.
+2. Set owner, workflow status, or review verdict on the card. Open **Edit annotations** to edit
+   the call to action, ticket URL, or notes. Leave the edited field to stage the change locally.
+3. Choose **Apply and sync** to submit those changes to the warehouse. Confirm the saved values
+   on the card after synchronization.
+
+A recurring card shows the previous close reason and workflow status at close. Open
+**Previous investigation** for the previous notes and ticket. Include archived issues to view
+the previous occurrence's verdict.
 
 The app compares annotation versions before applying changes and keeps an audit history.
 A concurrent reviewer edit produces a conflict instead of a silent overwrite. Sync overlays
@@ -94,6 +100,5 @@ For explicit paths or a target, use:
 dbt-dqm app --project-dir /path/to/project --profiles-dir /path/to/profiles --target dev
 ```
 
-See [operations](operations.md#project-target-and-artifact-resolution) for defaults and
-the matching `--target-path` option. Restart the app after changing the naming namespace;
+See the [CLI reference](reference-cli.md) for flag defaults, bounds, and artifact resolution. Restart the app after changing the naming namespace;
 the local workspaces remain isolated by resolved installation.
