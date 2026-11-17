@@ -78,12 +78,16 @@ JSON, which keeps them out of command-line arguments.
 
 The dbt 2 preflight uses a separate projection without global hooks. The package's
 empty-mode guard lives in model pre-hooks because dbt 2 can execute global hooks
-during compilation. The Core-only offline compile helper uses a shim to avoid opening
-an unused lazy BigQuery connection on close. See the [offline checks](ci-measurements.md#run-the-dbt-2-checks-locally).
+during compilation. For Core `compile --no-introspect`, the [CLI](../src/dbt_dqm_app/dbt_cli.py)
+runs [a shim](../src/dbt_dqm_app/dbt1_entrypoint.py) when it finds the selected engine's
+Python. The shim prevents the BigQuery adapter from opening an unused lazy connection on
+close. See the [offline checks](ci-measurements.md#run-the-dbt-2-checks-locally).
 
-dbt 2 does not expose the manifest metadata needed to check for maintenance macro
-overrides. It runs maintenance steps normally even if the experimental shortcut is enabled.
-On Core, the probes can skip eligible jobs when the runner can establish default behavior.
+When maintenance shortcuts are enabled on BigQuery with Core, the
+[maintenance macro](../macros/maintenance.sql) checks dispatch metadata to choose which
+steps to probe. It skips a job only when that step uses the package defaults and the
+probe confirms there is no eligible work. dbt 2 does not expose the dispatch metadata, so
+the macro runs all configured steps without probing.
 
 ## 5. Capture: `C-1` becomes an observation
 
