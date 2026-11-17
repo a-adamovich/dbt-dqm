@@ -76,4 +76,6 @@ The artifact directory contains `dqm_workflow_metrics.json`, with available timi
 | `--archive-cache-days` | 90 days. Use `0` for active issues only in the snapshot. |
 | `--lock-timeout` | 5 seconds for Postgres annotation writes. Accepts positive integers. |
 
-The app exits `1` for invalid app option values and `130` on a keyboard interrupt. Once started, it reads existing tracking relations. If they are missing, verify the project, target, and naming variables and run `dbt-dqm run` first. See [review app workflows](review-app.md) for browsing and edits.
+The app exits `1` for out-of-range cache, search, archive, or lock settings, `2` for CLI
+usage errors such as an unknown option or a non-integer `--port`, and `130` on a keyboard
+interrupt. Once started, it reads existing tracking relations. If they are missing, verify the project, target, and naming variables and run `dbt-dqm run` first. See [review app workflows](review-app.md) for browsing and edits.

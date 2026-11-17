@@ -4,15 +4,15 @@ Run the shipped [Postgres demo](../integration_tests/demo_postgres) with synthet
 
 ## 1. Start Postgres
 
-**Ran.** From a shell with Docker and uv, use a fresh checkout of this repository and start a dedicated container. The example uses the container name `dbt-dqm-b2-demo`. If it is taken, use a different name throughout. Docker assigns a free host port on loopback.
+**Ran.** From a shell with Docker and uv, use a fresh checkout of this repository and start a dedicated container. The example uses the container name `dbt-dqm-demo`. If it is taken, use a different name throughout. Docker assigns a free host port on loopback.
 
 ```bash
-docker run --rm -d --name dbt-dqm-b2-demo \
+docker run --rm -d --name dbt-dqm-demo \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=dbt_dqm_local \
   -e POSTGRES_DB=dbt_dqm_demo -p 127.0.0.1::5432 postgres:16
-docker port dbt-dqm-b2-demo 5432/tcp
-docker exec dbt-dqm-b2-demo pg_isready -U postgres -d dbt_dqm_demo
-docker exec dbt-dqm-b2-demo psql -v ON_ERROR_STOP=1 -U postgres -d dbt_dqm_demo \
+docker port dbt-dqm-demo 5432/tcp
+docker exec dbt-dqm-demo pg_isready -U postgres -d dbt_dqm_demo
+docker exec dbt-dqm-demo psql -v ON_ERROR_STOP=1 -U postgres -d dbt_dqm_demo \
   -c 'create extension if not exists pgcrypto'
 ```
 
@@ -40,7 +40,7 @@ dbt seed
 
 ## 3. Open and review issues
 
-**Ran.** Define a shell function and run the first scenario. The explicit `dqm_enabled` variable makes the demo assertion selectable by ordinary dbt.
+**Ran.** The three commands below ran individually. The shell function groups them for reuse. The explicit `dqm_enabled` variable makes the demo assertion selectable by ordinary dbt.
 
 ```bash
 run_demo() {
@@ -86,8 +86,8 @@ Both assertion runs should exit `0`.
 
 ```bash
 dbt-dqm workspace purge
-docker rm -f dbt-dqm-b2-demo
-docker ps -a --filter 'name=^/dbt-dqm-b2-demo$'
+docker rm -f dbt-dqm-demo
+docker ps -a --filter 'name=^/dbt-dqm-demo$'
 rm "$DBT_PROFILES_DIR/profiles.yml"
 rmdir "$DBT_PROFILES_DIR"
 unset DBT_PROFILES_DIR

@@ -1,6 +1,6 @@
 # Quickstart on disposable BigQuery
 
-Run the shipped [BigQuery demo](../integration_tests/demo_bigquery) against a dataset created solely for this walkthrough. Use the checkout root for installation commands.
+Run the shipped [BigQuery demo](../integration_tests/demo_bigquery) against a dataset created solely for this walkthrough. Use the checkout root and a shell with uv for installation commands.
 
 ## 1. Install the app and dbt 2
 
@@ -8,11 +8,10 @@ Run the shipped [BigQuery demo](../integration_tests/demo_bigquery) against a da
 
 ```bash
 demo_env="$(mktemp -d)"
-python -m venv "$demo_env/app"
+UV_PROJECT_ENVIRONMENT="$demo_env/app" uv sync --locked --no-dev --extra bigquery
 source "$demo_env/app/bin/activate"
-python -m pip install -e '.[bigquery]'
-python -m venv "$demo_env/engine"
-"$demo_env/engine/bin/python" -m pip install 'dbt==2.0.11'
+uv venv "$demo_env/engine"
+uv pip install --python "$demo_env/engine/bin/python" 'dbt==2.0.11'
 export DBT_DQM_DBT_EXECUTABLE="$demo_env/engine/bin/dbt"
 "$DBT_DQM_DBT_EXECUTABLE" --version
 ```
@@ -62,6 +61,18 @@ Expect exit `0` for each command and `OPENED (NEW)` 7. The tracked tests report 
 
 **Needs authorized runtime verification.** Stop the app and use `dbt-dqm workspace purge` with the demo settings if you want to remove the local snapshot and drafts. Have the authorized dataset owner confirm the project and dataset ID, delete that dataset with its demo objects, and verify it is absent in the project as a principal with dataset visibility. Record the deletion and verification results. [Delete a BigQuery dataset](https://docs.cloud.google.com/bigquery/docs/managing-datasets)
 
+**Inspected.** With the app stopped and any workspace purge complete, remove the temporary
+profile and environments created by this guide. Run the cleanup from the setup shell, where
+`DBT_PROFILES_DIR` and `demo_env` still point to the directories created by `mktemp`.
+
+```bash
+rm "$DBT_PROFILES_DIR/profiles.yml"
+rmdir "$DBT_PROFILES_DIR"
+deactivate
+rm -r "${demo_env:?missing temporary demo directory}"
+unset DBT_PROFILES_DIR DBT_DQM_DBT_EXECUTABLE demo_env
+```
+
 ## Offline check
 
 **Ran.** Core compiled 27 nodes, including 16 data tests, with zero warehouse executions. The repository's offline check uses dbt Core 1.12.6 and dbt-bigquery 1.12.1 in a separate environment. From the checkout root run `uv sync --locked --group dbt1 --extra bigquery`. From the BigQuery demo directory, copy the unmodified example profile to a fresh temporary directory.
@@ -71,6 +82,8 @@ offline_profiles="$(mktemp -d)"
 cp profiles.yml.example "$offline_profiles/profiles.yml"
 uv run --no-sync dbt deps --profiles-dir "$offline_profiles"
 uv run --no-sync python ../../scripts/compile_bigquery.py --profiles-dir "$offline_profiles"
+rm "$offline_profiles/profiles.yml"
+rmdir "$offline_profiles"
 ```
 
-The compile helper rejects warehouse connections. The [historical credentialed proof](bigquery-lifecycle.md#proof-runs-2026-11-11) documents dbt 2 coverage on its own revision.
+The compile helper rejects warehouse connections. The final two commands remove the local profile copy. The [historical credentialed proof](bigquery-lifecycle.md#proof-runs-2026-11-11) documents dbt 2 coverage on its own revision.

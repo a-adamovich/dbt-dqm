@@ -6,9 +6,9 @@
 | --- | --- | --- |
 | dbt Core 1.11–1.12 | Postgres 14 and 16 | `dbt-postgres` 1.11.0. Full validation covers the Core 1.11.0 lower bound. Enable `pgcrypto` in the target database. |
 | dbt Core 1.11–1.12 | BigQuery | `dbt-bigquery`. CI uses 1.12.1 and the credentialed release tier runs a 9-of-33-case Core smoke selection. |
-| dbt 2 | BigQuery | Bundled adapter. The CLI accepts `>=2.0.9,<3`. Offline checks use 2.0.9 and 2.0.11. The live-validated and production pin is 2.0.11. |
+| dbt 2 | BigQuery | Bundled adapter. The CLI accepts `>=2.0.9,<3`. Offline checks use 2.0.9 and 2.0.11. The live-validated pin is 2.0.11. |
 
-The production configuration for this release is dbt 2.0.11 on BigQuery `US` with dbt-dqm 0.2.5. dbt 2 support is limited to BigQuery. DuckDB, ClickHouse, Snowflake, and Databricks are outside this release's support.
+dbt 2 support is limited to BigQuery. DuckDB, ClickHouse, Snowflake, and Databricks are outside this release's support.
 
 The Python app supports 3.11–3.14. Use a Python version supported by the engine and adapter you install. CI includes Windows and macOS portability checks. On Windows, the runner uses private copies when symlink creation is denied. Large user-supplied argument lists still follow the platform's command-size limits. See [CI tiers](ci-measurements.md) and the [release checklist](release-checklist.md) for the coverage and gates.
 

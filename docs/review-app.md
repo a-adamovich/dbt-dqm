@@ -8,8 +8,7 @@ dbt-dqm app
 ```
 
 The app reads your dbt profile and synchronizes saved warehouse issues at the start of a
-browser session. It does not execute tests or capture failures. Use its **Health** view to
-inspect setup, tests, collections, and maintenance. If tracking relations are missing, run
+browser session. It does not execute tests or capture failures. If tracking relations are missing, run
 `dbt-dqm run` first. Pass the same `--vars` when custom naming macros depend on them;
 switching namespace in an open session requires a restart.
 
@@ -71,6 +70,30 @@ completed file. A limit failure offers no partial download. Warehouse exports us
 filtered data query with installation and generation checks. On BigQuery, the complete
 export query respects `--max-search-gib`, even without text search. Prepared files are
 temporary and are discarded after filter changes, Sync, or Apply.
+
+## Read Health
+
+**Inspected.** Choose **Sync**, open **Health**, and check **Last health sync** before interpreting
+the tables. **Test health** shows review, resolution, and collection measures by test.
+**Area health** groups results by model or source, so a test can appear in multiple areas.
+Review and resolution measures use the reporting window. Backlog measures cover current active
+issues. **Maintenance** shows each configured step's last assessed status and diagnostic ID where
+available. See [Health populations](warehouse-interfaces.md#health-populations) for the
+denominators and [optional maintenance](warehouse-interfaces.md#optional-maintenance) for
+interpreting maintenance states.
+
+## Report a missed issue
+
+**Inspected.** Open **Report missed issue** when you have confirmed an issue the tests missed.
+Select the affected model or source, or choose **Unmapped area** and enter an area name. Enter
+the discovery date and description, choose a root cause, and optionally select the test that
+should have detected it. Add an evidence URL, priority, or detection method if known.
+
+Choose **Report missed issue** to save to `dqm_missed_issues`. If the app cannot confirm
+the write, retry from the same form in the same browser session. The app reuses the same
+submission ID so a retry cannot create a duplicate. After success, choose **Sync** to refresh
+the known-miss counts in Health. SQL callers supply their own stable ID.
+See [SQL path for known misses](warehouse-interfaces.md#sql-path-for-known-misses).
 
 ## Local workspace and browsing modes
 

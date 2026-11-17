@@ -1,10 +1,10 @@
 # Quickstart in an existing dbt project
 
-Pilot one test in a development target using synthetic data you can change. The example uses Postgres with `pgcrypto` enabled in the development database. See [supported configurations](supported-configurations.md) for the BigQuery engine and client combinations.
+Pilot one test in a development target using synthetic data you can change. Choose the install for your warehouse. The worked lifecycle below was run on Postgres with `pgcrypto` enabled.
 
 ## 1. Install the dbt package and Python command
 
-**Ran.** From the consumer project, add the Git package to `packages.yml`. Activate your project's Python environment and install the app alongside the engine you use for the pilot. The example uses uv.
+**Ran on Postgres.** From the consumer project, add the Git package to `packages.yml`.
 
 ```yaml
 packages:
@@ -12,11 +12,37 @@ packages:
     revision: v0.2.5
 ```
 
+### Postgres with dbt Core
+
+**Ran.** Activate your project's Python environment first.
+
 ```bash
 # Example for a fresh Postgres environment
 uv pip install 'dbt-core==1.12.6' 'dbt-postgres==1.11.0' 'dbt-dqm[postgres]==0.2.5'
 dbt deps
 ```
+
+### BigQuery with dbt 2
+
+**Inspected / needs authorized runtime verification.** In your app environment, install the
+BigQuery client extra. Keep dbt 2.0.11 in a separate engine environment and use your existing
+BigQuery development profile and authorized credentials.
+
+```bash
+uv pip install 'dbt-dqm[bigquery]==0.2.5'
+engine_env="$PWD/.venv-dbt2"
+uv venv "$engine_env"
+uv pip install --python "$engine_env/bin/python" 'dbt==2.0.11'
+export DBT_DQM_DBT_EXECUTABLE="$engine_env/bin/dbt"
+"$DBT_DQM_DBT_EXECUTABLE" deps
+```
+
+Use that executable for ordinary dbt commands below. The app and DQM runner use the exported
+path, which you can also supply with `--dbt-executable`. If you already have a separate dbt 2.0.11
+environment, set the variable to its executable and run `deps` there. See
+[supported configurations](supported-configurations.md) for the engine coverage.
+
+### Configure retention and target
 
 Add these variables to your existing `vars:` mapping in `dbt_project.yml`.
 
@@ -66,6 +92,9 @@ dbt ls --select pilot_customers --resource-type test
 dbt build --select pilot_customers
 dbt test --select not_null_pilot_customers_email
 ```
+
+**Adding the enable guard to the original test would disable it in ordinary `dbt test` and
+`dbt build` runs.** Leave the original test as it is and put the guard on the named DQM copy.
 
 The listing shows the original test. With the synthetic null email, both ordinary CI commands exit `1` because the original test fails. The named copy stays disabled because `dqm_enabled` defaults to false. Keep the existing CI job and run the DQM copy in a separate job after building upstream models.
 

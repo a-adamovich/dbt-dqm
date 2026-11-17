@@ -47,7 +47,7 @@ Set project defaults under `vars:` in `dbt_project.yml`. Use the same naming var
 | `dbt_dqm_retention_days` | Unset | Positive integer to prune processed raw evidence and old run-ledger rows. |
 | `dbt_dqm_event_retention_days` | Unset | Positive integer to age out issue events. |
 | `dbt_dqm_event_payloads` | `full` | `full`, `changed_columns`, or `none`. Controls values written to new events. Raw capture still includes all output values. |
-| `dbt_dqm_reconcile_timeout_minutes` | `60` | Positive integer age for recovery of stale BigQuery reconciliation runs. |
+| `dbt_dqm_reconcile_timeout_minutes` | `60` | Positive integer in minutes. Sets the stale BigQuery reconciliation threshold and the BigQuery schema migration lease duration. |
 | `dbt_dqm_metrics_window_days` | `30` | Positive integer reporting window for Health metrics. |
 | `dbt_dqm_stale_days` | `14` | Positive integer age threshold for stale active issues. |
 | `dbt_dqm_schema` | Unset | Optional custom schema name passed through dbt schema naming. |
