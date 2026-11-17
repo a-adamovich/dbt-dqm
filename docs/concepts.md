@@ -150,7 +150,7 @@ stateDiagram-v2
     [*] --> Active: first failure
     Active --> Active: still failing, or no closing evidence
     Active --> Passed: identity absent in complete evidence
-    Active --> Structural: grain changed or test removed
+    Active --> Structural: complete evidence under new grain, or test untracked
     Passed --> Next: fails again
 ```
 

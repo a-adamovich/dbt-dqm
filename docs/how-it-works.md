@@ -166,9 +166,16 @@ state. Source: [`maintenance.sql`](../macros/maintenance.sql).
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Every step succeeded and no tracked test failed. Tests at `warn` severity still capture their rows and open issues. |
+| `0` | The workflow finished and no tracked test failed, or you declined a full refresh. Tests at `warn` severity still capture their rows and open issues. A failed maintenance step only prints a warning, so `0` doesn't prove that cleanup ran. |
 | `1` | At least one tracked test failed, **and** its evidence was captured and reconciled. |
 | `2` | A step failed, a test errored or was skipped, or capture had a problem. Read the message. Evidence committed before the problem is still reconciled when the run gets that far. |
+
+**Exit `0` isn't proof of everything.** If you decline the full-refresh prompt, the run prints
+`DQM cancelled: no tracking relations reset; no tests run.` and exits `0` before setup or any test.
+A non-interactive full refresh without `--yes` exits `2` instead. A maintenance step that fails is
+logged and printed as `WARNING: DQM maintenance <step> failed; see maintenance Health.`, and the run
+still exits with the code its tests earned. Check the output or `dqm_maintenance_health` when
+cleanup or a reset matters.
 
 **Exit `1` is expected.** A failing test is what dbt-dqm exists to record. The command exits `1`
 only after the failed rows are safely in the warehouse, so a scheduler sees a failure without losing
