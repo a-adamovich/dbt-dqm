@@ -113,7 +113,10 @@ These two ideas explain most of dbt-dqm's behaviour.
 3. The text is hashed with SHA-256 into the issue's `unique_id`.
 
 The same record gets the same `unique_id` on every run and on every supported warehouse and dbt
-engine. Identity belongs to one test: the same customer failing two tests gives two issues.
+engine. Identity belongs to one test: the same customer failing two tests gives two issues. The
+hash itself uses only the granularity names and values, though, so two tests with the same grain
+produce the same `unique_id` for the same customer. When you query, always pair `unique_id` with
+`test_unique_id`.
 
 Two consequences follow:
 
@@ -145,8 +148,8 @@ stateDiagram-v2
     state "Next occurrence, Active" as Next
 
     [*] --> Active: first failure
-    Active --> Active: still failing, or no usable evidence
-    Active --> Passed: complete pass
+    Active --> Active: still failing, or no closing evidence
+    Active --> Passed: identity absent in complete evidence
     Active --> Structural: grain changed or test removed
     Passed --> Next: fails again
 ```
@@ -154,11 +157,11 @@ stateDiagram-v2
 | Transition | Event | Close reason |
 | --- | --- | --- |
 | First failure | `APPEARED` | |
-| Still failing | `VALUES_CHANGED` if values differ, otherwise none | |
-| No usable evidence (limit reached, inconclusive, collection error, not selected) | none | |
-| Complete pass | `DISAPPEARED` | `Passed` |
-| Grain changed | `CLOSED_STRUCTURAL` | `IDENTITY_CHANGED` |
-| Test removed | `CLOSED_STRUCTURAL` | `TEST_REMOVED` |
+| Still failing (in complete or capped evidence) | `VALUES_CHANGED` if values differ, otherwise none | |
+| No closing evidence: identity omitted from a capped run, or no usable execution | none | |
+| Identity absent in complete evidence | `DISAPPEARED` | `Passed` |
+| Identity absent in complete evidence under a new grain | `CLOSED_STRUCTURAL` | `IDENTITY_CHANGED` |
+| Test no longer tracked | `CLOSED_STRUCTURAL` | `TEST_REMOVED` |
 | Fails again after `Passed` | `REAPPEARED` | |
 
 The rules behind the diagram:
@@ -168,24 +171,38 @@ The rules behind the diagram:
 - **Still failing.** A later failing run keeps the same occurrence. If any non-granularity value
   changed, it emits `VALUES_CHANGED`. Reordering the same columns isn't a change. A
   `STILL_FAILING` event is written only if you set `dbt_dqm_emit_still_failing_events: true`.
-- **Closing as passed.** A run whose evidence is complete and doesn't contain the record archives
-  the occurrence with `close_reason = 'Passed'` and emits `DISAPPEARED`. In the example, if a later
-  run returns only `C-2`, the `C-1` occurrence is archived.
-- **No change.** Only conclusive, completely collected results can close an issue. A test that
-  errored, was skipped, failed to collect, hit its limit, or wasn't selected in this run leaves its
-  open issues as they are.
-- **Structural closure.** If you change a test's granularity, its open issues close as
-  `IDENTITY_CHANGED`, and rows under the new granularity open new occurrences. If a test disappears
-  from the project, its open issues close as `TEST_REMOVED`. Both emit `CLOSED_STRUCTURAL`.
+- **Closing as passed.** An issue closes when its identity is absent from a complete, conclusive
+  execution of its test. The test itself can still fail on other records. In the example, if a
+  later run returns only `C-2`, the `C-1` occurrence is archived with `close_reason = 'Passed'` and
+  a `DISAPPEARED` event, while `C-2` stays open.
+- **Capped evidence.** An execution that reached its limit still opens issues for the identities
+  it saw, keeps them open and can emit `VALUES_CHANGED`. It never closes an identity it didn't
+  return, because that identity may simply not have fit under the limit.
+- **No usable evidence.** An execution that errored, was skipped, or had a configuration or
+  collection error changes nothing. A run that doesn't execute the test adds no new evidence for it
+  (see [the note on selection](#a-rename-is-a-removal)).
+- **Structural closure, grain change.** If you change a test's granularity, the old identities no
+  longer exist under the new grain. They close as `IDENTITY_CHANGED` on the first complete,
+  conclusive execution under the new grain, and rows under the new grain open new occurrences. A
+  capped execution doesn't close them, for the same reason as above.
+- **Structural closure, test removed.** If a test is no longer tracked (see below), its open issues
+  close as `TEST_REMOVED` on the next reconciliation, without any new execution. Both structural
+  closures emit `CLOSED_STRUCTURAL`.
 - **Recurrence.** If an occurrence closed as `Passed` and its record fails again, dbt-dqm opens the
   next occurrence and emits `REAPPEARED`. After a structural closure, a new failure counts as
   `APPEARED`, not as a recurrence.
 
-**A rename is a removal.** dbt identifies a test by its node `unique_id`, which includes its name.
-Renaming a test, moving it to another package, disabling it, or deleting its `meta.dbt_dqm` key
-closes its open issues as `TEST_REMOVED` on the next run. The renamed test then opens fresh issues.
-Running a subset with `--select` or `--exclude` doesn't count: tests you didn't select are left
-alone. [How a run works](how-it-works.md#reconcile-turn-evidence-into-occurrences) explains why.
+### A rename is a removal
+
+dbt identifies a test by its node `unique_id`, which includes its name. Renaming a test, moving it
+to another package, disabling it, or deleting its `meta.dbt_dqm` key closes its open issues as
+`TEST_REMOVED` on the next run. The renamed test then opens fresh issues.
+
+Running a subset with `--select` or `--exclude` is different. Selection decides which tests
+**execute** in this run. A tracked test you didn't select gets no new execution, but it stays
+tracked, so it is never closed as removed. Reconciliation can still apply evidence that an earlier
+run captured for it and never processed, for example after a reconciliation that failed.
+[How a run works](how-it-works.md#reconcile-turn-evidence-into-occurrences) explains why.
 
 ## Review state
 

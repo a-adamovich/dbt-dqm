@@ -77,14 +77,20 @@ Each occurrence of `C-1` is one row in the timeline. A recurrence is a new row w
 ```sql
 select occurrence_number, valid_from, valid_to, close_reason, is_current
 from `my-project.analytics_dqm.dqm_issue_timeline`
-where unique_id in (
-  select unique_id
-  from `my-project.analytics_dqm.dqm_all_issues`
-  where test_name = 'customers_missing_email'
-    and json_value(record_values_json, '$.customer_id') = 'C-1'
-)
+where test_unique_id = 'test.my_project.customers_missing_email'
+  and unique_id in (
+    select unique_id
+    from `my-project.analytics_dqm.dqm_all_issues`
+    where test_unique_id = 'test.my_project.customers_missing_email'
+      and lower(trim(json_value(record_values_json, '$.customer_id'))) = 'c-1'
+  )
 order by occurrence_number
 ```
+
+Filter on `test_unique_id` on both sides. `unique_id` is a hash of the granularity names and values
+only, so another test with `customer_id` as its grain has the same `unique_id` for `C-1`. The
+`lower(trim(...))` matches the normalization identity uses, so spellings such as ` C-1` count as the
+same record.
 
 For the individual changes inside an occurrence, read its events:
 
@@ -139,7 +145,8 @@ only changes. Occurrences summarize both. That's why their retention is set sepa
 
 ## Retention
 
-Nothing is deleted unless you configure it.
+Retention of evidence and history is opt-in. Without configuration, raw evidence and events are
+kept forever:
 
 - `dbt_dqm_retention_days` prunes raw evidence: executions, observations and receipts, together and
   only after reconciliation has processed them. Occurrences and the per-test high-water mark are
@@ -151,8 +158,20 @@ Nothing is deleted unless you configure it.
   Lifecycle processing always uses full values. The setting only affects what events store.
 
 Captured values can contain personal data, and with `full` event payloads they stay in events until
-event retention removes them. A run warns when raw retention is unset, and when event retention is unset while event payloads are `full`. Digests aren't
-anonymization, because predictable values can be recovered by hashing guesses.
+event retention removes them. A run warns when raw retention is unset, and when event retention is
+unset while event payloads are `full`. Digests aren't anonymization, because predictable values can
+be recovered by hashing guesses.
+
+Some cleanup runs by default, because it removes only internal working data:
+
+- On BigQuery, maintenance deletes app staging rows older than 24 hours, which can no longer be
+  applied, and drops reconciliation stage tables that are no longer needed.
+- Whenever maintenance has at least one step to run, which is always the case on BigQuery, it also
+  prunes `dqm_maintenance_log` rows older than 30 days.
+- With `dbt_dqm_retention_days` set, it also prunes finished reconciliation runs older than that,
+  with their frozen input lists. On BigQuery, a run whose stage table still exists is kept.
+
+`dqm_maintenance_health` shows the outcome of each step.
 
 ## Grants
 

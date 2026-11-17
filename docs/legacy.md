@@ -1,9 +1,8 @@
 # Legacy upgrade and recovery code
 
 dbt-dqm 0.2.x carries code whose only job is to upgrade older installations or to repair one past
-incident. It still runs and is still tested, but it's legacy: it is planned for removal in a later
-major version, so don't build anything new on it. This page explains what that code does, so its
-messages make sense when you meet them. To upgrade, follow [Upgrading](operations.md#upgrading).
+incident. It still runs and is still tested. It is kept for compatibility, so don't build anything
+new on it. This page explains what that code does, so its messages make sense when you meet them. To upgrade, follow [Upgrading](operations.md#upgrading).
 
 The recovery macros for late evidence, stuck runs and leftover stages aren't legacy. They handle
 normal runtime situations and are described in
@@ -25,14 +24,19 @@ installation, then applies any migration it hasn't recorded yet, in order:
 | `0007_browse_keyset_index` | An index for warehouse browsing (Postgres). |
 | `0008_canonical_identity_signature` | Engine-independent identity metadata (see [#105](#the-105-identity-repair)). |
 
-A **fresh** install also goes through this list: `0001` creates the tables, and the later steps
-find nothing to change. That's why the upgrade machinery can't simply be deleted today. Once an
-installation is at the latest migration, setup takes a fast path and does no DDL.
+A **fresh** install also goes through this list, and some of its objects exist only because a
+later migration creates them. `0001` creates the core tables. On BigQuery, `0003` creates the app
+staging table. On both warehouses, `0005` creates the maintenance log and `0006` adds its
+attribution columns. On Postgres, `0007` creates the browsing index. The other steps find their
+columns already in place. So the upgrade path is
+also today's install path. Once an installation is at the latest migration, setup takes a fast
+path and does no DDL.
 
 Each migration is applied, backfilled where needed, verified, then recorded in
-`dqm_schema_migrations`. It also increases the generation, so a reconciliation frozen before the
-migration can't apply afterwards. `dqm_reconciliation_control.schema_version` holds the latest
-migration.
+`dqm_schema_migrations`. `dqm_reconciliation_control.schema_version` holds the latest migration.
+Migrations also increase the generation, so a reconciliation frozen before them can't apply
+afterwards. Postgres increases it as each migration starts and again as it finishes. BigQuery
+increases it once when a run claims the migration lease and once when it releases the lease.
 
 **Why BigQuery needs a migration lease.** BigQuery can't run schema changes inside a transaction.
 A migration that stops halfway can't roll back, so the first run to start one claims a lease in the

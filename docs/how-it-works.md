@@ -83,13 +83,18 @@ Capture reads the results of step 8 only. For each tracked test it writes one ro
 
 - **Failing test.** It reads the store-failures table once into a temporary stage, hashes each
   row's granularity values into `unique_id`, keeps all columns as `record_values_json`, collapses
-  duplicates, and writes one row per identity to `dqm_issue_observations`. If the number of rows
-  differs from what dbt reported, another process overwrote the table, and the execution becomes
-  `collection_error`. If the row count reached the limit, the execution is `limit_reached`.
-- **Passing test.** Its store-failures table must still be empty. Rows there mean another run
-  overwrote it, which is a `collection_error`, never a pass.
+  duplicates, and writes one row per identity to `dqm_issue_observations`. If the row count reached
+  the limit, the execution is `limit_reached`.
+- **Test with zero reported failures.** Its store-failures table must be empty.
 - **Bad configuration, errored or skipped test.** The execution is `configuration_error` or
   `inconclusive`. These never count as evidence.
+
+**Why a row-count mismatch is a collection error.** Capture compares the rows in the store-failures
+table with the failure count dbt reported. If they differ, the evidence is inconsistent, so the
+execution becomes `collection_error` and never counts as a pass. One cause is another run
+overwriting the table. Another is a test with `warn_if` or `error_if` thresholds: when it passes
+under its threshold, dbt Core reports zero failures even though the query returned rows. Such a
+test records a collection error each time it passes that way, so it can't close issues.
 
 **Why a collection error can leave earlier evidence in place.** Capture commits each failing test
 separately. If capture breaks partway through, the tests already processed keep their evidence,
@@ -116,8 +121,9 @@ over `dqm_issue_occurrences`. Its pre-hook and post-hook do the work. Source:
 3. **Late-evidence check.** If a frozen execution is older than one this test already processed,
    the run stops before changing anything (see [When something goes wrong](#when-something-goes-wrong)).
 4. **Replay.** For each test and identity it orders the frozen executions by capture time and
-   marks each one failing or absent. Consecutive failures form one occurrence. An absence closes
-   it. A failure after an absence starts the next one. The result goes into a stage table.
+   marks each one failing or absent. Consecutive failures form one occurrence. An absence in
+   complete evidence closes it. A failure after an absence starts the next one. The result goes
+   into a stage table.
 5. **Apply.** In one transaction, it checks that the generation is unchanged since the freeze,
    upserts occurrences without touching reviewer fields, inserts events, records receipts for the
    frozen executions, increases the generation and marks the run completed.
@@ -125,16 +131,22 @@ over `dqm_issue_occurrences`. Its pre-hook and post-hook do the work. Source:
 Replay processes evidence in capture order, so a reconciliation that failed earlier is caught up
 by the next run without skipping or reordering anything.
 
-**What "currently tracked" means.** The list of tracked tests comes from the manifest of step 10,
-which includes every enabled test with `meta.dbt_dqm`, whatever you selected. A test you didn't
-select is still tracked. It just has no new execution, so its open issues don't change. A test that
-is gone from that manifest (deleted, renamed, disabled, or without `meta.dbt_dqm`) is no longer
-tracked, and its open issues close as `TEST_REMOVED`.
+**Selection versus tracking.** `--select` and `--exclude` decide which tests execute in this run
+(steps 3 to 9). They don't limit reconciliation. The list of tracked tests comes from the manifest
+of step 10, which includes every enabled test with `meta.dbt_dqm`, whatever you selected. The
+freeze then takes every unprocessed usable execution of any tracked test. So a run that selects
+only one test can still apply evidence that an earlier run captured for another test and never
+reconciled, for example because that reconciliation failed. A tracked test with no unprocessed
+evidence keeps its open issues as they are. A test that is gone from the manifest (deleted,
+renamed, disabled, or without `meta.dbt_dqm`) is no longer tracked, and its open issues close as
+`TEST_REMOVED`.
 
 **What counts as evidence.** Only executions with a `pass`, `warn` or `fail` status and a
 `success`, `not_applicable` or `limit_reached` collection are frozen. A `limit_reached` execution
-can open and update issues, but its missing rows are ignored. So only complete, conclusive results
-can close an issue.
+can open and update the issues it saw, but identities it didn't return are ignored, including old
+identities after a grain change. So only complete, conclusive results can close an issue as
+`Passed` or `IDENTITY_CHANGED`. `TEST_REMOVED` is the exception: it depends only on whether the
+test is still in the manifest.
 
 **Why BigQuery stages are real tables.** On BigQuery, each phase is a separate script, so the
 change set must outlive the pre-hook. It goes into a table named after the run's invocation ID,
@@ -143,8 +155,10 @@ table in the same transaction instead.
 
 ### Maintenance
 
-After reconciliation, maintenance prunes raw evidence and events you set retention for, and on
-BigQuery expires old app staging rows and drops old stage tables. A failing maintenance step is
+After reconciliation, maintenance prunes raw evidence and events if you set retention for them. On
+BigQuery it always deletes expired app staging rows, drops old stage tables and prunes maintenance
+log rows older than 30 days ([Retention](warehouse-tables.md#retention) has the details). A failing
+maintenance step is
 logged and retried next time. It never fails the run. `dqm_maintenance_health` shows each step's
 state. Source: [`maintenance.sql`](../macros/maintenance.sql).
 
