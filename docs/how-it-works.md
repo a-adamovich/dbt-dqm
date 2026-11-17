@@ -3,7 +3,8 @@
 This page follows one `dbt-dqm run` from the command line to the warehouse, then follows the
 results into the review app and back. It continues the `customers_missing_email` example from
 [Concepts](concepts.md). For the tables involved, read [Warehouse tables](warehouse-tables.md).
-For every flag, read [Configure tests and run dbt-dqm](using-dbt-dqm.md).
+See the [CLI reference](reference-cli.md) for flags and the
+[configuration reference](reference-configuration.md) for test settings.
 
 ## The short version
 
@@ -198,6 +199,8 @@ Your naming macros (`generate_schema_name`, `generate_alias_name`) and `dbt_dqm_
 where the dbt-dqm tables live. The app asks dbt for the resolved names in a separate process, so it
 always addresses the same installation as `run`. **Pass the same naming `--vars` to `run`, `app`
 and `workspace`.** Different values point the app at a different installation, or at none.
+The [CLI resolution table](reference-cli.md#common-options-and-resolution) lists how to
+select the project, profile, target, and artifact directory.
 
 ### Sync
 

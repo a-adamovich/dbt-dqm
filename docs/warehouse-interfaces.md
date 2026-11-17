@@ -2,7 +2,8 @@
 
 Read `dqm_current_issues` for active issues, `dqm_all_issues` for active and archived occurrences,
 and `dqm_issue_timeline` for occurrence intervals. Use `dqm_issue_events` for lifecycle events,
-`dqm_annotation_changes` for review history, and the Health views for operational reporting.
+`dqm_annotation_changes` for review history, and the Health views for operational reporting. See
+[Warehouse tables](warehouse-tables.md) for relation grains and example queries.
 
 - [Annotations and metadata](#annotations-and-metadata) defines the six editable fields, verdicts,
   and audit guarantees.
@@ -11,7 +12,9 @@ and `dqm_issue_timeline` for occurrence intervals. Use `dqm_issue_events` for li
 - [SQL path for known misses](#sql-path-for-known-misses) documents how to insert a report with a
   stable caller-generated ID.
 
-0.2 requires a fresh `dbt_dqm_schema`. Recognizable 0.1 tables are rejected before an install marker is written. The package does not delete, baseline or migrate existing history. Keep that schema for historical queries and point the new package at another schema. Later upgrades use ordered, verified, idempotent migrations; columns are added and backfilled, never removed automatically. Identity remains `dqm-id-v1` and changes only through an explicit identity scheme version.
+Normal setup rejects recognizable 0.1 tables before writing an install marker. Use a
+new schema to keep the old history available for queries. See [upgrading](legacy.md#upgrading)
+for the explicit reset option, which discards that installation's DQM history. Later upgrades use ordered, verified, idempotent migrations; columns are added and backfilled, never removed automatically. Identity remains `dqm-id-v1` and changes only through an explicit identity scheme version.
 
 ## Relations and ownership
 
@@ -34,18 +37,12 @@ and `dqm_issue_timeline` for occurrence intervals. Use `dqm_issue_events` for li
 
 ## Dedicated execution and schema contract
 
-`dqm_enabled` defaults to false. Models and consumer tests opt in through this variable; test
-membership is the presence of `meta.dbt_dqm`. The isolated command validates selection and output
-columns before initialization/reset, executes selected tests, captures their exact invocation results,
-reconciles, publishes views and runs maintenance even after quality failures. Test limits use native
-`config.limit`, defaulting to `dbt_dqm_default_test_limit` (100) when missing with a warning. Samples
-sort by granularity identity and payload before limiting raw rows; duplicates can reduce issue counts.
-Full capture stores all output keys and attributes. Deprecated capture mode settings warn and are ignored.
-
-Executions store `failure_limit` and `captured_issue_count`. At the exact cap `limit_reached` is
-incomplete evidence: the full total is unknown. Observed identities can open/update issues; omitted
-identities cannot close through absence. Only complete executions infer resolution. Health exposes
-limited collections separately from failed/inconclusive collection and from complete evidence.
+Tracked tests opt in through `meta.dbt_dqm`. The `dqm_enabled` guard defaults to false.
+The dedicated command enables guarded nodes and validates selection and output columns before
+initialization or reset. It captures the selected tests' exact invocation results, reconciles,
+publishes views, and runs maintenance even after quality failures. Capture includes all returned
+columns. See [test configuration](reference-configuration.md#tracked-data-tests) for native
+limits and [How a run works](how-it-works.md#one-run-step-by-step) for the sequence.
 
 The `dqm-full-v1` marker rejects older installations. `dbt-dqm run --full-refresh` explicitly resets
 known macro-owned relations and current manifest package relations, with a fresh installation UUID.
@@ -57,18 +54,37 @@ patches bind to the installation UUID and are checked transactionally before aud
 
 ## Evidence and lifecycle
 
-Capture records selected tests marked with `meta.dbt_dqm` and configured with `store_failures`.
-Tracked tests require `fail_calc=count(*)` after whitespace/case normalization, a positive native
-`limit`, and table failure storage. Native limits apply before deduplication. Reaching the limit
-records `collection_status=limit_reached` and cannot close omitted issues through absence.
-Configuration, collection and inconclusive outcomes never archive issues. Output granularity is
-validated for passing and failing tests before initialization or destructive refresh.
+Capture requires table failure storage and `fail_calc=count(*)` after whitespace and
+case normalization. The native limit applies to rows sorted by identity and payload before
+deduplication. Executions record `failure_limit` and `captured_issue_count`. At the exact cap,
+`collection_status=limit_reached` means the total is unknown. Observed identities can open or
+update issues. Omitted identities cannot close through absence on that evidence. Health reports
+limited, inconclusive, and complete evidence separately.
 
-Reconciliation freezes all unreceipted conclusive execution IDs. It replays them in `(captured_at, invocation_id)` order. Passing evidence closes an Active issue as `Passed`; identity scheme changes close it as `IDENTITY_CHANGED`; a removed tracked test closes it as `TEST_REMOVED`. New occurrences start with clean annotations. Public history context matches the previous occurrence within the same identity scheme. Recurrence requires its previous closure to be `Passed`; potential regression additionally requires the previous closure workflow snapshot to be `RESOLVED`.
+Reconciliation freezes unreceipted conclusive executions and replays them in
+`(captured_at, invocation_id)` order. Complete, conclusive evidence that omits an active identity
+closes it as `Passed` if the identity scheme is unchanged, or as `IDENTITY_CHANGED` if it changed.
+A separate manifest check closes active issues from tests that are no longer tracked as
+`TEST_REMOVED`. Skips, errors, and unselected tests supply no new closing evidence. See the
+[lifecycle rules](concepts.md#the-issue-lifecycle) for examples.
 
 Postgres 14/16 uses a transaction-scoped advisory lock and an EXCLUSIVE occurrence lock, a temporary stage on the same connection, and `ON CONFLICT` lifecycle updates inside dbt's transaction. The temporary stage disappears at commit. On Postgres, `dqm_reconcile` uses the package's `dqm_entry_view` materialization: it takes the lock in the first transactional pre-hook, then replaces the view in place with `CREATE OR REPLACE VIEW`, with no `__dbt_tmp`/`__dbt_backup` relations and no DDL before the lock. dbt's default view materialization drops cached temporary relations before the transactional pre-hooks, so overlapping runs could act on each other's relations (#17). `CREATE OR REPLACE VIEW` requires existing columns to keep their names, order and types; new columns can only be appended, which the additive-only occurrence migrations guarantee. An unexpected table named `dqm_reconcile` is refused rather than dropped. BigQuery keeps its adapter's view materialization, which replaces views atomically. BigQuery uses an invocation-specific stage and one transaction for lifecycle changes, events, receipts, state, generation and completion. Generation, setup readiness and run status guard against stale or abandoned applies; concurrent transactions update the common control row. A known SQL failure abandons the run with a generation increment, allowing a fresh invocation to retry. A lost runner is recovered through timeout abandonment. BigQuery lifecycle and concurrency parity requires credentialed acceptance runs; offline compilation alone does not establish it.
 
 Matched updates preserve all reviewer annotations and annotation versions. `workflow_status_at_close` snapshots the current target workflow atomically on Active→Archived. It does not change afterward. Every rerun freezes again and rebuilds against current state. A successful commit with a lost client response leaves receipted inputs; the next invocation makes no duplicate lifecycle changes.
+
+### Previous occurrence fields
+
+`dqm_all_issues` and `dqm_current_issues` join the immediately preceding occurrence for the same
+test, identity, and identity scheme. `has_previous_occurrence` indicates a match.
+`is_recurrence` requires a previous `Passed` closure. `is_potential_regression` additionally
+requires `previous_workflow_status_at_close` to be `RESOLVED`.
+
+The views expose `previous_occurrence_id`, `previous_archived_at`, `previous_close_reason`,
+`previous_workflow_status_at_close`, `previous_review_verdict`, `previous_dqm_owner`,
+`previous_ticket_url`, and `previous_notes`. These fields are null when there is no match.
+A recurring issue starts with a fresh review. The app shows the earlier note under
+**Previous investigation**. The archived card retains the earlier verdict, which the views
+also expose as `previous_review_verdict` on the recurring row.
 
 ## Annotations and metadata
 
@@ -89,7 +105,7 @@ the row owner, belongs to full payload capture. `owner_column` and `poc_responsi
 
 ## History events
 
-Events include `APPEARED`, `REAPPEARED`, `VALUES_CHANGED`, `DISAPPEARED`, `CLOSED_STRUCTURAL`, and `EVIDENCE_SKIPPED`. `dbt_dqm_emit_still_failing_events: true` also emits `STILL_FAILING`. Value changes require `allowlist` or `full` capture.
+Events include `APPEARED`, `REAPPEARED`, `VALUES_CHANGED`, `DISAPPEARED`, `CLOSED_STRUCTURAL`, and `EVIDENCE_SKIPPED`. `dbt_dqm_emit_still_failing_events: true` also emits `STILL_FAILING`. Value changes compare the captured payload of consecutive observations in an occurrence.
 
 `dbt_dqm_event_payloads` controls what the event ledger keeps; lifecycle processing always uses the full captured payloads. Each event records the mode it was written with in `payload_mode`.
 
@@ -99,7 +115,7 @@ Events include `APPEARED`, `REAPPEARED`, `VALUES_CHANGED`, `DISAPPEARED`, `CLOSE
 | `changed_columns` | null | sorted, comma-separated changed keys | SHA-256 of each payload |
 | `none` | null | null | null |
 
-With the default `full` mode, captured values in events are kept until event retention (`dbt_dqm_event_retention_days`, separate from raw-log retention) removes them. Under `allowlist` or `full` capture those values can include personal data: set event retention or choose a smaller mode. Digests are not anonymization; predictable values can be recovered by hashing guesses. A key missing on one side counts as changed, distinct from an explicit JSON null. Changing the mode affects new events only; migration `0002_event_payload_mode` marks events written before it as `full`. IDs use SHA-256 over the canonical length-prefixed, null-safe `dqm-event-v1` encoding of test, occurrence, original invocation and event type. Skipped evidence has a null occurrence ID and includes the test ID, so skipping two tests from one invocation creates two distinct events.
+With the default `full` mode, captured values in events are kept until event retention (`dbt_dqm_event_retention_days`, separate from raw-log retention) removes them. Captured values can include personal data. Set event retention or choose a smaller mode. Digests are not anonymization; predictable values can be recovered by hashing guesses. A key missing on one side counts as changed, distinct from an explicit JSON null. Changing the mode affects new events only; migration `0002_event_payload_mode` marks events written before it as `full`. IDs use SHA-256 over the canonical length-prefixed, null-safe `dqm-event-v1` encoding of test, occurrence, original invocation and event type. Skipped evidence has a null occurrence ID and includes the test ID, so skipping two tests from one invocation creates two distinct events.
 
 ## Recovery and retention
 

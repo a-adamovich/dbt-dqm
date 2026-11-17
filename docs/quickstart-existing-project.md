@@ -22,6 +22,17 @@ uv pip install 'dbt-core==1.12.6' 'dbt-postgres==1.11.0' 'dbt-dqm[postgres]==0.2
 dbt deps
 ```
 
+Ask a database administrator to enable `pgcrypto` once in the target Postgres database
+before the first DQM run:
+
+```sql
+create extension if not exists pgcrypto;
+```
+
+dbt-dqm uses the extension's `digest()` function for issue identities. The package leaves
+extension setup to the administrator because creating extensions can require privileges
+the dbt role does not have.
+
 ### BigQuery with dbt 2
 
 **Inspected / needs authorized runtime verification.** In your app environment, install the
@@ -39,7 +50,8 @@ export DBT_DQM_DBT_EXECUTABLE="$engine_env/bin/dbt"
 
 Use that executable for ordinary dbt commands below. The app and DQM runner use the exported
 path, which you can also supply with `--dbt-executable`. If you already have a separate dbt 2.0.11
-environment, set the variable to its executable and run `deps` there. See
+environment, set the variable to its executable and run `deps` there. Keep the engine
+environment out of version control. See
 [supported configurations](supported-configurations.md) for the engine coverage.
 
 ### Configure retention and target
@@ -64,7 +76,9 @@ union all
 select 2 as customer_id, cast(null as {{ dbt.type_string() }}) as email
 ```
 
-Keep the ordinary `not_null` test and add a second, separately named copy with DQM configuration in the model's YAML.
+Keep the ordinary `not_null` test and add a second, separately named copy with DQM
+configuration in the model's YAML. For SQL tests, see the
+[singular-test example](reference-configuration.md#tracked-data-tests).
 
 ```yaml
 version: 2

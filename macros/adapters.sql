@@ -41,9 +41,9 @@
   unnest([1])
 {% endmacro %}
 
-{# Lowercase hex-encoded SHA-256 of a string expression. Functional requirement, not a style
-   choice (see docs/functional-requirements.md) — every supported adapter must implement this
-   exact shape so unique_id/occurrence_id stay comparable across warehouses. Postgres requires
+{# Lowercase hex-encoded SHA-256 of a string expression. All supported adapters must
+   implement this shape so unique_id/occurrence_id stay comparable across warehouses.
+   See docs/concepts.md#identity-versus-occurrence. Postgres requires
    the pgcrypto extension (`create extension if not exists pgcrypto`) for digest(); this isn't
    auto-created by the package since CREATE EXTENSION commonly needs elevated privileges the
    package's own role may not have. #}
@@ -159,12 +159,10 @@
   on conflict ({{ key_columns | join(', ') }}) do nothing
 {% endmacro %}
 
-{# The incremental strategy dqm_reconcile.sql and dqm_annotation_changes.sql should use per
-   adapter. BigQuery supports 'merge' directly. dbt-postgres only gained native 'merge' support
-   once targeting Postgres 15+; 'delete+insert' keyed by unique_key is supported on every
-   Postgres version dbt-postgres supports and is semantically equivalent here, since every run
-   regenerates the complete, correct set of rows for whatever it touches rather than partially
-   patching existing rows. #}
+{# dqm_annotation_changes.sql and dqm_missed_issues.sql configure this strategy.
+   BigQuery supports 'merge'. dbt-postgres supports native 'merge' on Postgres 15+.
+   The 'delete+insert' strategy works on all supported Postgres versions. It replaces
+   complete rows by unique_key, which is equivalent here. #}
 {% macro incremental_upsert_strategy() %}
   {{ return('merge' if target.type == 'bigquery' else 'delete+insert') }}
 {% endmacro %}

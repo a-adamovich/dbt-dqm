@@ -1,12 +1,9 @@
 {{ config(enabled=var('dqm_enabled',false)) }}
--- Scripted lifecycle assertions for the demo walkthrough documented in README.md, replacing what
--- was previously a manual, human-verified visual check. Assumes the documented, reset-then-ordered
--- sequence: `dbt run-operation reset_demo_dqm`, then initial -> passed -> recurrence, running
--- `dbt-dqm run` between each `demo_scenario`
--- change. Run this after each step with the same `--vars '{demo_scenario: ...}'` used for that
--- step: `dbt test --select assert_scenario_outcomes --vars '{demo_scenario: initial}'`. Any
--- returned row is a mismatch between the documented expected outcome and the actual state of
--- dqm_all_issues.
+-- Lifecycle assertions for docs/quickstart-bigquery.md.
+-- Reset before running the initial, passed, and recurrence scenarios in order.
+-- After each dbt-dqm run, execute assert_scenario_outcomes with the same
+-- demo_scenario and dqm_enabled: true. Returned rows show mismatches
+-- between the expected outcome and dqm_all_issues.
 {% set scenario = var('demo_scenario', 'initial') %}
 
 with actual as (

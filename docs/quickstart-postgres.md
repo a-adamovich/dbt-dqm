@@ -11,12 +11,21 @@ docker run --rm -d --name dbt-dqm-demo \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=dbt_dqm_local \
   -e POSTGRES_DB=dbt_dqm_demo -p 127.0.0.1::5432 postgres:16
 docker port dbt-dqm-demo 5432/tcp
-docker exec dbt-dqm-demo pg_isready -U postgres -d dbt_dqm_demo
+```
+
+Check for readiness. Repeat the check until the server reports that it is accepting connections
+over TCP inside the container.
+
+```bash
+docker exec dbt-dqm-demo pg_isready -h 127.0.0.1 -U postgres -d dbt_dqm_demo
+```
+
+Then install `pgcrypto` for the `digest()` function used to hash identities.
+
+```bash
 docker exec dbt-dqm-demo psql -v ON_ERROR_STOP=1 -U postgres -d dbt_dqm_demo \
   -c 'create extension if not exists pgcrypto'
 ```
-
-Wait for `pg_isready` to report that it is accepting connections before creating the extension. `pgcrypto` provides the `digest()` function used to hash identities.
 
 ## 2. Install and seed the demo
 
@@ -40,7 +49,8 @@ dbt seed
 
 ## 3. Open and review issues
 
-**Ran.** The three commands below ran individually. The shell function groups them for reuse. The explicit `dqm_enabled` variable makes the demo assertion selectable by ordinary dbt.
+**Ran.** The shell function runs one scenario and checks its assertions. The explicit
+`dqm_enabled` variable makes the demo assertion selectable by ordinary dbt.
 
 ```bash
 run_demo() {
@@ -64,10 +74,16 @@ Open the local URL, select **Sync**, and find the customer email issue for `cust
 
 ## 4. Pass, then recur
 
-**Ran.** Run these in order from the first shell.
+**Ran.** Run the pass scenario from the first shell.
 
 ```bash
 run_demo passed
+```
+
+In the browser, select **Sync** and include **Archived** in the lifecycle filter to see
+the saved verdict and note. Then run the recurrence scenario from the first shell.
+
+```bash
 run_demo recurrence
 ```
 
@@ -78,7 +94,7 @@ run_demo recurrence
 
 Both assertion runs should exit `0`.
 
-**Ran.** After `passed`, Sync and include **Archived** in the lifecycle filter to see the saved verdict and note. After `recurrence`, Sync again and inspect the active `cust-001` card. Its workflow status is `NEW` and review verdict is `UNREVIEWED`. Expand **Previous investigation** to see the earlier note. The archived card retains the earlier verdict. You can also read the prior verdict from the active row's `previous_review_verdict` in `dqm_all_issues`.
+**Ran.** After `recurrence`, select **Sync** again and inspect the active `cust-001` card. Its workflow status is `NEW` and review verdict is `UNREVIEWED`. Expand **Previous investigation** to see the earlier note. The archived card retains the earlier verdict. You can also read the prior verdict from the active row's `previous_review_verdict` in `dqm_all_issues`.
 
 ## 5. Tear down
 
@@ -86,6 +102,7 @@ Both assertion runs should exit `0`.
 
 ```bash
 dbt-dqm workspace purge
+dbt-dqm workspace info
 docker rm -f dbt-dqm-demo
 docker ps -a --filter 'name=^/dbt-dqm-demo$'
 rm "$DBT_PROFILES_DIR/profiles.yml"
@@ -93,4 +110,4 @@ rmdir "$DBT_PROFILES_DIR"
 unset DBT_PROFILES_DIR
 ```
 
-The filtered container list should contain no rows. See [CLI reference](reference-cli.md) for exit codes and [Review app workflows](review-app.md) for annotation controls.
+The workspace should report `Exists: no` and the filtered container list should contain no rows. See [CLI reference](reference-cli.md) for exit codes and [Review app workflows](review-app.md) for annotation controls.

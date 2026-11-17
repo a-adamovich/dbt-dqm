@@ -28,7 +28,8 @@
 | `--verbose` | Print full dbt console output and timings. Normal output includes phase progress, warnings, and one line per test. Both modes retain dbt file logs. |
 | `--full-refresh`, `--yes` | Reset the resolved installation's tracking history and annotations. Use `--yes` to confirm in a noninteractive shell. |
 
-Deferral affects consumer test compilation and execution. Setup, capture, reconciliation, and maintenance stay in the selected target. Keep state input separate from artifact output so parsing cannot overwrite the state manifest.
+Deferral affects consumer test compilation and execution. Setup, capture, reconciliation, and maintenance stay in the selected target. The runner rejects
+identical resolved state and artifact output paths before parsing can overwrite the state manifest.
 
 ```bash
 dbt-dqm run --select tag:customer --exclude tag:experimental --threads 4
@@ -79,3 +80,14 @@ The artifact directory contains `dqm_workflow_metrics.json`, with available timi
 The app exits `1` for out-of-range cache, search, archive, or lock settings, `2` for CLI
 usage errors such as an unknown option or a non-integer `--port`, and `130` on a keyboard
 interrupt. Once started, it reads existing tracking relations. If they are missing, verify the project, target, and naming variables and run `dbt-dqm run` first. See [review app workflows](review-app.md) for browsing and edits.
+
+## Troubleshooting
+
+- If tracking relations are missing, check the profile, target, and naming variables, then
+  initialize that installation with `dbt-dqm run`.
+- Use `--verbose`, dbt file logs, and `dqm_workflow_metrics.json` to identify the failing phase.
+- If reported failures reach the collection limit, increase the native limit or obtain a later
+  complete execution before treating an omitted identity as resolved.
+- Keep deferral input artifacts separate from the resolved artifact output path.
+- Use `dbt-dqm workspace info` to check the local workspace. Purging discards its snapshot
+  and pending edits.

@@ -2,11 +2,40 @@
 
 dbt-dqm 0.2.x carries code whose only job is to upgrade older installations or to repair one past
 incident. It still runs and is still tested. It is kept for compatibility, so don't build anything
-new on it. This page explains what that code does, so its messages make sense when you meet them. To upgrade, follow [Upgrading](operations.md#upgrading).
+new on it. This page explains what the compatibility code does and how to upgrade a
+populated installation.
 
 The recovery macros for late evidence, stuck runs and leftover stages aren't legacy. They handle
 normal runtime situations and are described in
 [How a run works](how-it-works.md#when-something-goes-wrong).
+
+## Upgrading
+
+Upgrade the Python command and the dbt package together, run `dbt deps`, and restart the
+review app. A normal run applies pending schema migrations. From 0.2.0a7 or a8, a normal
+upgrade in the same namespace needs no full refresh. The 0.2.5 identity migration preserves
+issue hashes, annotations, and display order. If your installation already encountered
+[#105](#the-105-identity-repair), pause the workflow and follow the
+[incident repair](identity-105-recovery.md).
+
+Upgrades from 0.2.0a4–a6 preserve history when resolved names stay the same. Since a7,
+alias prefixes also apply to state tables. When setup recognizes legacy shared tables in
+the schema, it refuses to initialize a new prefixed installation in a normal run.
+
+Before changing the namespace, apply pending edits or record them separately. Stop the old
+review app. Run `dbt-dqm run --full-refresh` with the new target and naming variables and
+verify the destinations before confirming. This starts isolated history for the resolved
+installation. Shared history stays in its original tables. See the [reset and confirmation
+rules](reference-cli.md#exit-codes-and-full-refresh).
+
+For 0.1, point `dbt_dqm_schema` at a new schema to keep the old history available for
+queries. To start over in the same schema, back up any history you need and explicitly confirm
+`dbt-dqm run --full-refresh` for that installation. The reset discards its old DQM history
+and starts a fresh installation. For older 0.2 alphas before a4, export annotations you need
+before a full refresh. Update tests to the [current configuration](reference-configuration.md#tracked-data-tests),
+remove obsolete settings, and set a [retention policy](operations.md#retention-and-maintenance).
+After an intentional reset, purge the obsolete local workspace before restarting the app.
+Annotation drafts from the previous install cannot be applied to the new one.
 
 ## Setup and migrations run on every install
 
@@ -57,10 +86,11 @@ and [`identity_migration.sql`](../macros/identity_migration.sql).
 Setup refuses to write in these cases. It never deletes or converts the old data:
 
 - **A 0.1 schema.** Tracking tables without a 0.2 install marker. Point `dbt_dqm_schema` at a new
-  schema, or reset with `dbt-dqm run --full-refresh`. History from 0.1 isn't migrated.
+  schema to preserve the old history, or explicitly reset the existing installation with
+  `dbt-dqm run --full-refresh`. The reset discards the old DQM history. See [Upgrading](#upgrading).
 - **An incompatible marker.** `dqm_install` exists without `dqm-full-v1`.
 - **BigQuery collation from before 0.2.1.** Collated tracking columns broke case-sensitive identity.
-  The fix is a confirmed full refresh with the same target and naming variables.
+  See [BigQuery collation recovery](operations.md#bigquery-dataset-collation) for reinstall options.
 - **A newly prefixed namespace next to legacy shared tables.** Since 0.2.0a7, a prefixing alias
   macro also prefixes the internal tables. If the old unprefixed tables still exist in that schema,
   an ordinary run won't start a second installation beside them. It asks for an explicit

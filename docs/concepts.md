@@ -22,20 +22,12 @@ dbt-dqm ships as two pieces that you install in two different ways.
 | dbt package | `dbt_dqm` | `packages.yml`, Git revision `v0.2.5`, then `dbt deps` | Macros, models, the test materialization override and the warehouse schema |
 | Python package | `dbt-dqm` | `pip install 'dbt-dqm[bigquery]==0.2.5'` | The `dbt-dqm` command and the local review app |
 
-The version numbers match, but the two installations are independent. Upgrading one without the
-other is a common source of confusing errors, so upgrade both together. The Python extras
+Follow the [upgrade steps](legacy.md#upgrading) when changing versions. The Python extras
 (`[bigquery]`, `[postgres]`) install the warehouse client the app needs. They never install dbt:
 you install dbt yourself, and `dbt-dqm` runs that dbt as a separate program.
 
-What is supported today:
-
-- dbt 2 on BigQuery only, with the adapter bundled in dbt 2. The command accepts dbt 2 from 2.0.9 up
-  to (not including) 3. Production and the live validation use 2.0.11.
-- dbt Core 1.11 and 1.12 on BigQuery (dbt-bigquery) and on Postgres 14 and 16 (dbt-postgres).
-- Python 3.11 to 3.14.
-- Postgres on dbt 2 isn't supported. The command refuses it. Other warehouses aren't supported.
-
-[Installation and compatibility](operations.md#installation-and-compatibility) has the details.
+See [supported configurations](supported-configurations.md) for supported engines, warehouses,
+Python versions, and installation options.
 
 ## The running example
 
@@ -72,13 +64,13 @@ folders play no part. Before it runs anything, `dbt-dqm run` also checks that ea
   (100).
 
 `owner`, `priority`, `criticality` and `call_to_action` are optional.
-[Configure tests](using-dbt-dqm.md#configure-tests) lists every key.
+[Configure tests](reference-configuration.md#tracked-data-tests) lists every key.
 
 **Why `enabled=var('dqm_enabled', false)`?** It turns the test off in ordinary `dbt test` and
 `dbt build`. dbt-dqm runs tracked tests only in its own command, which sets `dqm_enabled: true`
 for its dbt calls. If a test must also keep running in your normal dbt CI, leave the original
-unchanged and add a separately named copy for dbt-dqm. The README shows an example of
-[tracking an existing generic test](../README.md#get-started).
+unchanged and add a separately named copy for dbt-dqm. See the
+[generic-test example](quickstart-existing-project.md#2-preserve-the-ordinary-ci-test).
 
 ### What a run stores
 
@@ -110,7 +102,9 @@ These two ideas explain most of dbt-dqm's behaviour.
 1. Each value is cast to text, trimmed and lowercased. `C-1`, `c-1` and ` C-1 ` are the same record.
 2. The column names and values are joined in a length-prefixed format, so no two different inputs
    produce the same text.
-3. The text is hashed with SHA-256 into the issue's `unique_id`.
+3. dbt-dqm hashes the `dqm-id-v1` text with SHA-256 and stores the lowercase hexadecimal
+   result as `unique_id`. The encoded names stay in grain order and nulls have their own
+   marker. The row's display JSON is separate from this encoding.
 
 The same record gets the same `unique_id` on every run and on every supported warehouse and dbt
 engine. Identity belongs to one test: the same customer failing two tests gives two issues. The

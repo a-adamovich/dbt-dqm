@@ -25,6 +25,7 @@ appreciated — please allow time for a fix to be released before any public dis
 ## Scope Notes
 
 - The local review app (`dbt-dqm app`) never writes warehouse credentials to its local SQLite
-  workspace; see `docs/functional-requirements.md` for the specifics of what it stores locally.
+  workspace. See [local workspace and browsing modes](docs/review-app.md#local-workspace-and-browsing-modes)
+  for the data it stores locally.
 - The dbt package (`models/`, `macros/`) runs entirely inside your own warehouse under your own
   credentials — dbt-dqm has no external network calls of its own.

@@ -68,6 +68,27 @@ rows by identity hash and then row JSON before the limit.
 Tests: `tests/test_runtime_project.py`, and the acceptance case
 `test_dedicated_run_preserves_an_existing_root_test_materialization`.
 
+### Engine-specific paths
+
+The temporary test project keeps the original project name and relative source paths.
+It links sources and installed packages, with private copies when Windows denies symlinks.
+Artifact and state paths stay anchored to the original project directory. Internal SQL,
+result payloads, and column maps travel through the projected configuration as literal
+JSON, which keeps them out of command-line arguments.
+
+The dbt 2 preflight uses a separate projection without global hooks. The package's
+empty-mode guard lives in model pre-hooks because dbt 2 can execute global hooks
+during compilation. For Core `compile --no-introspect`, the [CLI](../src/dbt_dqm_app/dbt_cli.py)
+runs [a shim](../src/dbt_dqm_app/dbt1_entrypoint.py) when it finds the selected engine's
+Python. The shim prevents the BigQuery adapter from opening an unused lazy connection on
+close. See the [offline checks](ci-measurements.md#run-the-dbt-2-checks-locally).
+
+When maintenance shortcuts are enabled on BigQuery with Core, the
+[maintenance macro](../macros/maintenance.sql) checks dispatch metadata to choose which
+steps to probe. It skips a job only when that step uses the package defaults and the
+probe confirms there is no eligible work. dbt 2 does not expose the dispatch metadata, so
+the macro runs all configured steps without probing.
+
 ## 5. Capture: `C-1` becomes an observation
 
 `collect_results` in `workflow.sql` receives the results of the `test` step and runs the SQL that
@@ -156,7 +177,9 @@ Tests: `tests/test_relations.py`, `tests/test_sync_and_errors.py`, `tests/test_a
 
 ## Where BigQuery and Postgres differ
 
-Most SQL is shared. The differences sit in a few known places:
+Issue identity, lifecycle transitions, and granularity rules should behave the same on
+BigQuery and Postgres. A difference in those results is a bug. Most SQL is shared, with
+adapter-specific implementations in a few places:
 
 - **Dispatched macros** in [`adapters.sql`](../macros/adapters.sql) and [`helpers.sql`](../macros/helpers.sql):
   string literals, SHA-256, JSON building, insert-if-missing, the high-water upsert and changed-key
