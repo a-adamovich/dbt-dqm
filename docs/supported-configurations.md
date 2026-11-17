@@ -16,13 +16,24 @@ The Python app supports 3.11–3.14. Use a Python version supported by the engin
 
 Install the dbt package at Git revision `v0.2.5` through `dbt deps`. Install the Python distribution separately as `dbt-dqm==0.2.5`. The `[postgres]` and `[bigquery]` extras provide the app's warehouse clients. Install your engine and any external dbt adapter separately. Use separate environments for Core and dbt 2 because both provide a `dbt` command. Select the intended one with `--dbt-executable` or `DBT_DQM_DBT_EXECUTABLE`.
 
+For BigQuery with dbt Core, the tested app and adapter installation uses:
+
+```bash
+python -m pip install 'dbt-core==1.12.6' 'dbt-bigquery==1.12.1' 'dbt-dqm[bigquery]==0.2.5'
+```
+
+For source development, use `local: /path/to/dbt-dqm` under `packages:` and install
+the Python app from the same checkout. See [Contributing](../CONTRIBUTING.md) for the locked
+development setup. On Windows, executables in an activated Python virtual environment
+come from its `Scripts` directory.
+
 See the [Postgres demo](quickstart-postgres.md), [BigQuery demo](quickstart-bigquery.md), or [existing-project pilot](quickstart-existing-project.md) for setup.
 
 ## Operating limits
 
 - Serialize captures that share stored-failure tables. Equal counts alone cannot establish which invocation wrote those rows.
 - BigQuery allows one reconciliation per resolved DQM installation at a time. Overlaps are detected and fail rather than waiting in a queue.
-- Use a fresh schema when moving from 0.1 to 0.2. See [upgrading](operations.md#upgrading) for later migrations.
+- Use a fresh schema when moving from 0.1 to 0.2. See [upgrading](legacy.md#upgrading) for later migrations.
 - Event payloads default to `full` with indefinite retention. Set a retention and event payload policy appropriate for the captured data.
-- App cache ceilings measure serialized data. In auto mode, larger populations switch to warehouse browsing. On BigQuery, each 2,000-issue read and each summary is billed. See the [review app workflows](review-app.md) for browse modes and export limits.
+- App cache ceilings measure serialized data. Process memory can be higher. In auto mode, larger populations switch to warehouse browsing. On BigQuery, each 2,000-issue read and each summary is billed. See the [review app workflows](review-app.md) for browse modes and export limits.
 - Maintenance Health is a monitoring approximation. Automated suites do not exercise live interactive OAuth sign-in for the app. See [optional maintenance](warehouse-interfaces.md#optional-maintenance).

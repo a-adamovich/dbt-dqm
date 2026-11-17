@@ -153,11 +153,9 @@ macros:
 
   - name: incremental_upsert_strategy
     description: >
-      Returns the incremental_strategy dqm_reconcile and dqm_annotation_changes should use for the
-      current target: 'merge' on BigQuery, 'delete+insert' everywhere else (dbt-postgres only gained
-      native 'merge' support targeting Postgres 15+; 'delete+insert' keyed by unique_key is
-      semantically equivalent here since every run regenerates the complete, correct set of rows for
-      whatever it touches).
+      Returns the strategy configured by dqm_annotation_changes and dqm_missed_issues.
+      Uses 'merge' on BigQuery and 'delete+insert' on Postgres, including versions
+      that lack native MERGE. Both strategies replace complete rows by unique_key.
 
   - name: unsupported_adapter_error
     description: >

@@ -22,6 +22,16 @@ and disabled commands, changed-evidence rejection, late/skipped evidence, rollba
 reviewer-edit preservation, and generic/singular lifecycle. The generic fixture is disabled
 unless the acceptance case opts in. The existing demo walkthrough is not repeated in this tier.
 
+### Run the dbt 2 checks locally
+
+Install dbt 2.0.11 in an isolated engine environment and point the offline tests to that
+executable. The tests run the installed executable and use no warehouse credentials.
+
+```bash
+uv sync --locked --all-groups --all-extras
+DBT_DQM_V2_EXECUTABLE=/path/to/dbt-2.0.11/bin/dbt uv run --group dbt1 pytest -q tests/test_dbt_v2.py
+```
+
 ## Manual full validation
 
 Run `Full validation` from GitHub Actions, selecting the candidate branch. All jobs check out

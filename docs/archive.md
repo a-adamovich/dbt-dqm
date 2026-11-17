@@ -198,3 +198,10 @@ Publication status was checked on GitHub and PyPI on 2026-11-12. Each verificati
 - [postgres-plan-mass_pass-nestloop-on-change_set.txt](https://github.com/a-adamovich/dbt-dqm/blob/3043befbf99b8b82519f79ce6081a2a0711232d5/docs/scale-results/postgres-planner/postgres-plan-mass_pass-nestloop-on-change_set.txt)
 - [postgres-plan-steady-nestloop-off-change_set.txt](https://github.com/a-adamovich/dbt-dqm/blob/3043befbf99b8b82519f79ce6081a2a0711232d5/docs/scale-results/postgres-planner/postgres-plan-steady-nestloop-off-change_set.txt)
 - [postgres-plan-steady-nestloop-on-change_set.txt](https://github.com/a-adamovich/dbt-dqm/blob/3043befbf99b8b82519f79ce6081a2a0711232d5/docs/scale-results/postgres-planner/postgres-plan-steady-nestloop-on-change_set.txt)
+
+## Guides replaced by the documentation index
+
+- [Pilot walkthrough](https://github.com/a-adamovich/dbt-dqm/blob/8ca5240d464eec0ebed759edca960ea46f8f7dbc/docs/pilot-walkthrough.md)
+- [Configure tests and run dbt-dqm](https://github.com/a-adamovich/dbt-dqm/blob/8ca5240d464eec0ebed759edca960ea46f8f7dbc/docs/using-dbt-dqm.md)
+- [dbt v2 compatibility verification](https://github.com/a-adamovich/dbt-dqm/blob/8ca5240d464eec0ebed759edca960ea46f8f7dbc/docs/dbt-2-compatibility.md)
+- [Functional requirements](https://github.com/a-adamovich/dbt-dqm/blob/8ca5240d464eec0ebed759edca960ea46f8f7dbc/docs/functional-requirements.md)

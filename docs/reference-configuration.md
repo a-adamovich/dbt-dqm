@@ -28,7 +28,7 @@ where email is null
 
 | `meta.dbt_dqm` key | Accepted value and effect |
 | --- | --- |
-| `granularity` | Required nonempty list of output column names. Names must be nonblank and unique after trimming and case normalization. Rows at the same grain form one issue observation. Changing the grain definition closes old identities structurally. |
+| `granularity` | Required nonempty list of output column names. Names must be nonblank and unique after trimming and case normalization. Rows at the same grain form one issue observation. A complete, conclusive execution can close omitted identities from an earlier grain as `IDENTITY_CHANGED`. |
 | `owner` | String, list of strings, or null. Initializes the owner when no usable row owner exists. |
 | `priority` | `critical`, `high`, `medium`, `low`, `unset`, or omitted. |
 | `criticality` | Optional string describing the business effect. |
@@ -59,9 +59,40 @@ Raw evidence and events are retained indefinitely unless retention is configured
 
 ## Namespaces and grants
 
-Package models and tracking tables follow `generate_schema_name` and `generate_alias_name`. With dbt's standard schema macro, `dbt_dqm_schema: governance` resolves to the target schema plus `_governance`. Custom naming rules can change that result. Pass the same naming vars and target flags to every command using the installation. Changing names creates a different address for the tracking objects. Read [upgrade guidance](operations.md#upgrading) before changing a populated installation.
+Package models and tracking tables follow `generate_schema_name` and `generate_alias_name`. With dbt's standard schema macro, `dbt_dqm_schema: governance` resolves to the target schema plus `_governance`. Custom naming rules can change that result. Pass the same naming vars and target flags to every command using the installation. Changing names creates a different address for the tracking objects. Read [upgrade guidance](legacy.md#upgrading) before changing a populated installation.
 
 Grant public-view access through dbt model configuration and configure durable-table privileges with `dbt_dqm_table_grants` when needed. See the [warehouse interface grants](warehouse-interfaces.md#grants) for adapter-specific privilege names and reviewer access.
+
+## Profile credentials
+
+Use the same profile and target for the CLI and review app. The dbt profile's credentials
+must be accessible to both processes. See [CLI resolution](reference-cli.md#common-options-and-resolution)
+for the profile search order.
+
+The app can also read credentials supplied through `env_var()`. For BigQuery Workload
+Identity Federation, provide a trusted external-account Application Default Credentials
+configuration through `GOOGLE_APPLICATION_CREDENTIALS` to the command and app. Use a
+dbt profile with `method: oauth`, for example:
+
+```yaml
+consumer:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: oauth
+      project: your-project
+      dataset: your_dataset
+      location: US
+      threads: 4
+```
+
+Use your consumer project's profile name in place of `consumer`. The configuration and
+token source must be accessible to both the command and app. Use the normal ADC environment
+path rather than an explicit credentials-file override for WIF. dbt-dqm does not create
+identity pools, providers, service accounts, IAM bindings, or credential files. Use an
+environment you trust. The local WIF smoke test uses simulated responses. The [keyless BigQuery workflow](bigquery-lifecycle.md)
+describes CI federation and its live verification.
 
 ## Deprecated and obsolete settings
 

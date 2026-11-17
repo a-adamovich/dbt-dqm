@@ -39,7 +39,8 @@ export DBT_DQM_DBT_EXECUTABLE="$engine_env/bin/dbt"
 
 Use that executable for ordinary dbt commands below. The app and DQM runner use the exported
 path, which you can also supply with `--dbt-executable`. If you already have a separate dbt 2.0.11
-environment, set the variable to its executable and run `deps` there. See
+environment, set the variable to its executable and run `deps` there. Keep the engine
+environment out of version control. See
 [supported configurations](supported-configurations.md) for the engine coverage.
 
 ### Configure retention and target
@@ -64,7 +65,9 @@ union all
 select 2 as customer_id, cast(null as {{ dbt.type_string() }}) as email
 ```
 
-Keep the ordinary `not_null` test and add a second, separately named copy with DQM configuration in the model's YAML.
+Keep the ordinary `not_null` test and add a second, separately named copy with DQM
+configuration in the model's YAML. For SQL tests, see the
+[singular-test example](reference-configuration.md#tracked-data-tests).
 
 ```yaml
 version: 2

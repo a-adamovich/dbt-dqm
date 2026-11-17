@@ -68,6 +68,23 @@ rows by identity hash and then row JSON before the limit.
 Tests: `tests/test_runtime_project.py`, and the acceptance case
 `test_dedicated_run_preserves_an_existing_root_test_materialization`.
 
+### Engine-specific paths
+
+The temporary test project keeps the original project name and relative source paths.
+It links sources and installed packages, with private copies when Windows denies symlinks.
+Artifact and state paths stay anchored to the original project directory. Internal SQL,
+result payloads, and column maps travel through the projected configuration as literal
+JSON, which keeps them out of command-line arguments.
+
+The dbt 2 preflight uses a separate projection without global hooks. The package's
+empty-mode guard lives in model pre-hooks because dbt 2 can execute global hooks
+during compilation. The Core-only offline compile helper uses a shim to avoid opening
+an unused lazy BigQuery connection on close. See the [offline checks](ci-measurements.md#run-the-dbt-2-checks-locally).
+
+dbt 2 does not expose the manifest metadata needed to check for maintenance macro
+overrides. It runs maintenance steps normally even if the experimental shortcut is enabled.
+On Core, the probes can skip eligible jobs when the runner can establish default behavior.
+
 ## 5. Capture: `C-1` becomes an observation
 
 `collect_results` in `workflow.sql` receives the results of the `test` step and runs the SQL that
