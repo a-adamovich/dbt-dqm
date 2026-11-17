@@ -1,4 +1,4 @@
-# Review issues in the local app
+# Review app workflows
 
 The Python `dbt-dqm` installation includes a single-user local browser app for the issues
 captured by `dbt-dqm run`. Start it from the same dbt project and target used for the run:
@@ -8,17 +8,22 @@ dbt-dqm app
 ```
 
 The app reads your dbt profile and synchronizes saved warehouse issues at the start of a
-browser session. It does not execute tests or capture failures. Use its **Health** view to
-inspect setup, tests, collections, and maintenance. If tracking relations are missing, run
+browser session. It does not execute tests or capture failures. If tracking relations are missing, run
 `dbt-dqm run` first. Pass the same `--vars` when custom naming macros depend on them;
 switching namespace in an open session requires a restart.
 
 ## Review and apply
 
-Browse issue cards and filter by lifecycle, workflow status, owner, creation date, or text.
-Cards show the captured record, owner, review status, timestamps, and action fields. You can
-edit owner, workflow status, review verdict, call to action, ticket URL, and notes. Local
-edits are pending until **Apply and sync** submits them to the warehouse.
+1. Choose **Sync** to refresh saved issues. In **Issues**, filter by lifecycle, workflow status,
+   owner, creation date, or text. Include archived issues to see Passed closures.
+2. Set owner, workflow status, or review verdict on the card. Open **Edit annotations** to edit
+   the call to action, ticket URL, or notes. Leave the edited field to stage the change locally.
+3. Choose **Apply and sync** to submit those changes to the warehouse. Confirm the saved values
+   on the card after synchronization.
+
+A recurring card shows the previous close reason and workflow status at close. Open
+**Previous investigation** for the previous notes and ticket. Include archived issues to view
+the previous occurrence's verdict.
 
 The app compares annotation versions before applying changes and keeps an audit history.
 A concurrent reviewer edit produces a conflict instead of a silent overwrite. Sync overlays
@@ -66,6 +71,30 @@ filtered data query with installation and generation checks. On BigQuery, the co
 export query respects `--max-search-gib`, even without text search. Prepared files are
 temporary and are discarded after filter changes, Sync, or Apply.
 
+## Read Health
+
+**Inspected.** Choose **Sync**, open **Health**, and check **Last health sync** before interpreting
+the tables. **Test health** shows review, resolution, and collection measures by test.
+**Area health** groups results by model or source, so a test can appear in multiple areas.
+Review and resolution measures use the reporting window. Backlog measures cover current active
+issues. **Maintenance** shows each configured step's last assessed status and diagnostic ID where
+available. See [Health populations](warehouse-interfaces.md#health-populations) for the
+denominators and [optional maintenance](warehouse-interfaces.md#optional-maintenance) for
+interpreting maintenance states.
+
+## Report a missed issue
+
+**Inspected.** Open **Report missed issue** when you have confirmed an issue the tests missed.
+Select the affected model or source, or choose **Unmapped area** and enter an area name. Enter
+the discovery date and description, choose a root cause, and optionally select the test that
+should have detected it. Add an evidence URL, priority, or detection method if known.
+
+Choose **Report missed issue** to save to `dqm_missed_issues`. If the app cannot confirm
+the write, retry from the same form in the same browser session. The app reuses the same
+submission ID so a retry cannot create a duplicate. After success, choose **Sync** to refresh
+the known-miss counts in Health. SQL callers supply their own stable ID.
+See [SQL path for known misses](warehouse-interfaces.md#sql-path-for-known-misses).
+
 ## Local workspace and browsing modes
 
 The app keeps a project-, target-, and resolved-installation-specific SQLite snapshot and
@@ -94,6 +123,5 @@ For explicit paths or a target, use:
 dbt-dqm app --project-dir /path/to/project --profiles-dir /path/to/profiles --target dev
 ```
 
-See [operations](operations.md#project-target-and-artifact-resolution) for defaults and
-the matching `--target-path` option. Restart the app after changing the naming namespace;
+See the [CLI reference](reference-cli.md) for flag defaults, bounds, and artifact resolution. Restart the app after changing the naming namespace;
 the local workspaces remain isolated by resolved installation.
